@@ -9,6 +9,7 @@ pub enum TokenKind {
     Slash,
 
     Number(i64),
+    Identifier(String),
 
     Eof,
 }

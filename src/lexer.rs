@@ -32,6 +32,7 @@ impl Lexer {
                 '*' => TokenKind::Star,
                 '/' => TokenKind::Slash,
                 c if c.is_ascii_digit() => self.number(c),
+                c if c.is_ascii_alphabetic() || c == '_' => self.identifier(c),
                 _ => continue,
             };
 
@@ -63,6 +64,19 @@ impl Lexer {
             s.push(self.advance());
         }
         TokenKind::Number(s.parse().unwrap())
+    }
+
+    fn identifier(&mut self, first: char) -> TokenKind {
+        let mut s = String::from(first);
+        while !self.is_at_end() {
+            let c = self.source[self.current];
+            if c.is_ascii_alphanumeric() || c == '_' {
+                s.push(self.advance());
+            } else {
+                break;
+            }
+        }
+        TokenKind::Identifier(s)
     }
 
     fn is_at_end(&self) -> bool {
@@ -131,6 +145,18 @@ mod tests {
                 TokenKind::Number(2),
                 TokenKind::Eof,
             ]
+        );
+    }
+
+    #[test]
+    fn test_identifier() {
+        assert_eq!(
+            scan("foo"),
+            vec![TokenKind::Identifier("foo".into()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan("my_var"),
+            vec![TokenKind::Identifier("my_var".into()), TokenKind::Eof]
         );
     }
 }
