@@ -38,18 +38,10 @@ impl Lexer {
                 _ => continue,
             };
 
-            tokens.push(Token {
-                kind,
-                lexeme: c.to_string(),
-                line: self.line,
-            });
+            tokens.push(Token { kind, line: self.line });
         }
 
-        tokens.push(Token {
-            kind: TokenKind::Eof,
-            lexeme: String::new(),
-            line: self.line,
-        });
+        tokens.push(Token { kind: TokenKind::Eof, line: self.line });
 
         tokens
     }
