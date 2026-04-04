@@ -1,5 +1,10 @@
 use crate::token::Token;
 
+pub enum Stmt {
+    Expression(Expr),
+    Print(Expr),
+}
+
 pub enum Expr {
     Literal(i64),
     Grouping(Box<Expr>),

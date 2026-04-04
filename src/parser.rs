@@ -1,4 +1,4 @@
-use crate::ast::Expr;
+use crate::ast::{Expr, Stmt};
 use crate::error::SapphireError;
 use crate::token::{Token, TokenKind};
 
@@ -31,8 +31,23 @@ impl Parser {
         &self.tokens[self.current - 1]
     }
 
-    pub fn parse(&mut self) -> Result<Expr, SapphireError> {
-        self.term()
+    pub fn parse(&mut self) -> Result<Vec<Stmt>, SapphireError> {
+        let mut stmts = Vec::new();
+        while !self.is_at_end() {
+            stmts.push(self.statement()?);
+            if self.check(&TokenKind::Semicolon) {
+                self.advance();
+            }
+        }
+        Ok(stmts)
+    }
+
+    fn statement(&mut self) -> Result<Stmt, SapphireError> {
+        if self.check(&TokenKind::Print) {
+            self.advance();
+            return Ok(Stmt::Print(self.term()?));
+        }
+        Ok(Stmt::Expression(self.term()?))
     }
 
     // term: factor (('+' | '-') factor)*
@@ -103,27 +118,31 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Expr;
+    use crate::ast::{Expr, Stmt};
     use crate::lexer::Lexer;
 
-    fn parse(source: &str) -> Expr {
+    fn parse_expr(source: &str) -> Expr {
         let tokens = Lexer::new(source).scan_tokens();
-        Parser::new(tokens).parse().unwrap()
+        let mut stmts = Parser::new(tokens).parse().unwrap();
+        match stmts.remove(0) {
+            Stmt::Expression(e) => e,
+            _ => panic!("expected expression statement"),
+        }
     }
 
     #[test]
     fn test_literal() {
-        assert!(matches!(parse("42"), Expr::Literal(42)));
+        assert!(matches!(parse_expr("42"), Expr::Literal(42)));
     }
 
     #[test]
     fn test_addition() {
-        assert!(matches!(parse("1+2"), Expr::Binary { .. }));
+        assert!(matches!(parse_expr("1+2"), Expr::Binary { .. }));
     }
 
     #[test]
     fn test_precedence() {
-        let expr = parse("1+2*3");
+        let expr = parse_expr("1+2*3");
         if let Expr::Binary { op, right, .. } = expr {
             assert_eq!(op.kind, TokenKind::Plus);
             assert!(matches!(*right, Expr::Binary { .. }));
@@ -134,7 +153,7 @@ mod tests {
 
     #[test]
     fn test_grouping() {
-        let expr = parse("(1+2)*3");
+        let expr = parse_expr("(1+2)*3");
         if let Expr::Binary { op, left, .. } = expr {
             assert_eq!(op.kind, TokenKind::Star);
             assert!(matches!(*left, Expr::Grouping(_)));
@@ -147,5 +166,19 @@ mod tests {
     fn test_parse_error() {
         let tokens = Lexer::new("1+").scan_tokens();
         assert!(Parser::new(tokens).parse().is_err());
+    }
+
+    #[test]
+    fn test_print_statement() {
+        let tokens = Lexer::new("print 42").scan_tokens();
+        let mut stmts = Parser::new(tokens).parse().unwrap();
+        assert!(matches!(stmts.remove(0), Stmt::Print(Expr::Literal(42))));
+    }
+
+    #[test]
+    fn test_multiple_statements() {
+        let tokens = Lexer::new("x = 1; x + 2").scan_tokens();
+        let stmts = Parser::new(tokens).parse().unwrap();
+        assert_eq!(stmts.len(), 2);
     }
 }

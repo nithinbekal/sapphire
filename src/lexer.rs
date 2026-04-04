@@ -32,6 +32,7 @@ impl Lexer {
                 '*' => TokenKind::Star,
                 '/' => TokenKind::Slash,
                 '=' => TokenKind::Eq,
+                ';' => TokenKind::Semicolon,
                 c if c.is_ascii_digit() => self.number(c),
                 c if c.is_ascii_alphabetic() || c == '_' => self.identifier(c),
                 _ => continue,
@@ -77,7 +78,10 @@ impl Lexer {
                 break;
             }
         }
-        TokenKind::Identifier(s)
+        match s.as_str() {
+            "print" => TokenKind::Print,
+            _ => TokenKind::Identifier(s),
+        }
     }
 
     fn is_at_end(&self) -> bool {

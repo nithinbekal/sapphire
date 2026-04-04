@@ -8,9 +8,11 @@ pub enum TokenKind {
     Star,
     Slash,
     Eq,
+    Semicolon,
 
     Number(i64),
     Identifier(String),
+    Print,
 
     Eof,
 }

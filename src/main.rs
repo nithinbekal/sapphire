@@ -30,10 +30,15 @@ fn main() {
         let tokens = lexer::Lexer::new(source).scan_tokens();
         match parser::Parser::new(tokens).parse() {
             Err(e) => eprintln!("{}", e),
-            Ok(expr) => match interpreter::evaluate(expr, &mut env) {
-                Ok(result) => println!("{}", result),
-                Err(e) => eprintln!("{}", e),
-            },
+            Ok(stmts) => {
+                for stmt in stmts {
+                    match interpreter::execute(stmt, &mut env) {
+                        Ok(Some(result)) => println!("{}", result),
+                        Ok(None) => {}
+                        Err(e) => { eprintln!("{}", e); break; }
+                    }
+                }
+            }
         }
     }
 }
