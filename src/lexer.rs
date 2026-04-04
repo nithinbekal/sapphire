@@ -29,6 +29,7 @@ impl Lexer {
                 '-' => TokenKind::Minus,
                 '*' => TokenKind::Star,
                 '/' => TokenKind::Slash,
+                c if c.is_ascii_digit() => self.number(c),
                 _ => continue,
             };
 
@@ -52,6 +53,14 @@ impl Lexer {
         let c = self.source[self.current];
         self.current += 1;
         c
+    }
+
+    fn number(&mut self, first: char) -> TokenKind {
+        let mut s = String::from(first);
+        while !self.is_at_end() && self.source[self.current].is_ascii_digit() {
+            s.push(self.advance());
+        }
+        TokenKind::Number(s.parse().unwrap())
     }
 
     fn is_at_end(&self) -> bool {
@@ -102,5 +111,24 @@ mod tests {
     #[test]
     fn test_empty() {
         assert_eq!(scan(""), vec![TokenKind::Eof]);
+    }
+
+    #[test]
+    fn test_integer() {
+        assert_eq!(scan("42"), vec![TokenKind::Number(42), TokenKind::Eof]);
+        assert_eq!(scan("0"), vec![TokenKind::Number(0), TokenKind::Eof]);
+    }
+
+    #[test]
+    fn test_integer_in_expression() {
+        assert_eq!(
+            scan("1+2"),
+            vec![
+                TokenKind::Number(1),
+                TokenKind::Plus,
+                TokenKind::Number(2),
+                TokenKind::Eof,
+            ]
+        );
     }
 }

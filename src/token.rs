@@ -5,6 +5,8 @@ pub enum TokenKind {
     Star,
     Slash,
 
+    Number(i64),
+
     Eof,
 }
 
