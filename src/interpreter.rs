@@ -6,6 +6,8 @@ pub fn evaluate(expr: Expr) -> Result<i64, SapphireError> {
     match expr {
         Expr::Literal(n) => Ok(n),
         Expr::Grouping(inner) => evaluate(*inner),
+        Expr::Variable(_) => todo!("variables need an environment"),
+        Expr::Assign { .. } => todo!("assignment needs an environment"),
         Expr::Binary { left, op, right } => {
             let l = evaluate(*left)?;
             let r = evaluate(*right)?;

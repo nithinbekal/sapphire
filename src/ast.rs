@@ -8,4 +8,9 @@ pub enum Expr {
         op: Token,
         right: Box<Expr>,
     },
+    Variable(String),
+    Assign {
+        name: String,
+        value: Box<Expr>,
+    },
 }
