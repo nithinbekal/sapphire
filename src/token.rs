@@ -7,3 +7,10 @@ pub enum TokenKind {
 
     Eof,
 }
+
+#[derive(Debug, Clone)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub lexeme: String,
+    pub line: usize,
+}
