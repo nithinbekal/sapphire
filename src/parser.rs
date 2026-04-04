@@ -1,4 +1,5 @@
 use crate::ast::Expr;
+use crate::error::SapphireError;
 use crate::token::{Token, TokenKind};
 
 pub struct Parser {
@@ -30,17 +31,17 @@ impl Parser {
         &self.tokens[self.current - 1]
     }
 
-    pub fn parse(&mut self) -> Expr {
+    pub fn parse(&mut self) -> Result<Expr, SapphireError> {
         self.term()
     }
 
     // term: factor (('+' | '-') factor)*
-    fn term(&mut self) -> Expr {
-        let mut left = self.factor();
+    fn term(&mut self) -> Result<Expr, SapphireError> {
+        let mut left = self.factor()?;
 
         while self.check(&TokenKind::Plus) || self.check(&TokenKind::Minus) {
             let op = self.advance().clone();
-            let right = self.factor();
+            let right = self.factor()?;
             left = Expr::Binary {
                 left: Box::new(left),
                 op,
@@ -48,16 +49,16 @@ impl Parser {
             };
         }
 
-        left
+        Ok(left)
     }
 
     // factor: primary (('*' | '/') primary)*
-    fn factor(&mut self) -> Expr {
-        let mut left = self.primary();
+    fn factor(&mut self) -> Result<Expr, SapphireError> {
+        let mut left = self.primary()?;
 
         while self.check(&TokenKind::Star) || self.check(&TokenKind::Slash) {
             let op = self.advance().clone();
-            let right = self.primary();
+            let right = self.primary()?;
             left = Expr::Binary {
                 left: Box::new(left),
                 op,
@@ -65,25 +66,27 @@ impl Parser {
             };
         }
 
-        left
+        Ok(left)
     }
 
     // primary: NUMBER | '(' term ')'
-    fn primary(&mut self) -> Expr {
+    fn primary(&mut self) -> Result<Expr, SapphireError> {
         if let TokenKind::Number(n) = self.peek().kind {
             self.advance();
-            return Expr::Literal(n);
+            return Ok(Expr::Literal(n));
         }
 
         if self.check(&TokenKind::LeftParen) {
             self.advance();
-            let expr = self.term();
-            // consume ')'
-            self.advance();
-            return Expr::Grouping(Box::new(expr));
+            let expr = self.term()?;
+            self.advance(); // consume ')'
+            return Ok(Expr::Grouping(Box::new(expr)));
         }
 
-        panic!("unexpected token: {:?}", self.peek().kind);
+        Err(SapphireError::ParseError {
+            message: format!("unexpected token '{:?}'", self.peek().kind),
+            line: self.peek().line,
+        })
     }
 }
 
@@ -95,7 +98,7 @@ mod tests {
 
     fn parse(source: &str) -> Expr {
         let tokens = Lexer::new(source).scan_tokens();
-        Parser::new(tokens).parse()
+        Parser::new(tokens).parse().unwrap()
     }
 
     #[test]
@@ -105,16 +108,11 @@ mod tests {
 
     #[test]
     fn test_addition() {
-        assert!(matches!(
-            parse("1+2"),
-            Expr::Binary { .. }
-        ));
+        assert!(matches!(parse("1+2"), Expr::Binary { .. }));
     }
 
     #[test]
     fn test_precedence() {
-        // 1+2*3 should parse as 1+(2*3), so the top node is Binary(+)
-        // whose right child is Binary(*)
         let expr = parse("1+2*3");
         if let Expr::Binary { op, right, .. } = expr {
             assert_eq!(op.kind, TokenKind::Plus);
@@ -126,7 +124,6 @@ mod tests {
 
     #[test]
     fn test_grouping() {
-        // (1+2)*3 — top node should be Binary(*) whose left is Grouping
         let expr = parse("(1+2)*3");
         if let Expr::Binary { op, left, .. } = expr {
             assert_eq!(op.kind, TokenKind::Star);
@@ -134,5 +131,11 @@ mod tests {
         } else {
             panic!("expected Binary");
         }
+    }
+
+    #[test]
+    fn test_parse_error() {
+        let tokens = Lexer::new("1+").scan_tokens();
+        assert!(Parser::new(tokens).parse().is_err());
     }
 }

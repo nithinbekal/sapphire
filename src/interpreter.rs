@@ -1,19 +1,30 @@
 use crate::ast::Expr;
+use crate::error::SapphireError;
 use crate::token::TokenKind;
 
-pub fn evaluate(expr: Expr) -> i64 {
+pub fn evaluate(expr: Expr) -> Result<i64, SapphireError> {
     match expr {
-        Expr::Literal(n) => n,
+        Expr::Literal(n) => Ok(n),
         Expr::Grouping(inner) => evaluate(*inner),
         Expr::Binary { left, op, right } => {
-            let l = evaluate(*left);
-            let r = evaluate(*right);
+            let l = evaluate(*left)?;
+            let r = evaluate(*right)?;
             match op.kind {
-                TokenKind::Plus  => l + r,
-                TokenKind::Minus => l - r,
-                TokenKind::Star  => l * r,
-                TokenKind::Slash => l / r,
-                _ => panic!("unknown binary operator: {:?}", op.kind),
+                TokenKind::Plus  => Ok(l + r),
+                TokenKind::Minus => Ok(l - r),
+                TokenKind::Star  => Ok(l * r),
+                TokenKind::Slash => {
+                    if r == 0 {
+                        Err(SapphireError::RuntimeError {
+                            message: "division by zero".into(),
+                        })
+                    } else {
+                        Ok(l / r)
+                    }
+                }
+                _ => Err(SapphireError::RuntimeError {
+                    message: format!("unknown operator: {:?}", op.kind),
+                }),
             }
         }
     }
@@ -27,8 +38,8 @@ mod tests {
 
     fn run(source: &str) -> i64 {
         let tokens = Lexer::new(source).scan_tokens();
-        let expr = Parser::new(tokens).parse();
-        evaluate(expr)
+        let expr = Parser::new(tokens).parse().unwrap();
+        evaluate(expr).unwrap()
     }
 
     #[test]
@@ -59,5 +70,12 @@ mod tests {
     #[test]
     fn test_division() {
         assert_eq!(run("10/2"), 5);
+    }
+
+    #[test]
+    fn test_division_by_zero() {
+        let tokens = Lexer::new("1/0").scan_tokens();
+        let expr = Parser::new(tokens).parse().unwrap();
+        assert!(evaluate(expr).is_err());
     }
 }

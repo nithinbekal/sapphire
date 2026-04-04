@@ -1,4 +1,5 @@
 mod ast;
+mod error;
 mod interpreter;
 mod lexer;
 mod parser;
@@ -24,9 +25,13 @@ fn main() {
         }
 
         let tokens = lexer::Lexer::new(source).scan_tokens();
-        let expr = parser::Parser::new(tokens).parse();
-        let result = interpreter::evaluate(expr);
-        println!("{}", result);
+        match parser::Parser::new(tokens).parse() {
+            Err(e) => eprintln!("{}", e),
+            Ok(expr) => match interpreter::evaluate(expr) {
+                Ok(result) => println!("{}", result),
+                Err(e) => eprintln!("{}", e),
+            },
+        }
     }
 }
 
