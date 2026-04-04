@@ -1,5 +1,8 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
+    LeftParen,
+    RightParen,
+
     Plus,
     Minus,
     Star,

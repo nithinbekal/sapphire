@@ -25,6 +25,8 @@ impl Lexer {
             let c = self.advance();
 
             let kind = match c {
+                '(' => TokenKind::LeftParen,
+                ')' => TokenKind::RightParen,
                 '+' => TokenKind::Plus,
                 '-' => TokenKind::Minus,
                 '*' => TokenKind::Star,
