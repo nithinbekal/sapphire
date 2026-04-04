@@ -16,4 +16,91 @@ impl Lexer {
             line: 1,
         }
     }
+
+    pub fn scan_tokens(mut self) -> Vec<Token> {
+        let mut tokens = Vec::new();
+
+        while !self.is_at_end() {
+            self.start = self.current;
+            let c = self.advance();
+
+            let kind = match c {
+                '+' => TokenKind::Plus,
+                '-' => TokenKind::Minus,
+                '*' => TokenKind::Star,
+                '/' => TokenKind::Slash,
+                _ => continue,
+            };
+
+            tokens.push(Token {
+                kind,
+                lexeme: c.to_string(),
+                line: self.line,
+            });
+        }
+
+        tokens.push(Token {
+            kind: TokenKind::Eof,
+            lexeme: String::new(),
+            line: self.line,
+        });
+
+        tokens
+    }
+
+    fn advance(&mut self) -> char {
+        let c = self.source[self.current];
+        self.current += 1;
+        c
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.current >= self.source.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scan(source: &str) -> Vec<TokenKind> {
+        Lexer::new(source)
+            .scan_tokens()
+            .into_iter()
+            .map(|t| t.kind)
+            .collect()
+    }
+
+    #[test]
+    fn test_single_operators() {
+        assert_eq!(scan("+"), vec![TokenKind::Plus, TokenKind::Eof]);
+        assert_eq!(scan("-"), vec![TokenKind::Minus, TokenKind::Eof]);
+        assert_eq!(scan("*"), vec![TokenKind::Star, TokenKind::Eof]);
+        assert_eq!(scan("/"), vec![TokenKind::Slash, TokenKind::Eof]);
+    }
+
+    #[test]
+    fn test_sequence() {
+        assert_eq!(
+            scan("+-*/"),
+            vec![
+                TokenKind::Plus,
+                TokenKind::Minus,
+                TokenKind::Star,
+                TokenKind::Slash,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_ignores_unknown_chars() {
+        assert_eq!(scan("  "), vec![TokenKind::Eof]);
+        assert_eq!(scan("@"), vec![TokenKind::Eof]);
+    }
+
+    #[test]
+    fn test_empty() {
+        assert_eq!(scan(""), vec![TokenKind::Eof]);
+    }
 }
