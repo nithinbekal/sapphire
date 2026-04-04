@@ -1,16 +1,23 @@
 use crate::ast::Expr;
+use crate::environment::Environment;
 use crate::error::SapphireError;
 use crate::token::TokenKind;
 
-pub fn evaluate(expr: Expr) -> Result<i64, SapphireError> {
+pub fn evaluate(expr: Expr, env: &mut Environment) -> Result<i64, SapphireError> {
     match expr {
         Expr::Literal(n) => Ok(n),
-        Expr::Grouping(inner) => evaluate(*inner),
-        Expr::Variable(_) => todo!("variables need an environment"),
-        Expr::Assign { .. } => todo!("assignment needs an environment"),
+        Expr::Grouping(inner) => evaluate(*inner, env),
+        Expr::Variable(name) => env.get(&name).ok_or_else(|| SapphireError::RuntimeError {
+            message: format!("undefined variable '{}'", name),
+        }),
+        Expr::Assign { name, value } => {
+            let result = evaluate(*value, env)?;
+            env.set(name, result);
+            Ok(result)
+        }
         Expr::Binary { left, op, right } => {
-            let l = evaluate(*left)?;
-            let r = evaluate(*right)?;
+            let l = evaluate(*left, env)?;
+            let r = evaluate(*right, env)?;
             match op.kind {
                 TokenKind::Plus  => Ok(l + r),
                 TokenKind::Minus => Ok(l - r),
@@ -41,7 +48,7 @@ mod tests {
     fn run(source: &str) -> i64 {
         let tokens = Lexer::new(source).scan_tokens();
         let expr = Parser::new(tokens).parse().unwrap();
-        evaluate(expr).unwrap()
+        evaluate(expr, &mut Environment::new()).unwrap()
     }
 
     #[test]
@@ -78,6 +85,25 @@ mod tests {
     fn test_division_by_zero() {
         let tokens = Lexer::new("1/0").scan_tokens();
         let expr = Parser::new(tokens).parse().unwrap();
-        assert!(evaluate(expr).is_err());
+        assert!(evaluate(expr, &mut Environment::new()).is_err());
+    }
+
+    #[test]
+    fn test_assign_and_read() {
+        let mut env = Environment::new();
+        let tokens = Lexer::new("x = 10").scan_tokens();
+        let expr = Parser::new(tokens).parse().unwrap();
+        assert_eq!(evaluate(expr, &mut env).unwrap(), 10);
+
+        let tokens = Lexer::new("x").scan_tokens();
+        let expr = Parser::new(tokens).parse().unwrap();
+        assert_eq!(evaluate(expr, &mut env).unwrap(), 10);
+    }
+
+    #[test]
+    fn test_undefined_variable() {
+        let tokens = Lexer::new("y").scan_tokens();
+        let expr = Parser::new(tokens).parse().unwrap();
+        assert!(evaluate(expr, &mut Environment::new()).is_err());
     }
 }

@@ -11,6 +11,8 @@ use std::io::{self, Write};
 fn main() {
     println!("Sapphire 0.1.0 — :q to quit");
 
+    let mut env = environment::Environment::new();
+
     loop {
         print!("> ");
         io::stdout().flush().unwrap();
@@ -28,7 +30,7 @@ fn main() {
         let tokens = lexer::Lexer::new(source).scan_tokens();
         match parser::Parser::new(tokens).parse() {
             Err(e) => eprintln!("{}", e),
-            Ok(expr) => match interpreter::evaluate(expr) {
+            Ok(expr) => match interpreter::evaluate(expr, &mut env) {
                 Ok(result) => println!("{}", result),
                 Err(e) => eprintln!("{}", e),
             },

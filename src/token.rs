@@ -7,6 +7,7 @@ pub enum TokenKind {
     Minus,
     Star,
     Slash,
+    Eq,
 
     Number(i64),
     Identifier(String),

@@ -69,11 +69,21 @@ impl Parser {
         Ok(left)
     }
 
-    // primary: NUMBER | '(' term ')'
+    // primary: NUMBER | IDENTIFIER ('=' term)? | '(' term ')'
     fn primary(&mut self) -> Result<Expr, SapphireError> {
         if let TokenKind::Number(n) = self.peek().kind {
             self.advance();
             return Ok(Expr::Literal(n));
+        }
+
+        if let TokenKind::Identifier(name) = self.peek().kind.clone() {
+            self.advance();
+            if self.check(&TokenKind::Eq) {
+                self.advance(); // consume '='
+                let value = self.term()?;
+                return Ok(Expr::Assign { name, value: Box::new(value) });
+            }
+            return Ok(Expr::Variable(name));
         }
 
         if self.check(&TokenKind::LeftParen) {
