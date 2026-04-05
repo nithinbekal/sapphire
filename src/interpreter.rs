@@ -182,6 +182,19 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 };
             }
 
+            // Integers
+            if let Value::Int(n) = obj {
+                return match name.as_str() {
+                    "times" => Ok(Value::NativeMethod {
+                        receiver: Box::new(Value::Int(n)),
+                        name,
+                    }),
+                    _ => Err(SapphireError::RuntimeError {
+                        message: format!("unknown integer method '{}'", name),
+                    }),
+                };
+            }
+
             // Strings
             if let Value::Str(ref s) = obj {
                 return match name.as_str() {
@@ -463,6 +476,15 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 message: "pop called on empty list".into(),
                             })
                         }
+                        (Value::Int(n), "times") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "times requires a block".into(),
+                            })?;
+                            for i in 0..n {
+                                run_block(&blk, vec![Value::Int(i)], env.clone())?;
+                            }
+                            Ok(Value::Nil)
+                        }
                         (Value::Str(s), "split") => {
                             let sep = match args.into_iter().next() {
                                 Some(Value::Str(sep)) => sep,
@@ -583,6 +605,15 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 Ok(Value::Int(l / r))
                             }
                         }
+                        TokenKind::Percent   => {
+                            if r == 0 {
+                                Err(SapphireError::RuntimeError {
+                                    message: "division by zero".into(),
+                                })
+                            } else {
+                                Ok(Value::Int(l % r))
+                            }
+                        }
                         TokenKind::Less      => Ok(Value::Bool(l < r)),
                         TokenKind::LessEq    => Ok(Value::Bool(l <= r)),
                         TokenKind::Greater   => Ok(Value::Bool(l > r)),
@@ -663,6 +694,19 @@ mod tests {
         let tokens = Lexer::new("1/0").scan_tokens();
         let mut stmts = Parser::new(tokens).parse().unwrap();
         assert!(execute(stmts.remove(0), Environment::new()).is_err());
+    }
+
+    #[test]
+    fn test_modulo() {
+        assert_eq!(run("10 % 3"), Value::Int(1));
+        assert_eq!(run("9 % 3"), Value::Int(0));
+    }
+
+    #[test]
+    fn test_times() {
+        let env = Environment::new();
+        exec_env("n = 0\n3.times { |i| n = n + 1 }", env.clone());
+        assert_eq!(run_env("n", env.clone()), Value::Int(3));
     }
 
     #[test]

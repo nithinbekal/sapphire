@@ -51,6 +51,7 @@ impl Lexer {
                 '-' => TokenKind::Minus,
                 '*' => TokenKind::Star,
                 '/' => TokenKind::Slash,
+                '%' => TokenKind::Percent,
                 '!' => if self.match_next('=') { TokenKind::BangEq } else { TokenKind::Bang },
                 '=' => if self.match_next('=') { TokenKind::EqEq } else { TokenKind::Eq },
                 '&' => {

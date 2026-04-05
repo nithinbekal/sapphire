@@ -7,6 +7,7 @@ pub enum TokenKind {
     Minus,
     Star,
     Slash,
+    Percent,
     Bang,
     Pipe,
     AmpDot,

@@ -328,7 +328,7 @@ impl Parser {
     // factor: unary (('*' | '/') unary)*
     fn factor(&mut self) -> Result<Expr, SapphireError> {
         let mut left = self.unary()?;
-        while self.check(&TokenKind::Star) || self.check(&TokenKind::Slash) {
+        while self.check(&TokenKind::Star) || self.check(&TokenKind::Slash) || self.check(&TokenKind::Percent) {
             let op = self.advance().clone();
             let right = self.unary()?;
             left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
