@@ -10,14 +10,19 @@ use crate::token::TokenKind;
 use crate::value::Value;
 
 const LIST_STDLIB: &str = include_str!("../stdlib/list.spr");
+const MAP_STDLIB: &str = include_str!("../stdlib/map.spr");
 
 pub fn global_env() -> EnvRef {
     let env = Environment::new();
     env.borrow_mut().set("read_line".to_string(), Value::NativeFunction("read_line".to_string()));
-    let tokens = crate::lexer::Lexer::new(LIST_STDLIB).scan_tokens();
-    let stmts = crate::parser::Parser::new(tokens).parse().expect("stdlib/list.spr failed to parse");
-    for stmt in stmts {
-        execute(stmt, env.clone()).expect("stdlib/list.spr failed to execute");
+    for (src, label) in [(LIST_STDLIB, "stdlib/list.spr"), (MAP_STDLIB, "stdlib/map.spr")] {
+        let tokens = crate::lexer::Lexer::new(src).scan_tokens();
+        let stmts = crate::parser::Parser::new(tokens).parse()
+            .unwrap_or_else(|e| panic!("{} failed to parse: {}", label, e));
+        for stmt in stmts {
+            execute(stmt, env.clone())
+                .unwrap_or_else(|e| panic!("{} failed to execute: {}", label, e));
+        }
     }
     env.borrow_mut().freeze("List");
     env.borrow_mut().freeze("Map");
@@ -1418,6 +1423,39 @@ mod tests {
         assert_eq!(run_env("c.length", env.clone()), Value::Int(2));
         assert_eq!(run_env(r#"c["x"]"#, env.clone()), Value::Int(1));
         assert_eq!(run_env(r#"c["y"]"#, env.clone()), Value::Int(2));
+    }
+
+    #[test]
+    fn test_map_select() {
+        let env = global_env();
+        exec_env(r#"m = { a: 1, b: 2, c: 3 }; result = m.select { |k, v| v > 1 }"#, env.clone());
+        assert_eq!(run_env("result.length", env.clone()), Value::Int(2));
+        assert_eq!(run_env(r#"result.has_key?("a")"#, env.clone()), Value::Bool(false));
+        assert_eq!(run_env(r#"result.has_key?("b")"#, env.clone()), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_map_any() {
+        let env = global_env();
+        exec_env(r#"m = { a: 1, b: 2 }"#, env.clone());
+        assert_eq!(run_env("m.any? { |k, v| v > 1 }", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("m.any? { |k, v| v > 9 }", env.clone()), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_map_all() {
+        let env = global_env();
+        exec_env(r#"m = { a: 1, b: 2 }"#, env.clone());
+        assert_eq!(run_env("m.all? { |k, v| v > 0 }", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("m.all? { |k, v| v > 1 }", env.clone()), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_map_none() {
+        let env = global_env();
+        exec_env(r#"m = { a: 1, b: 2 }"#, env.clone());
+        assert_eq!(run_env("m.none? { |k, v| v > 9 }", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("m.none? { |k, v| v > 1 }", env.clone()), Value::Bool(false));
     }
 
     #[test]
