@@ -10,6 +10,44 @@ mod value;
 use std::io::{self, Write};
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    match args.as_slice() {
+        [_, cmd, path] if cmd == "run" => run_file(path),
+        [_] => run_repl(),
+        _ => {
+            eprintln!("Usage: sapphire [run <file.spr>]");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_file(path: &str) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error reading '{}': {}", path, e);
+            std::process::exit(1);
+        }
+    };
+    let env = environment::Environment::new();
+    let tokens = lexer::Lexer::new(&source).scan_tokens();
+    match parser::Parser::new(tokens).parse() {
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+        Ok(stmts) => {
+            for stmt in stmts {
+                if let Err(e) = interpreter::execute(stmt, env.clone()) {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+fn run_repl() {
     println!("Sapphire 0.1.0 — :q to quit");
 
     let env = environment::Environment::new();
@@ -43,4 +81,3 @@ fn main() {
         }
     }
 }
-
