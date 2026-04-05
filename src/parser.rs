@@ -366,6 +366,23 @@ impl Parser {
                     break;
                 }
                 expr = Expr::Get { object: Box::new(expr), name };
+            } else if self.check(&TokenKind::LeftBracket) {
+                self.advance(); // consume '['
+                let index = self.logical()?;
+                if !self.check(&TokenKind::RightBracket) {
+                    return Err(SapphireError::ParseError {
+                        message: "expected ']' after index".into(),
+                        line: self.peek().line,
+                    });
+                }
+                self.advance(); // consume ']'
+                if self.check(&TokenKind::Eq) {
+                    self.advance(); // consume '='
+                    let value = self.logical()?;
+                    expr = Expr::IndexSet { object: Box::new(expr), index: Box::new(index), value: Box::new(value) };
+                    break;
+                }
+                expr = Expr::Index { object: Box::new(expr), index: Box::new(index) };
             } else {
                 break;
             }
@@ -449,6 +466,26 @@ impl Parser {
             let expr = self.logical()?;
             self.advance(); // consume ')'
             return Ok(Expr::Grouping(Box::new(expr)));
+        }
+
+        if self.check(&TokenKind::LeftBracket) {
+            self.advance(); // consume '['
+            let mut elements = Vec::new();
+            if !self.check(&TokenKind::RightBracket) {
+                elements.push(self.logical()?);
+                while self.check(&TokenKind::Comma) {
+                    self.advance();
+                    elements.push(self.logical()?);
+                }
+            }
+            if !self.check(&TokenKind::RightBracket) {
+                return Err(SapphireError::ParseError {
+                    message: "expected ']' after array elements".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume ']'
+            return Ok(Expr::ArrayLit(elements));
         }
 
         Err(SapphireError::ParseError {

@@ -22,6 +22,8 @@ pub enum TokenKind {
 
     LeftBrace,
     RightBrace,
+    LeftBracket,
+    RightBracket,
     Dot,
     Colon,
 

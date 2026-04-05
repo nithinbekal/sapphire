@@ -40,6 +40,11 @@ pub enum Value {
         body: Vec<Stmt>,
         closure: EnvRef,
     },
+    Array(Rc<RefCell<Vec<Value>>>),
+    NativeMethod {
+        receiver: Box<Value>,
+        name: String,
+    },
 }
 
 impl PartialEq for Value {
@@ -65,6 +70,11 @@ impl fmt::Display for Value {
             Value::Class { name, .. } => write!(f, "<class {}>", name),
             Value::Constructor { class_name, .. } => write!(f, "<new {}>", class_name),
             Value::BoundMethod { .. } => write!(f, "<method>"),
+            Value::NativeMethod { name, .. } => write!(f, "<method {}>", name),
+            Value::Array(elements) => {
+                let parts: Vec<String> = elements.borrow().iter().map(|v| format!("{}", v)).collect();
+                write!(f, "[{}]", parts.join(", "))
+            }
             Value::Instance { class_name, fields } => {
                 let mut pairs: Vec<String> = fields
                     .borrow()

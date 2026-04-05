@@ -80,4 +80,14 @@ pub enum Expr {
         name: String,
         value: Box<Expr>,
     },
+    ArrayLit(Vec<Expr>),
+    Index {
+        object: Box<Expr>,
+        index: Box<Expr>,
+    },
+    IndexSet {
+        object: Box<Expr>,
+        index: Box<Expr>,
+        value: Box<Expr>,
+    },
 }

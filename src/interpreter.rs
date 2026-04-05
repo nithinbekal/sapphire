@@ -102,6 +102,21 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
         }),
         Expr::Get { object, name } => {
             let obj = evaluate(*object, env.clone())?;
+            match &obj {
+                Value::Array(elements) => {
+                    return match name.as_str() {
+                        "length" => Ok(Value::Int(elements.borrow().len() as i64)),
+                        "push" | "pop" | "first" | "last" => Ok(Value::NativeMethod {
+                            receiver: Box::new(obj.clone()),
+                            name,
+                        }),
+                        _ => Err(SapphireError::RuntimeError {
+                            message: format!("unknown array method '{}'", name),
+                        }),
+                    };
+                }
+                _ => {}
+            }
             match obj {
                 Value::Class { name: class_name, fields, methods, closure } => {
                     if name == "new" {
@@ -137,6 +152,51 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 }
                 _ => Err(SapphireError::RuntimeError {
                     message: format!("cannot access '{}' on this value", name),
+                }),
+            }
+        }
+        Expr::ArrayLit(elements) => {
+            let mut vals = Vec::new();
+            for el in elements {
+                vals.push(evaluate(el, env.clone())?);
+            }
+            Ok(Value::Array(Rc::new(RefCell::new(vals))))
+        }
+        Expr::Index { object, index } => {
+            let obj = evaluate(*object, env.clone())?;
+            let idx = evaluate(*index, env)?;
+            match (obj, idx) {
+                (Value::Array(elements), Value::Int(i)) => {
+                    let elems = elements.borrow();
+                    let i = if i < 0 { elems.len() as i64 + i } else { i };
+                    elems.get(i as usize).cloned().ok_or_else(|| SapphireError::RuntimeError {
+                        message: format!("index {} out of bounds", i),
+                    })
+                }
+                _ => Err(SapphireError::RuntimeError {
+                    message: "index operator requires an array and an integer".into(),
+                }),
+            }
+        }
+        Expr::IndexSet { object, index, value } => {
+            let obj = evaluate(*object, env.clone())?;
+            let idx = evaluate(*index, env.clone())?;
+            let val = evaluate(*value, env)?;
+            match (obj, idx) {
+                (Value::Array(elements), Value::Int(i)) => {
+                    let mut elems = elements.borrow_mut();
+                    let len = elems.len() as i64;
+                    let i = if i < 0 { len + i } else { i };
+                    if i < 0 || i >= len {
+                        return Err(SapphireError::RuntimeError {
+                            message: format!("index {} out of bounds", i),
+                        });
+                    }
+                    elems[i as usize] = val.clone();
+                    Ok(val)
+                }
+                _ => Err(SapphireError::RuntimeError {
+                    message: "index assignment requires an array and an integer".into(),
                 }),
             }
         }
@@ -232,6 +292,38 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         }
                     }
                     Ok(Value::Instance { class_name, fields: Rc::new(RefCell::new(instance_fields)) })
+                }
+                Value::NativeMethod { receiver, name } => {
+                    let args: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
+                    match (*receiver, name.as_str()) {
+                        (Value::Array(elements), "push") => {
+                            if args.len() != 1 {
+                                return Err(SapphireError::RuntimeError {
+                                    message: "push requires exactly one argument".into(),
+                                });
+                            }
+                            elements.borrow_mut().push(args.into_iter().next().unwrap());
+                            Ok(Value::Nil)
+                        }
+                        (Value::Array(elements), "pop") => {
+                            elements.borrow_mut().pop().ok_or_else(|| SapphireError::RuntimeError {
+                                message: "pop called on empty array".into(),
+                            })
+                        }
+                        (Value::Array(elements), "first") => {
+                            elements.borrow().first().cloned().ok_or_else(|| SapphireError::RuntimeError {
+                                message: "first called on empty array".into(),
+                            })
+                        }
+                        (Value::Array(elements), "last") => {
+                            elements.borrow().last().cloned().ok_or_else(|| SapphireError::RuntimeError {
+                                message: "last called on empty array".into(),
+                            })
+                        }
+                        _ => Err(SapphireError::RuntimeError {
+                            message: "unknown native method".into(),
+                        }),
+                    }
                 }
                 _ => Err(SapphireError::RuntimeError {
                     message: "can only call functions".into(),
@@ -512,6 +604,46 @@ mod tests {
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_array_literal() {
+        let env = Environment::new();
+        exec_env("a = [1, 2, 3]", env.clone());
+        assert_eq!(run_env("a[0]", env.clone()), Value::Int(1));
+        assert_eq!(run_env("a[2]", env.clone()), Value::Int(3));
+    }
+
+    #[test]
+    fn test_array_index_set() {
+        let env = Environment::new();
+        exec_env("a = [1, 2, 3]", env.clone());
+        exec_env("a[0] = 99", env.clone());
+        assert_eq!(run_env("a[0]", env.clone()), Value::Int(99));
+    }
+
+    #[test]
+    fn test_array_length() {
+        let env = Environment::new();
+        exec_env("a = [1, 2, 3]", env.clone());
+        assert_eq!(run_env("a.length", env.clone()), Value::Int(3));
+    }
+
+    #[test]
+    fn test_array_push() {
+        let env = Environment::new();
+        exec_env("a = [1, 2]", env.clone());
+        exec_env("a.push(3)", env.clone());
+        assert_eq!(run_env("a.length", env.clone()), Value::Int(3));
+        assert_eq!(run_env("a[2]", env.clone()), Value::Int(3));
+    }
+
+    #[test]
+    fn test_array_pop() {
+        let env = Environment::new();
+        exec_env("a = [1, 2, 3]", env.clone());
+        assert_eq!(run_env("a.pop()", env.clone()), Value::Int(3));
+        assert_eq!(run_env("a.length", env.clone()), Value::Int(2));
     }
 
     #[test]
