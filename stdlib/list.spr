@@ -1,4 +1,4 @@
-class __List__ {
+class List {
   def map() {
     result = []
     self.each { |x| result.push(yield(x)) }

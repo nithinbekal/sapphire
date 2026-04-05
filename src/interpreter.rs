@@ -19,6 +19,7 @@ pub fn global_env() -> EnvRef {
     for stmt in stmts {
         execute(stmt, env.clone()).expect("stdlib/list.spr failed to execute");
     }
+    env.borrow_mut().freeze("List");
     env
 }
 
@@ -31,6 +32,11 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
         }
         Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
         Stmt::Class { name, superclass, fields, methods } => {
+            if env.borrow().is_frozen(&name) {
+                return Err(SapphireError::RuntimeError {
+                    message: format!("'{}' is reserved and cannot be redefined", name),
+                });
+            }
             let (mut merged_fields, mut merged_methods) = match superclass {
                 Some(ref super_name) => {
                     let super_val = env.borrow().get(super_name).ok_or_else(|| SapphireError::RuntimeError {
@@ -55,6 +61,11 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             Ok(None)
         }
         Stmt::Function { name, params, body } => {
+            if env.borrow().is_frozen(&name) {
+                return Err(SapphireError::RuntimeError {
+                    message: format!("'{}' is reserved and cannot be redefined", name),
+                });
+            }
             let func = Value::Function { params, body, closure: env.clone() };
             env.borrow_mut().set(name, func);
             Ok(None)
@@ -200,8 +211,8 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     }),
                     _ => {}
                 }
-                // Fall back to __List__ class for stdlib-defined methods
-                if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("__List__") {
+                // Fall back to List class for stdlib-defined methods
+                if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("List") {
                     if let Some(method) = methods.iter().find(|m| m.name == name) {
                         return Ok(Value::BoundMethod {
                             receiver: Box::new(obj.clone()),
@@ -1344,5 +1355,13 @@ mod tests {
         exec_env("w = Wrapper.new(items: [10, 20, 30])", env.clone());
         exec_env("sum = 0; w.each() { |x| sum = sum + x }", env.clone());
         assert_eq!(env.borrow().get("sum"), Some(Value::Int(60)));
+    }
+
+    #[test]
+    fn test_reserved_class_cannot_be_redefined() {
+        let env = global_env();
+        let tokens = crate::lexer::Lexer::new("class List { attr x }").scan_tokens();
+        let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
+        assert!(execute(stmts.remove(0), env).is_err());
     }
 }
