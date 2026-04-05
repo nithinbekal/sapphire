@@ -40,7 +40,7 @@ pub enum Value {
         body: Vec<Stmt>,
         closure: EnvRef,
     },
-    Array(Rc<RefCell<Vec<Value>>>),
+    List(Rc<RefCell<Vec<Value>>>),
     NativeMethod {
         receiver: Box<Value>,
         name: String,
@@ -73,7 +73,7 @@ impl fmt::Display for Value {
             Value::BoundMethod { .. } => write!(f, "<method>"),
             Value::NativeMethod { name, .. } => write!(f, "<method {}>", name),
             Value::NativeFunction(name) => write!(f, "<fn {}>", name),
-            Value::Array(elements) => {
+            Value::List(elements) => {
                 let parts: Vec<String> = elements.borrow().iter().map(|v| format!("{}", v)).collect();
                 write!(f, "[{}]", parts.join(", "))
             }

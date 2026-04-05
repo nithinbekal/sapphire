@@ -573,12 +573,12 @@ impl Parser {
             }
             if !self.check(&TokenKind::RightBracket) {
                 return Err(SapphireError::ParseError {
-                    message: "expected ']' after array elements".into(),
+                    message: "expected ']' after list elements".into(),
                     line: self.peek().line,
                 });
             }
             self.advance(); // consume ']'
-            return Ok(Expr::ArrayLit(elements));
+            return Ok(Expr::ListLit(elements));
         }
 
         Err(SapphireError::ParseError {

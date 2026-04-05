@@ -144,21 +144,21 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             }
 
             // Arrays
-            if let Value::Array(ref elements) = obj {
+            if let Value::List(ref elements) = obj {
                 return match name.as_str() {
                     "length" => Ok(Value::Int(elements.borrow().len() as i64)),
                     "first" => elements.borrow().first().cloned().ok_or_else(|| SapphireError::RuntimeError {
-                        message: "first called on empty array".into(),
+                        message: "first called on empty list".into(),
                     }),
                     "last" => elements.borrow().last().cloned().ok_or_else(|| SapphireError::RuntimeError {
-                        message: "last called on empty array".into(),
+                        message: "last called on empty list".into(),
                     }),
                     "push" | "pop" | "each" | "map" | "select" | "reduce" => Ok(Value::NativeMethod {
                         receiver: Box::new(obj.clone()),
                         name,
                     }),
                     _ => Err(SapphireError::RuntimeError {
-                        message: format!("unknown array method '{}'", name),
+                        message: format!("unknown list method '{}'", name),
                     }),
                 };
             }
@@ -205,18 +205,18 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             }
             Ok(Value::Str(result))
         }
-        Expr::ArrayLit(elements) => {
+        Expr::ListLit(elements) => {
             let mut vals = Vec::new();
             for el in elements {
                 vals.push(evaluate(el, env.clone())?);
             }
-            Ok(Value::Array(Rc::new(RefCell::new(vals))))
+            Ok(Value::List(Rc::new(RefCell::new(vals))))
         }
         Expr::Index { object, index } => {
             let obj = evaluate(*object, env.clone())?;
             let idx = evaluate(*index, env)?;
             match (obj, idx) {
-                (Value::Array(elements), Value::Int(i)) => {
+                (Value::List(elements), Value::Int(i)) => {
                     let elems = elements.borrow();
                     let i = if i < 0 { elems.len() as i64 + i } else { i };
                     elems.get(i as usize).cloned().ok_or_else(|| SapphireError::RuntimeError {
@@ -224,7 +224,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     })
                 }
                 _ => Err(SapphireError::RuntimeError {
-                    message: "index operator requires an array and an integer".into(),
+                    message: "index operator requires a list and an integer".into(),
                 }),
             }
         }
@@ -233,7 +233,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             let idx = evaluate(*index, env.clone())?;
             let val = evaluate(*value, env)?;
             match (obj, idx) {
-                (Value::Array(elements), Value::Int(i)) => {
+                (Value::List(elements), Value::Int(i)) => {
                     let mut elems = elements.borrow_mut();
                     let len = elems.len() as i64;
                     let i = if i < 0 { len + i } else { i };
@@ -246,7 +246,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     Ok(val)
                 }
                 _ => Err(SapphireError::RuntimeError {
-                    message: "index assignment requires an array and an integer".into(),
+                    message: "index assignment requires a list and an integer".into(),
                 }),
             }
         }
@@ -368,7 +368,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 Value::NativeMethod { receiver, name } => {
                     let args: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
                     match (*receiver, name.as_str()) {
-                        (Value::Array(elements), "each") => {
+                        (Value::List(elements), "each") => {
                             let blk = block.ok_or_else(|| SapphireError::RuntimeError {
                                 message: "each requires a block".into(),
                             })?;
@@ -377,7 +377,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             }
                             Ok(Value::Nil)
                         }
-                        (Value::Array(elements), "map") => {
+                        (Value::List(elements), "map") => {
                             let blk = block.ok_or_else(|| SapphireError::RuntimeError {
                                 message: "map requires a block".into(),
                             })?;
@@ -385,9 +385,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             for val in elements.borrow().clone().iter() {
                                 result.push(run_block(&blk, vec![val.clone()], env.clone())?);
                             }
-                            Ok(Value::Array(Rc::new(RefCell::new(result))))
+                            Ok(Value::List(Rc::new(RefCell::new(result))))
                         }
-                        (Value::Array(elements), "select") => {
+                        (Value::List(elements), "select") => {
                             let blk = block.ok_or_else(|| SapphireError::RuntimeError {
                                 message: "select requires a block".into(),
                             })?;
@@ -401,9 +401,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                     }),
                                 }
                             }
-                            Ok(Value::Array(Rc::new(RefCell::new(result))))
+                            Ok(Value::List(Rc::new(RefCell::new(result))))
                         }
-                        (Value::Array(elements), "reduce") => {
+                        (Value::List(elements), "reduce") => {
                             let blk = block.ok_or_else(|| SapphireError::RuntimeError {
                                 message: "reduce requires a block".into(),
                             })?;
@@ -412,7 +412,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 (args.into_iter().next().unwrap(), elems.as_slice())
                             } else if args.is_empty() {
                                 let mut it = elems.as_slice().split_first().ok_or_else(|| SapphireError::RuntimeError {
-                                    message: "reduce requires an initial value or a non-empty array".into(),
+                                    message: "reduce requires an initial value or a non-empty list".into(),
                                 })?;
                                 (it.0.clone(), it.1)
                             } else {
@@ -425,7 +425,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             }
                             Ok(acc)
                         }
-                        (Value::Array(elements), "push") => {
+                        (Value::List(elements), "push") => {
                             if args.len() != 1 {
                                 return Err(SapphireError::RuntimeError {
                                     message: "push requires exactly one argument".into(),
@@ -434,9 +434,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             elements.borrow_mut().push(args.into_iter().next().unwrap());
                             Ok(Value::Nil)
                         }
-                        (Value::Array(elements), "pop") => {
+                        (Value::List(elements), "pop") => {
                             elements.borrow_mut().pop().ok_or_else(|| SapphireError::RuntimeError {
-                                message: "pop called on empty array".into(),
+                                message: "pop called on empty list".into(),
                             })
                         }
                         _ => Err(SapphireError::RuntimeError {
@@ -836,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_literal() {
+    fn test_list_literal() {
         let env = Environment::new();
         exec_env("a = [1, 2, 3]", env.clone());
         assert_eq!(run_env("a[0]", env.clone()), Value::Int(1));
@@ -844,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_index_set() {
+    fn test_list_index_set() {
         let env = Environment::new();
         exec_env("a = [1, 2, 3]", env.clone());
         exec_env("a[0] = 99", env.clone());
@@ -852,14 +852,14 @@ mod tests {
     }
 
     #[test]
-    fn test_array_length() {
+    fn test_list_length() {
         let env = Environment::new();
         exec_env("a = [1, 2, 3]", env.clone());
         assert_eq!(run_env("a.length", env.clone()), Value::Int(3));
     }
 
     #[test]
-    fn test_array_push() {
+    fn test_list_push() {
         let env = Environment::new();
         exec_env("a = [1, 2]", env.clone());
         exec_env("a.push(3)", env.clone());
@@ -868,7 +868,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_pop() {
+    fn test_list_pop() {
         let env = Environment::new();
         exec_env("a = [1, 2, 3]", env.clone());
         assert_eq!(run_env("a.pop()", env.clone()), Value::Int(3));

@@ -98,7 +98,7 @@ pub enum Expr {
         value: Box<Expr>,
     },
     StringInterp(Vec<StringPart>),
-    ArrayLit(Vec<Expr>),
+    ListLit(Vec<Expr>),
     Index {
         object: Box<Expr>,
         index: Box<Expr>,
