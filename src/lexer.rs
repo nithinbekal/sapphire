@@ -134,7 +134,20 @@ impl Lexer {
                 parts.push((current.clone(), true));
                 current.clear();
             } else {
-                current.push(self.advance());
+                let c = self.advance();
+                if c == '\\' && !self.is_at_end() {
+                    match self.advance() {
+                        'n'  => current.push('\n'),
+                        't'  => current.push('\t'),
+                        'r'  => current.push('\r'),
+                        '\\' => current.push('\\'),
+                        '"'  => current.push('"'),
+                        '#'  => current.push('#'),
+                        c    => { current.push('\\'); current.push(c); }
+                    }
+                } else {
+                    current.push(c);
+                }
             }
         }
         if self.is_at_end() {
