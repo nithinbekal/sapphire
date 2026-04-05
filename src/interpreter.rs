@@ -185,7 +185,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             // Strings
             if let Value::Str(ref s) = obj {
                 return match name.as_str() {
-                    "length" | "size" => Ok(Value::Int(s.chars().count() as i64)),
+                    "length" => Ok(Value::Int(s.chars().count() as i64)),
                     "upcase"          => Ok(Value::Str(s.to_uppercase())),
                     "downcase"        => Ok(Value::Str(s.to_lowercase())),
                     "strip"           => Ok(Value::Str(s.trim().to_string())),
@@ -812,7 +812,6 @@ mod tests {
     #[test]
     fn test_string_length() {
         assert_eq!(run(r#""hello".length"#), Value::Int(5));
-        assert_eq!(run(r#""hello".size"#), Value::Int(5));
         assert_eq!(run(r#""".empty?"#), Value::Bool(true));
         assert_eq!(run(r#""hi".empty?"#), Value::Bool(false));
     }
