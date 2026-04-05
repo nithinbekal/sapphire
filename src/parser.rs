@@ -177,6 +177,11 @@ impl Parser {
             return Ok(Expr::Literal(Value::Int(n)));
         }
 
+        if let TokenKind::StringLit(s) = self.peek().kind.clone() {
+            self.advance();
+            return Ok(Expr::Literal(Value::Str(s)));
+        }
+
         if self.check(&TokenKind::True) {
             self.advance();
             return Ok(Expr::Literal(Value::Bool(true)));

@@ -21,6 +21,7 @@ pub enum TokenKind {
     RightBrace,
 
     Number(i64),
+    StringLit(String),
     Identifier(String),
     True,
     False,

@@ -84,6 +84,13 @@ pub fn evaluate(expr: Expr, env: &mut Environment) -> Result<Value, SapphireErro
             match op.kind {
                 TokenKind::EqEq  => Ok(Value::Bool(l == r)),
                 TokenKind::BangEq => Ok(Value::Bool(l != r)),
+                TokenKind::Plus => match (l, r) {
+                    (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+                    (Value::Str(a), Value::Str(b)) => Ok(Value::Str(a + &b)),
+                    _ => Err(SapphireError::RuntimeError {
+                        message: "'+' requires two integers or two strings".into(),
+                    }),
+                },
                 _ => {
                     let (l, r) = match (l, r) {
                         (Value::Int(a), Value::Int(b)) => (a, b),
@@ -92,7 +99,6 @@ pub fn evaluate(expr: Expr, env: &mut Environment) -> Result<Value, SapphireErro
                         }),
                     };
                     match op.kind {
-                        TokenKind::Plus  => Ok(Value::Int(l + r)),
                         TokenKind::Minus => Ok(Value::Int(l - r)),
                         TokenKind::Star  => Ok(Value::Int(l * r)),
                         TokenKind::Slash => {
@@ -238,6 +244,22 @@ mod tests {
         let mut stmts = Parser::new(tokens).parse().unwrap();
         execute(stmts.remove(0), &mut env).unwrap();
         assert_eq!(env.get("x"), Some(Value::Int(2)));
+    }
+
+    #[test]
+    fn test_string_literal() {
+        assert_eq!(run(r#""hello""#), Value::Str("hello".into()));
+    }
+
+    #[test]
+    fn test_string_concat() {
+        assert_eq!(run(r#""hello" + " world""#), Value::Str("hello world".into()));
+    }
+
+    #[test]
+    fn test_string_equality() {
+        assert_eq!(run(r#""a" == "a""#), Value::Bool(true));
+        assert_eq!(run(r#""a" == "b""#), Value::Bool(false));
     }
 
     #[test]

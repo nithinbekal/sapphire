@@ -38,6 +38,10 @@ impl Lexer {
                 '{' => TokenKind::LeftBrace,
                 '}' => TokenKind::RightBrace,
                 ';' => TokenKind::Semicolon,
+                '"' => match self.string() {
+                    Some(s) => s,
+                    None => continue,
+                },
                 c if c.is_ascii_digit() => self.number(c),
                 c if c.is_ascii_alphabetic() || c == '_' => self.identifier(c),
                 _ => continue,
@@ -63,6 +67,18 @@ impl Lexer {
         let c = self.source[self.current];
         self.current += 1;
         c
+    }
+
+    fn string(&mut self) -> Option<TokenKind> {
+        let mut s = String::new();
+        while !self.is_at_end() && self.source[self.current] != '"' {
+            s.push(self.advance());
+        }
+        if self.is_at_end() {
+            return None; // unterminated string
+        }
+        self.advance(); // consume closing '"'
+        Some(TokenKind::StringLit(s))
     }
 
     fn number(&mut self, first: char) -> TokenKind {
