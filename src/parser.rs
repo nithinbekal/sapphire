@@ -50,6 +50,17 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Result<Stmt, SapphireError> {
+        let stmt = self.statement_inner()?;
+        // Trailing conditional: `expr if condition`
+        if self.check(&TokenKind::If) {
+            self.advance();
+            let condition = self.logical()?;
+            return Ok(Stmt::If { condition, then_branch: vec![stmt], else_branch: None });
+        }
+        Ok(stmt)
+    }
+
+    fn statement_inner(&mut self) -> Result<Stmt, SapphireError> {
         if self.check(&TokenKind::Return) {
             self.advance();
             return Ok(Stmt::Return(self.logical()?));
