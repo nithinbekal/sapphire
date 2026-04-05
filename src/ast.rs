@@ -102,6 +102,11 @@ pub enum Expr {
     StringInterp(Vec<StringPart>),
     ListLit(Vec<Expr>),
     MapLit(Vec<(String, Expr)>),
+    Super {
+        method: String,
+        args: Vec<CallArg>,
+        block: Option<Block>,
+    },
     Index {
         object: Box<Expr>,
         index: Box<Expr>,

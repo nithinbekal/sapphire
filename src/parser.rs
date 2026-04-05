@@ -575,6 +575,50 @@ impl Parser {
             return Ok(Expr::SelfExpr);
         }
 
+        if self.check(&TokenKind::SuperKw) {
+            self.advance();
+            // Expect super.method_name(args)
+            if !self.check(&TokenKind::Dot) {
+                return Err(SapphireError::ParseError {
+                    message: "expected '.' after 'super'".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume '.'
+            let method = if let TokenKind::Identifier(name) = self.peek().kind.clone() {
+                self.advance();
+                name
+            } else {
+                return Err(SapphireError::ParseError {
+                    message: "expected method name after 'super.'".into(),
+                    line: self.peek().line,
+                });
+            };
+            let (args, block) = if self.check(&TokenKind::LeftParen) {
+                self.advance(); // consume '('
+                let mut args = Vec::new();
+                if !self.check(&TokenKind::RightParen) {
+                    args.push(self.parse_arg()?);
+                    while self.check(&TokenKind::Comma) {
+                        self.advance();
+                        args.push(self.parse_arg()?);
+                    }
+                }
+                if !self.check(&TokenKind::RightParen) {
+                    return Err(SapphireError::ParseError {
+                        message: "expected ')' after arguments".into(),
+                        line: self.peek().line,
+                    });
+                }
+                self.advance(); // consume ')'
+                let block = self.parse_block()?;
+                (args, block)
+            } else {
+                (Vec::new(), None)
+            };
+            return Ok(Expr::Super { method, args, block });
+        }
+
         if let TokenKind::Identifier(name) = self.peek().kind.clone() {
             self.advance();
             if self.check(&TokenKind::Eq) {

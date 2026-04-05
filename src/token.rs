@@ -47,6 +47,7 @@ pub enum TokenKind {
     Class,
     Attr,
     SelfKw,
+    SuperKw,
     Print,
 
     Newline,

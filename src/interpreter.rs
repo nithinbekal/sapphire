@@ -43,7 +43,7 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
                 merged_methods.retain(|m: &MethodDef| m.name != method.name);
                 merged_methods.push(method);
             }
-            let class = Value::Class { name: name.clone(), fields: merged_fields, methods: merged_methods, closure: env.clone() };
+            let class = Value::Class { name: name.clone(), superclass: superclass.clone(), fields: merged_fields, methods: merged_methods, closure: env.clone() };
             env.borrow_mut().set(name, class);
             Ok(None)
         }
@@ -152,13 +152,15 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 let class_val = env.borrow().get(class_name).ok_or_else(|| SapphireError::RuntimeError {
                     message: format!("class '{}' not found", class_name),
                 })?;
-                if let Value::Class { methods, closure, .. } = class_val {
+                if let Value::Class { name: ref cname, methods, closure, .. } = class_val {
+                    let cname = cname.clone();
                     if let Some(method) = methods.iter().find(|m| m.name == name) {
                         return Ok(Value::BoundMethod {
                             receiver: Box::new(obj),
                             params: method.params.clone(),
                             body: method.body.clone(),
                             closure,
+                            defined_in: cname,
                         });
                     }
                 }
@@ -254,9 +256,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             }
 
             // Class: only .new
-            if let Value::Class { name: class_name, fields, methods, closure } = obj {
+            if let Value::Class { name: class_name, superclass, fields, methods, closure } = obj {
                 return if name == "new" {
-                    Ok(Value::Constructor { class_name, fields, methods, closure })
+                    Ok(Value::Constructor { class_name, superclass, fields, methods, closure })
                 } else {
                     Err(SapphireError::RuntimeError {
                         message: format!("unknown class method '{}'", name),
@@ -391,7 +393,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     }
                     Ok(result)
                 }
-                Value::BoundMethod { receiver, params, body, closure } => {
+                Value::BoundMethod { receiver, params, body, closure, defined_in } => {
                     let arg_vals: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
                     if params.len() != arg_vals.len() {
                         return Err(SapphireError::RuntimeError {
@@ -400,6 +402,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     }
                     let call_env = Environment::new_child(closure);
                     call_env.borrow_mut().set("self".to_string(), *receiver);
+                    call_env.borrow_mut().set("__class__".to_string(), Value::Str(defined_in));
                     for (param, val) in params.iter().zip(arg_vals) {
                         call_env.borrow_mut().set(param.clone(), val);
                     }
@@ -765,6 +768,64 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     }
                 }
             }
+        }
+        Expr::Super { method, args, block } => {
+            let self_val = env.borrow().get("self").ok_or_else(|| SapphireError::RuntimeError {
+                message: "super used outside of a method".into(),
+            })?;
+            let current_class_name = match env.borrow().get("__class__") {
+                Some(Value::Str(s)) => s,
+                _ => return Err(SapphireError::RuntimeError {
+                    message: "super used outside of a method".into(),
+                }),
+            };
+            let current_class = env.borrow().get(&current_class_name).ok_or_else(|| SapphireError::RuntimeError {
+                message: format!("class '{}' not found", current_class_name),
+            })?;
+            let super_name = match current_class {
+                Value::Class { superclass: Some(s), .. } => s,
+                _ => return Err(SapphireError::RuntimeError {
+                    message: format!("'{}' has no superclass", current_class_name),
+                }),
+            };
+            let super_class = env.borrow().get(&super_name).ok_or_else(|| SapphireError::RuntimeError {
+                message: format!("superclass '{}' not found", super_name),
+            })?;
+            let (super_methods, super_closure) = match super_class {
+                Value::Class { methods, closure, .. } => (methods, closure),
+                _ => return Err(SapphireError::RuntimeError {
+                    message: format!("'{}' is not a class", super_name),
+                }),
+            };
+            let meth = super_methods.iter().find(|m| m.name == method).ok_or_else(|| SapphireError::RuntimeError {
+                message: format!("superclass '{}' has no method '{}'", super_name, method),
+            })?;
+            let mut arg_vals: Vec<Value> = Vec::new();
+            for arg in args {
+                arg_vals.push(evaluate(arg.value, env.clone())?);
+            }
+            if meth.params.len() != arg_vals.len() {
+                return Err(SapphireError::RuntimeError {
+                    message: format!("expected {} argument(s), got {}", meth.params.len(), arg_vals.len()),
+                });
+            }
+            let call_env = Environment::new_child(super_closure);
+            call_env.borrow_mut().set("self".to_string(), self_val);
+            call_env.borrow_mut().set("__class__".to_string(), Value::Str(super_name));
+            for (param, val) in meth.params.iter().zip(arg_vals) {
+                call_env.borrow_mut().set(param.clone(), val);
+            }
+            let _ = block; // super calls don't support blocks for now
+            let mut result = Value::Nil;
+            for stmt in meth.body.clone() {
+                match execute(stmt, call_env.clone()) {
+                    Ok(Some(v)) => result = v,
+                    Ok(None) => {}
+                    Err(SapphireError::Return(v)) => return Ok(v),
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(result)
         }
     }
 }
@@ -1254,6 +1315,24 @@ mod tests {
         let env = Environment::new();
         exec_env("sum = 0; [1, 2, 3, 4, 5].each { |x| break if x == 4; sum = sum + x }", env.clone());
         assert_eq!(env.borrow().get("sum"), Some(Value::Int(6))); // 1+2+3
+    }
+
+    #[test]
+    fn test_super() {
+        let env = Environment::new();
+        exec_env("class Animal { attr name; def speak() { \"...\" } }", env.clone());
+        exec_env("class Dog < Animal { def speak() { super.speak() } }", env.clone());
+        exec_env("d = Dog.new(name: \"Rex\")", env.clone());
+        assert_eq!(run_env("d.speak()", env.clone()), Value::Str("...".into()));
+    }
+
+    #[test]
+    fn test_super_with_override() {
+        let env = Environment::new();
+        exec_env("class Animal { attr name; def describe() { self.name } }", env.clone());
+        exec_env("class Dog < Animal { attr breed; def describe() { super.describe() + \" (\" + self.breed + \")\" } }", env.clone());
+        exec_env("d = Dog.new(name: \"Rex\", breed: \"Lab\")", env.clone());
+        assert_eq!(run_env("d.describe()", env.clone()), Value::Str("Rex (Lab)".into()));
     }
 
     #[test]
