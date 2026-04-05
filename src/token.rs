@@ -30,6 +30,7 @@ pub enum TokenKind {
     Else,
     While,
     Def,
+    Return,
     Print,
 
     Eof,

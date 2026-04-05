@@ -1,9 +1,11 @@
 use std::fmt;
+use crate::value::Value;
 
 #[derive(Debug)]
 pub enum SapphireError {
     ParseError { message: String, line: usize },
     RuntimeError { message: String },
+    Return(Value),
 }
 
 impl fmt::Display for SapphireError {
@@ -14,6 +16,9 @@ impl fmt::Display for SapphireError {
             }
             SapphireError::RuntimeError { message } => {
                 write!(f, "runtime error: {}", message)
+            }
+            SapphireError::Return(_) => {
+                write!(f, "return outside of function")
             }
         }
     }

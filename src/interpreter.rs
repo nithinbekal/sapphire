@@ -12,6 +12,10 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             Ok(None)
         }
         Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
+        Stmt::Return(expr) => {
+            let value = evaluate(expr, env)?;
+            Err(SapphireError::Return(value))
+        }
         Stmt::Function { name, params, body } => {
             let func = Value::Function { params, body, closure: env.clone() };
             env.borrow_mut().set(name, func);
@@ -84,8 +88,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     }
                     let mut result = Value::Nil;
                     for stmt in body {
-                        if let Some(v) = execute(stmt, call_env.clone())? {
-                            result = v;
+                        match execute(stmt, call_env.clone()) {
+                            Ok(Some(v)) => result = v,
+                            Ok(None) => {}
+                            Err(SapphireError::Return(v)) => return Ok(v),
+                            Err(e) => return Err(e),
                         }
                     }
                     Ok(result)
@@ -327,6 +334,14 @@ mod tests {
         let env = Environment::new();
         exec_env("def answer() { 42 }", env.clone());
         assert_eq!(run_env("answer()", env), Value::Int(42));
+    }
+
+    #[test]
+    fn test_early_return() {
+        let env = Environment::new();
+        exec_env("def abs(n) { if n < 0 { return -n }; n }", env.clone());
+        assert_eq!(run_env("abs(-5)", env.clone()), Value::Int(5));
+        assert_eq!(run_env("abs(3)", env.clone()), Value::Int(3));
     }
 
     #[test]

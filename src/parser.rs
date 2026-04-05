@@ -44,6 +44,10 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Result<Stmt, SapphireError> {
+        if self.check(&TokenKind::Return) {
+            self.advance();
+            return Ok(Stmt::Return(self.equality()?));
+        }
         if self.check(&TokenKind::Def) {
             return self.function_def();
         }

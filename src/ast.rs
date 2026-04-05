@@ -19,6 +19,7 @@ pub enum Stmt {
         params: Vec<String>,
         body: Vec<Stmt>,
     },
+    Return(Expr),
 }
 
 #[derive(Debug, Clone)]
