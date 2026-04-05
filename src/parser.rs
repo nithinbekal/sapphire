@@ -373,6 +373,22 @@ impl Parser {
                     break;
                 }
                 expr = Expr::Get { object: Box::new(expr), name };
+            } else if self.check(&TokenKind::AmpDot) {
+                self.advance(); // consume '&.'
+                let name = match self.peek().kind.clone() {
+                    TokenKind::Identifier(n) => { self.advance(); n }
+                    _ => return Err(SapphireError::ParseError {
+                        message: "expected method or field name after '&.'".into(),
+                        line: self.peek().line,
+                    }),
+                };
+                if self.check(&TokenKind::LeftParen) {
+                    let safe_get = Expr::SafeGet { object: Box::new(expr), name };
+                    let call = self.finish_call(safe_get)?;
+                    expr = call;
+                } else {
+                    expr = Expr::SafeGet { object: Box::new(expr), name };
+                }
             } else if self.check(&TokenKind::LeftBracket) {
                 self.advance(); // consume '['
                 let index = self.logical()?;

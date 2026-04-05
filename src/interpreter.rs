@@ -225,6 +225,13 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 }),
             }
         }
+        Expr::SafeGet { object, name } => {
+            let obj = evaluate(*object, env.clone())?;
+            if obj == Value::Nil {
+                return Ok(Value::Nil);
+            }
+            evaluate(Expr::Get { object: Box::new(Expr::Literal(obj)), name }, env)
+        }
         Expr::Set { object, name, value } => {
             let obj = evaluate(*object, env.clone())?;
             let val = evaluate(*value, env)?;
@@ -696,6 +703,20 @@ mod tests {
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_safe_navigation_nil() {
+        let env = Environment::new();
+        exec_env("x = nil", env.clone());
+        assert_eq!(run_env("x&.nil?", env.clone()), Value::Nil);
+    }
+
+    #[test]
+    fn test_safe_navigation_non_nil() {
+        let env = Environment::new();
+        exec_env("class Point { attr x }; p = Point.new(x: 3)", env.clone());
+        assert_eq!(run_env("p&.x", env.clone()), Value::Int(3));
     }
 
     #[test]

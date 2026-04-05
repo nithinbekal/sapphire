@@ -88,6 +88,10 @@ pub enum Expr {
         object: Box<Expr>,
         name: String,
     },
+    SafeGet {
+        object: Box<Expr>,
+        name: String,
+    },
     Set {
         object: Box<Expr>,
         name: String,

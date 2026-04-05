@@ -9,6 +9,7 @@ pub enum TokenKind {
     Slash,
     Bang,
     Pipe,
+    AmpDot,
     AmpAmp,
     PipePipe,
     Eq,

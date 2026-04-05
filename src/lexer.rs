@@ -33,7 +33,11 @@ impl Lexer {
                 '/' => TokenKind::Slash,
                 '!' => if self.match_next('=') { TokenKind::BangEq } else { TokenKind::Bang },
                 '=' => if self.match_next('=') { TokenKind::EqEq } else { TokenKind::Eq },
-                '&' => if self.match_next('&') { TokenKind::AmpAmp } else { continue },
+                '&' => {
+                    if self.match_next('&') { TokenKind::AmpAmp }
+                    else if self.match_next('.') { TokenKind::AmpDot }
+                    else { continue }
+                }
                 '|' => if self.match_next('|') { TokenKind::PipePipe } else { TokenKind::Pipe },
                 '<' => if self.match_next('=') { TokenKind::LessEq } else { TokenKind::Less },
                 '>' => if self.match_next('=') { TokenKind::GreaterEq } else { TokenKind::Greater },
