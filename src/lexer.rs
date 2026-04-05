@@ -77,15 +77,46 @@ impl Lexer {
     }
 
     fn string(&mut self) -> Option<TokenKind> {
-        let mut s = String::new();
+        let mut parts: Vec<(String, bool)> = Vec::new();
+        let mut current = String::new();
+        let mut has_interp = false;
+
         while !self.is_at_end() && self.source[self.current] != '"' {
-            s.push(self.advance());
+            if self.source[self.current] == '#'
+                && self.current + 1 < self.source.len()
+                && self.source[self.current + 1] == '{'
+            {
+                has_interp = true;
+                parts.push((current.clone(), false));
+                current.clear();
+                self.current += 2; // skip #{
+                let mut depth = 1usize;
+                while !self.is_at_end() && depth > 0 {
+                    let c = self.advance();
+                    match c {
+                        '{' => { depth += 1; current.push(c); }
+                        '}' => { depth -= 1; if depth > 0 { current.push(c); } }
+                        _ => current.push(c),
+                    }
+                }
+                parts.push((current.clone(), true));
+                current.clear();
+            } else {
+                current.push(self.advance());
+            }
         }
         if self.is_at_end() {
             return None; // unterminated string
         }
         self.advance(); // consume closing '"'
-        Some(TokenKind::StringLit(s))
+
+        if !has_interp {
+            return Some(TokenKind::StringLit(current));
+        }
+        if !current.is_empty() {
+            parts.push((current, false));
+        }
+        Some(TokenKind::StringInterp(parts))
     }
 
     fn number(&mut self, first: char) -> TokenKind {

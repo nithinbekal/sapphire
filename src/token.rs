@@ -29,6 +29,7 @@ pub enum TokenKind {
 
     Number(i64),
     StringLit(String),
+    StringInterp(Vec<(String, bool)>), // (content, is_expr)
     Identifier(String),
     True,
     False,

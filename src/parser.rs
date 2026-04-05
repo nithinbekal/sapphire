@@ -1,5 +1,6 @@
-use crate::ast::{CallArg, Expr, FieldDef, MethodDef, Stmt};
+use crate::ast::{CallArg, Expr, FieldDef, MethodDef, Stmt, StringPart};
 use crate::error::SapphireError;
+use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
 use crate::value::Value;
 
@@ -434,6 +435,21 @@ impl Parser {
         if let TokenKind::StringLit(s) = self.peek().kind.clone() {
             self.advance();
             return Ok(Expr::Literal(Value::Str(s)));
+        }
+
+        if let TokenKind::StringInterp(raw_parts) = self.peek().kind.clone() {
+            self.advance();
+            let mut parts = Vec::new();
+            for (content, is_expr) in raw_parts {
+                if is_expr {
+                    let tokens = Lexer::new(&content).scan_tokens();
+                    let expr = Parser::new(tokens).logical()?;
+                    parts.push(StringPart::Expr(Box::new(expr)));
+                } else {
+                    parts.push(StringPart::Lit(content));
+                }
+            }
+            return Ok(Expr::StringInterp(parts));
         }
 
         if self.check(&TokenKind::True) {

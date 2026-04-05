@@ -2,6 +2,12 @@ use crate::token::Token;
 use crate::value::Value;
 
 #[derive(Debug, Clone)]
+pub enum StringPart {
+    Lit(String),
+    Expr(Box<Expr>),
+}
+
+#[derive(Debug, Clone)]
 pub struct FieldDef {
     pub name: String,
     pub type_name: Option<String>,
@@ -80,6 +86,7 @@ pub enum Expr {
         name: String,
         value: Box<Expr>,
     },
+    StringInterp(Vec<StringPart>),
     ArrayLit(Vec<Expr>),
     Index {
         object: Box<Expr>,

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::ast::{Expr, MethodDef, Stmt};
+use crate::ast::{Expr, MethodDef, Stmt, StringPart};
 use crate::environment::Environment;
 use crate::value::EnvRef;
 use crate::error::SapphireError;
@@ -154,6 +154,19 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     message: format!("cannot access '{}' on this value", name),
                 }),
             }
+        }
+        Expr::StringInterp(parts) => {
+            let mut result = String::new();
+            for part in parts {
+                match part {
+                    StringPart::Lit(s) => result.push_str(&s),
+                    StringPart::Expr(expr) => {
+                        let val = evaluate(*expr, env.clone())?;
+                        result.push_str(&format!("{}", val));
+                    }
+                }
+            }
+            Ok(Value::Str(result))
         }
         Expr::ArrayLit(elements) => {
             let mut vals = Vec::new();
@@ -604,6 +617,27 @@ mod tests {
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_string_interp() {
+        let env = Environment::new();
+        exec_env("name = \"world\"", env.clone());
+        assert_eq!(run_env(r#""hello #{name}""#, env.clone()), Value::Str("hello world".into()));
+    }
+
+    #[test]
+    fn test_string_interp_expr() {
+        let env = Environment::new();
+        exec_env("x = 3", env.clone());
+        assert_eq!(run_env(r#""result: #{x * 2}""#, env.clone()), Value::Str("result: 6".into()));
+    }
+
+    #[test]
+    fn test_string_interp_int() {
+        let env = Environment::new();
+        exec_env("n = 42", env.clone());
+        assert_eq!(run_env(r#""n is #{n}""#, env.clone()), Value::Str("n is 42".into()));
     }
 
     #[test]
