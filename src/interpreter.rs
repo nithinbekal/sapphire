@@ -20,6 +20,7 @@ pub fn global_env() -> EnvRef {
         execute(stmt, env.clone()).expect("stdlib/list.spr failed to execute");
     }
     env.borrow_mut().freeze("List");
+    env.borrow_mut().freeze("Map");
     env
 }
 
@@ -230,28 +231,41 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
 
             // Maps
             if let Value::Map(ref map) = obj {
-                return match name.as_str() {
-                    "length" => Ok(Value::Int(map.borrow().len() as i64)),
+                match name.as_str() {
+                    "length" => return Ok(Value::Int(map.borrow().len() as i64)),
                     "keys" => {
                         let mut keys: Vec<Value> = map.borrow().keys().map(|k| Value::Str(k.clone())).collect();
                         keys.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
-                        Ok(Value::List(Rc::new(RefCell::new(keys))))
+                        return Ok(Value::List(Rc::new(RefCell::new(keys))));
                     }
                     "values" => {
                         let mut pairs: Vec<(String, Value)> = map.borrow().iter()
                             .map(|(k, v)| (k.clone(), v.clone()))
                             .collect();
                         pairs.sort_by(|a, b| a.0.cmp(&b.0));
-                        Ok(Value::List(Rc::new(RefCell::new(pairs.into_iter().map(|(_, v)| v).collect()))))
+                        return Ok(Value::List(Rc::new(RefCell::new(pairs.into_iter().map(|(_, v)| v).collect()))));
                     }
-                    "has_key?" | "each" => Ok(Value::NativeMethod {
+                    "has_key?" | "each" | "delete" | "merge" => return Ok(Value::NativeMethod {
                         receiver: Box::new(obj.clone()),
                         name,
                     }),
-                    _ => Err(SapphireError::RuntimeError {
-                        message: format!("unknown map method '{}'", name),
-                    }),
-                };
+                    _ => {}
+                }
+                // Fall back to Map class for stdlib-defined methods
+                if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("Map") {
+                    if let Some(method) = methods.iter().find(|m| m.name == name) {
+                        return Ok(Value::BoundMethod {
+                            receiver: Box::new(obj.clone()),
+                            params: method.params.clone(),
+                            body: method.body.clone(),
+                            closure,
+                            defined_in: class_name,
+                        });
+                    }
+                }
+                return Err(SapphireError::RuntimeError {
+                    message: format!("unknown map method '{}'", name),
+                });
             }
 
             // Integers
@@ -561,6 +575,28 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 }),
                             };
                             Ok(Value::Bool(map.borrow().contains_key(&key)))
+                        }
+                        (Value::Map(map), "delete") => {
+                            let key = match args.into_iter().next() {
+                                Some(Value::Str(k)) => k,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "delete requires a string argument".into(),
+                                }),
+                            };
+                            Ok(map.borrow_mut().remove(&key).unwrap_or(Value::Nil))
+                        }
+                        (Value::Map(map), "merge") => {
+                            let other = match args.into_iter().next() {
+                                Some(Value::Map(m)) => m,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "merge requires a map argument".into(),
+                                }),
+                            };
+                            let mut result = map.borrow().clone();
+                            for (k, v) in other.borrow().iter() {
+                                result.insert(k.clone(), v.clone());
+                            }
+                            Ok(Value::Map(Rc::new(RefCell::new(result))))
                         }
                         (Value::Map(map), "each") => {
                             let blk = block.ok_or_else(|| SapphireError::RuntimeError {
@@ -1361,6 +1397,33 @@ mod tests {
     fn test_reserved_class_cannot_be_redefined() {
         let env = global_env();
         let tokens = crate::lexer::Lexer::new("class List { attr x }").scan_tokens();
+        let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
+        assert!(execute(stmts.remove(0), env).is_err());
+    }
+
+    #[test]
+    fn test_map_delete() {
+        let env = Environment::new();
+        exec_env(r#"m = { name: "Alice", age: 30 }"#, env.clone());
+        exec_env(r#"m.delete("name")"#, env.clone());
+        assert_eq!(run_env("m.length", env.clone()), Value::Int(1));
+        assert_eq!(run_env(r#"m.has_key?("name")"#, env.clone()), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_map_merge() {
+        let env = Environment::new();
+        exec_env(r#"a = { x: 1 }; b = { y: 2 }"#, env.clone());
+        exec_env("c = a.merge(b)", env.clone());
+        assert_eq!(run_env("c.length", env.clone()), Value::Int(2));
+        assert_eq!(run_env(r#"c["x"]"#, env.clone()), Value::Int(1));
+        assert_eq!(run_env(r#"c["y"]"#, env.clone()), Value::Int(2));
+    }
+
+    #[test]
+    fn test_reserved_map_cannot_be_redefined() {
+        let env = global_env();
+        let tokens = crate::lexer::Lexer::new("class Map { attr x }").scan_tokens();
         let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
         assert!(execute(stmts.remove(0), env).is_err());
     }
