@@ -1,0 +1,28 @@
+class __List__ {
+  def map() {
+    result = []
+    self.each { |x| result.push(yield(x)) }
+    result
+  }
+
+  def select() {
+    result = []
+    self.each { |x| result.push(x) if yield(x) }
+    result
+  }
+
+  def any?() {
+    result = self.each { |x| break true if yield(x) }
+    result == true
+  }
+
+  def all?() {
+    result = self.each { |x| break false if yield(x) == false }
+    result != false
+  }
+
+  def none?() {
+    result = self.each { |x| break true if yield(x) }
+    result != true
+  }
+}

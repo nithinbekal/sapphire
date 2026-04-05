@@ -9,9 +9,16 @@ use crate::error::SapphireError;
 use crate::token::TokenKind;
 use crate::value::Value;
 
+const LIST_STDLIB: &str = include_str!("../stdlib/list.spr");
+
 pub fn global_env() -> EnvRef {
     let env = Environment::new();
     env.borrow_mut().set("read_line".to_string(), Value::NativeFunction("read_line".to_string()));
+    let tokens = crate::lexer::Lexer::new(LIST_STDLIB).scan_tokens();
+    let stmts = crate::parser::Parser::new(tokens).parse().expect("stdlib/list.spr failed to parse");
+    for stmt in stmts {
+        execute(stmt, env.clone()).expect("stdlib/list.spr failed to execute");
+    }
     env
 }
 
@@ -179,22 +186,35 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
 
             // Arrays
             if let Value::List(ref elements) = obj {
-                return match name.as_str() {
-                    "length" => Ok(Value::Int(elements.borrow().len() as i64)),
-                    "first" => elements.borrow().first().cloned().ok_or_else(|| SapphireError::RuntimeError {
+                match name.as_str() {
+                    "length" => return Ok(Value::Int(elements.borrow().len() as i64)),
+                    "first" => return elements.borrow().first().cloned().ok_or_else(|| SapphireError::RuntimeError {
                         message: "first called on empty list".into(),
                     }),
-                    "last" => elements.borrow().last().cloned().ok_or_else(|| SapphireError::RuntimeError {
+                    "last" => return elements.borrow().last().cloned().ok_or_else(|| SapphireError::RuntimeError {
                         message: "last called on empty list".into(),
                     }),
-                    "push" | "pop" | "each" | "map" | "select" | "reduce" | "any?" | "all?" | "none?" => Ok(Value::NativeMethod {
+                    "push" | "pop" | "each" | "reduce" => return Ok(Value::NativeMethod {
                         receiver: Box::new(obj.clone()),
                         name,
                     }),
-                    _ => Err(SapphireError::RuntimeError {
-                        message: format!("unknown list method '{}'", name),
-                    }),
-                };
+                    _ => {}
+                }
+                // Fall back to __List__ class for stdlib-defined methods
+                if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("__List__") {
+                    if let Some(method) = methods.iter().find(|m| m.name == name) {
+                        return Ok(Value::BoundMethod {
+                            receiver: Box::new(obj.clone()),
+                            params: method.params.clone(),
+                            body: method.body.clone(),
+                            closure,
+                            defined_in: class_name,
+                        });
+                    }
+                }
+                return Err(SapphireError::RuntimeError {
+                    message: format!("unknown list method '{}'", name),
+                });
             }
 
             // Maps
@@ -482,38 +502,6 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             }
                             Ok(Value::Nil)
                         }
-                        (Value::List(elements), "map") => {
-                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
-                                message: "map requires a block".into(),
-                            })?;
-                            let mut result = Vec::new();
-                            for val in elements.borrow().clone().iter() {
-                                match run_block(&blk, vec![val.clone()], env.clone()) {
-                                    Ok(v) => result.push(v),
-                                    Err(SapphireError::Break(v)) => return Ok(v),
-                                    Err(e) => return Err(e),
-                                }
-                            }
-                            Ok(Value::List(Rc::new(RefCell::new(result))))
-                        }
-                        (Value::List(elements), "select") => {
-                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
-                                message: "select requires a block".into(),
-                            })?;
-                            let mut result = Vec::new();
-                            for val in elements.borrow().clone().iter() {
-                                match run_block(&blk, vec![val.clone()], env.clone()) {
-                                    Ok(Value::Bool(true)) => result.push(val.clone()),
-                                    Ok(Value::Bool(false)) => {}
-                                    Ok(_) => return Err(SapphireError::RuntimeError {
-                                        message: "select block must return a boolean".into(),
-                                    }),
-                                    Err(SapphireError::Break(v)) => return Ok(v),
-                                    Err(e) => return Err(e),
-                                }
-                            }
-                            Ok(Value::List(Rc::new(RefCell::new(result))))
-                        }
                         (Value::List(elements), "reduce") => {
                             let blk = block.ok_or_else(|| SapphireError::RuntimeError {
                                 message: "reduce requires a block".into(),
@@ -579,48 +567,6 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 }
                             }
                             Ok(Value::Nil)
-                        }
-                        (Value::List(elements), "any?") => {
-                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
-                                message: "any? requires a block".into(),
-                            })?;
-                            for val in elements.borrow().clone().iter() {
-                                match run_block(&blk, vec![val.clone()], env.clone()) {
-                                    Ok(Value::Bool(true)) => return Ok(Value::Bool(true)),
-                                    Ok(_) => {}
-                                    Err(SapphireError::Break(v)) => return Ok(v),
-                                    Err(e) => return Err(e),
-                                }
-                            }
-                            Ok(Value::Bool(false))
-                        }
-                        (Value::List(elements), "all?") => {
-                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
-                                message: "all? requires a block".into(),
-                            })?;
-                            for val in elements.borrow().clone().iter() {
-                                match run_block(&blk, vec![val.clone()], env.clone()) {
-                                    Ok(Value::Bool(false)) => return Ok(Value::Bool(false)),
-                                    Ok(_) => {}
-                                    Err(SapphireError::Break(v)) => return Ok(v),
-                                    Err(e) => return Err(e),
-                                }
-                            }
-                            Ok(Value::Bool(true))
-                        }
-                        (Value::List(elements), "none?") => {
-                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
-                                message: "none? requires a block".into(),
-                            })?;
-                            for val in elements.borrow().clone().iter() {
-                                match run_block(&blk, vec![val.clone()], env.clone()) {
-                                    Ok(Value::Bool(true)) => return Ok(Value::Bool(false)),
-                                    Ok(_) => {}
-                                    Err(SapphireError::Break(v)) => return Ok(v),
-                                    Err(e) => return Err(e),
-                                }
-                            }
-                            Ok(Value::Bool(true))
                         }
                         (Value::Int(n), "times") => {
                             let blk = block.ok_or_else(|| SapphireError::RuntimeError {
@@ -1167,7 +1113,7 @@ mod tests {
 
     #[test]
     fn test_map() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("result = [1, 2, 3].map { |x| x * 2 }", env.clone());
         assert_eq!(run_env("result[0]", env.clone()), Value::Int(2));
         assert_eq!(run_env("result[2]", env.clone()), Value::Int(6));
@@ -1175,7 +1121,7 @@ mod tests {
 
     #[test]
     fn test_select() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("result = [1, 2, 3, 4].select { |x| x > 2 }", env.clone());
         assert_eq!(run_env("result.length", env.clone()), Value::Int(2));
         assert_eq!(run_env("result[0]", env.clone()), Value::Int(3));
@@ -1359,7 +1305,7 @@ mod tests {
 
     #[test]
     fn test_map_next() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("result = [1, 2, 3].map { |x| next 0 if x == 2; x * 2 }", env.clone());
         assert_eq!(run_env("result[0]", env.clone()), Value::Int(2));
         assert_eq!(run_env("result[1]", env.clone()), Value::Int(0));
