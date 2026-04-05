@@ -114,6 +114,20 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             if name == "nil?" {
                 return Ok(Value::Bool(obj == Value::Nil));
             }
+            if name == "to_s" {
+                return Ok(Value::Str(format!("{}", obj)));
+            }
+            if name == "to_i" {
+                return match obj {
+                    Value::Int(n) => Ok(Value::Int(n)),
+                    Value::Str(s) => s.trim().parse::<i64>().map(Value::Int).map_err(|_| SapphireError::RuntimeError {
+                        message: format!("cannot convert {:?} to integer", s),
+                    }),
+                    _ => Err(SapphireError::RuntimeError {
+                        message: format!("cannot convert {} to integer", obj),
+                    }),
+                };
+            }
             match &obj {
                 Value::Array(elements) => {
                     return match name.as_str() {
@@ -703,6 +717,19 @@ mod tests {
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_to_s() {
+        assert_eq!(run("42.to_s"), Value::Str("42".into()));
+        assert_eq!(run("true.to_s"), Value::Str("true".into()));
+        assert_eq!(run("nil.to_s"), Value::Str("nil".into()));
+    }
+
+    #[test]
+    fn test_to_i() {
+        assert_eq!(run(r#""42".to_i"#), Value::Int(42));
+        assert_eq!(run("42.to_i"), Value::Int(42));
     }
 
     #[test]
