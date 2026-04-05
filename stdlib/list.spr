@@ -1,26 +1,36 @@
 class List {
+  # Returns a new list with each element transformed by the block.
+  #   [1, 2, 3].map { |x| x * 2 }   # [2, 4, 6]
   def map() {
     result = []
     self.each { |x| result.push(yield(x)) }
     result
   }
 
+  # Returns a new list containing only the elements for which the block returns true.
+  #   [1, 2, 3, 4].select { |x| x > 2 }   # [3, 4]
   def select() {
     result = []
     self.each { |x| result.push(x) if yield(x) }
     result
   }
 
+  # Returns true if the block returns true for at least one element.
+  #   [1, 2, 3].any? { |x| x > 2 }   # true
   def any?() {
     result = self.each { |x| break true if yield(x) }
     result == true
   }
 
+  # Returns true if the block returns true for every element.
+  #   [1, 2, 3].all? { |x| x > 0 }   # true
   def all?() {
     result = self.each { |x| break false if yield(x) == false }
     result != false
   }
 
+  # Returns true if the block returns false for every element.
+  #   [1, 2, 3].none? { |x| x > 9 }   # true
   def none?() {
     result = self.each { |x| break true if yield(x) }
     result != true
