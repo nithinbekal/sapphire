@@ -49,6 +49,12 @@ impl Lexer {
                     Some(s) => s,
                     None => continue,
                 },
+                '#' => {
+                    while !self.is_at_end() && self.source[self.current] != '\n' {
+                        self.current += 1;
+                    }
+                    continue;
+                }
                 c if c.is_ascii_digit() => self.number(c),
                 c if c.is_ascii_alphabetic() || c == '_' => self.identifier(c),
                 _ => continue,
@@ -199,6 +205,15 @@ mod tests {
     fn test_ignores_unknown_chars() {
         assert_eq!(scan("  "), vec![TokenKind::Eof]);
         assert_eq!(scan("@"), vec![TokenKind::Eof]);
+    }
+
+    #[test]
+    fn test_comments() {
+        assert_eq!(scan("# hello"), vec![TokenKind::Eof]);
+        assert_eq!(
+            scan("1 # comment\n2"),
+            vec![TokenKind::Number(1), TokenKind::Number(2), TokenKind::Eof]
+        );
     }
 
     #[test]
