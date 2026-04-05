@@ -4,6 +4,11 @@ use crate::value::Value;
 pub enum Stmt {
     Expression(Expr),
     Print(Expr),
+    If {
+        condition: Expr,
+        then_branch: Vec<Stmt>,
+        else_branch: Option<Vec<Stmt>>,
+    },
 }
 
 pub enum Expr {

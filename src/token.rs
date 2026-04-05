@@ -17,10 +17,15 @@ pub enum TokenKind {
     GreaterEq,
     Semicolon,
 
+    LeftBrace,
+    RightBrace,
+
     Number(i64),
     Identifier(String),
     True,
     False,
+    If,
+    Else,
     Print,
 
     Eof,

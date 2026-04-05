@@ -12,6 +12,22 @@ pub fn execute(stmt: Stmt, env: &mut Environment) -> Result<Option<Value>, Sapph
             Ok(None)
         }
         Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
+        Stmt::If { condition, then_branch, else_branch } => {
+            let cond = evaluate(condition, env)?;
+            let branch = match cond {
+                Value::Bool(true)  => Some(then_branch),
+                Value::Bool(false) => else_branch,
+                _ => return Err(SapphireError::RuntimeError {
+                    message: "if condition must be a boolean".into(),
+                }),
+            };
+            if let Some(stmts) = branch {
+                for stmt in stmts {
+                    execute(stmt, env)?;
+                }
+            }
+            Ok(None)
+        }
     }
 }
 
@@ -186,5 +202,34 @@ mod tests {
     fn test_negate() {
         assert_eq!(run("-5"), Value::Int(-5));
         assert_eq!(run("-(1+2)"), Value::Int(-3));
+    }
+
+    #[test]
+    fn test_if_then() {
+        let mut env = Environment::new();
+        run_env("x = 0", &mut env);
+        let tokens = Lexer::new("if true { x = 1 }").scan_tokens();
+        let mut stmts = Parser::new(tokens).parse().unwrap();
+        execute(stmts.remove(0), &mut env).unwrap();
+        assert_eq!(env.get("x"), Some(Value::Int(1)));
+    }
+
+    #[test]
+    fn test_if_else() {
+        let mut env = Environment::new();
+        let tokens = Lexer::new("if false { x = 1 } else { x = 2 }").scan_tokens();
+        let mut stmts = Parser::new(tokens).parse().unwrap();
+        execute(stmts.remove(0), &mut env).unwrap();
+        assert_eq!(env.get("x"), Some(Value::Int(2)));
+    }
+
+    #[test]
+    fn test_if_condition() {
+        let mut env = Environment::new();
+        run_env("x = 5", &mut env);
+        let tokens = Lexer::new("if x > 3 { x = 99 }").scan_tokens();
+        let mut stmts = Parser::new(tokens).parse().unwrap();
+        execute(stmts.remove(0), &mut env).unwrap();
+        assert_eq!(env.get("x"), Some(Value::Int(99)));
     }
 }

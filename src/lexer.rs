@@ -35,6 +35,8 @@ impl Lexer {
                 '=' => if self.match_next('=') { TokenKind::EqEq } else { TokenKind::Eq },
                 '<' => if self.match_next('=') { TokenKind::LessEq } else { TokenKind::Less },
                 '>' => if self.match_next('=') { TokenKind::GreaterEq } else { TokenKind::Greater },
+                '{' => TokenKind::LeftBrace,
+                '}' => TokenKind::RightBrace,
                 ';' => TokenKind::Semicolon,
                 c if c.is_ascii_digit() => self.number(c),
                 c if c.is_ascii_alphabetic() || c == '_' => self.identifier(c),
@@ -84,6 +86,8 @@ impl Lexer {
         match s.as_str() {
             "true"  => TokenKind::True,
             "false" => TokenKind::False,
+            "if"    => TokenKind::If,
+            "else"  => TokenKind::Else,
             "print" => TokenKind::Print,
             _ => TokenKind::Identifier(s),
         }

@@ -44,11 +44,52 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Result<Stmt, SapphireError> {
+        if self.check(&TokenKind::If) {
+            return self.if_statement();
+        }
         if self.check(&TokenKind::Print) {
             self.advance();
             return Ok(Stmt::Print(self.equality()?));
         }
         Ok(Stmt::Expression(self.equality()?))
+    }
+
+    fn if_statement(&mut self) -> Result<Stmt, SapphireError> {
+        self.advance(); // consume 'if'
+        let condition = self.equality()?;
+        let then_branch = self.block()?;
+        let else_branch = if self.check(&TokenKind::Else) {
+            self.advance(); // consume 'else'
+            Some(self.block()?)
+        } else {
+            None
+        };
+        Ok(Stmt::If { condition, then_branch, else_branch })
+    }
+
+    fn block(&mut self) -> Result<Vec<Stmt>, SapphireError> {
+        if !self.check(&TokenKind::LeftBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '{'".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume '{'
+        let mut stmts = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            stmts.push(self.statement()?);
+            if self.check(&TokenKind::Semicolon) {
+                self.advance();
+            }
+        }
+        if !self.check(&TokenKind::RightBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '}'".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume '}'
+        Ok(stmts)
     }
 
     // equality: comparison (('==' | '!=') comparison)*
