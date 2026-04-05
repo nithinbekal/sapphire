@@ -46,7 +46,7 @@ impl Parser {
     fn statement(&mut self) -> Result<Stmt, SapphireError> {
         if self.check(&TokenKind::Return) {
             self.advance();
-            return Ok(Stmt::Return(self.equality()?));
+            return Ok(Stmt::Return(self.logical()?));
         }
         if self.check(&TokenKind::Class) {
             return self.class_def();
@@ -62,9 +62,9 @@ impl Parser {
         }
         if self.check(&TokenKind::Print) {
             self.advance();
-            return Ok(Stmt::Print(self.equality()?));
+            return Ok(Stmt::Print(self.logical()?));
         }
-        Ok(Stmt::Expression(self.equality()?))
+        Ok(Stmt::Expression(self.logical()?))
     }
 
     fn class_def(&mut self) -> Result<Stmt, SapphireError> {
@@ -125,7 +125,7 @@ impl Parser {
                 };
                 let default = if self.check(&TokenKind::Eq) {
                     self.advance();
-                    Some(self.equality()?)
+                    Some(self.logical()?)
                 } else {
                     None
                 };
@@ -152,7 +152,7 @@ impl Parser {
 
     fn if_statement(&mut self) -> Result<Stmt, SapphireError> {
         self.advance(); // consume 'if'
-        let condition = self.equality()?;
+        let condition = self.logical()?;
         let then_branch = self.block()?;
         let else_branch = if self.check(&TokenKind::Else) {
             self.advance();
@@ -247,7 +247,7 @@ impl Parser {
 
     fn while_statement(&mut self) -> Result<Stmt, SapphireError> {
         self.advance(); // consume 'while'
-        let condition = self.equality()?;
+        let condition = self.logical()?;
         let body = self.block()?;
         Ok(Stmt::While { condition, body })
     }
@@ -275,6 +275,17 @@ impl Parser {
         }
         self.advance(); // consume '}'
         Ok(stmts)
+    }
+
+    // logical: equality (('&&' | '||') equality)*
+    fn logical(&mut self) -> Result<Expr, SapphireError> {
+        let mut left = self.equality()?;
+        while self.check(&TokenKind::AmpAmp) || self.check(&TokenKind::PipePipe) {
+            let op = self.advance().clone();
+            let right = self.equality()?;
+            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
     }
 
     // equality: comparison (('==' | '!=') comparison)*
@@ -350,7 +361,7 @@ impl Parser {
                 };
                 if self.check(&TokenKind::Eq) {
                     self.advance(); // consume '='
-                    let value = self.equality()?;
+                    let value = self.logical()?;
                     expr = Expr::Set { object: Box::new(expr), name, value: Box::new(value) };
                     break;
                 }
@@ -390,10 +401,10 @@ impl Parser {
             {
                 self.advance(); // consume identifier
                 self.advance(); // consume ':'
-                return Ok(CallArg { name: Some(name), value: self.equality()? });
+                return Ok(CallArg { name: Some(name), value: self.logical()? });
             }
         }
-        Ok(CallArg { name: None, value: self.equality()? })
+        Ok(CallArg { name: None, value: self.logical()? })
     }
 
     // primary: NUMBER | STRING | BOOL | IDENTIFIER ('=' equality)? | '(' equality ')'
@@ -427,7 +438,7 @@ impl Parser {
             self.advance();
             if self.check(&TokenKind::Eq) {
                 self.advance(); // consume '='
-                let value = self.equality()?;
+                let value = self.logical()?;
                 return Ok(Expr::Assign { name, value: Box::new(value) });
             }
             return Ok(Expr::Variable(name));
@@ -435,7 +446,7 @@ impl Parser {
 
         if self.check(&TokenKind::LeftParen) {
             self.advance();
-            let expr = self.equality()?;
+            let expr = self.logical()?;
             self.advance(); // consume ')'
             return Ok(Expr::Grouping(Box::new(expr)));
         }

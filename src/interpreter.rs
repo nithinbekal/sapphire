@@ -257,6 +257,23 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             }
         }
         Expr::Binary { left, op, right } => {
+            // Short-circuit logical operators
+            if op.kind == TokenKind::AmpAmp {
+                let l = evaluate(*left, env.clone())?;
+                return match l {
+                    Value::Bool(false) => Ok(Value::Bool(false)),
+                    Value::Bool(true) => evaluate(*right, env),
+                    _ => Err(SapphireError::RuntimeError { message: "'&&' requires booleans".into() }),
+                };
+            }
+            if op.kind == TokenKind::PipePipe {
+                let l = evaluate(*left, env.clone())?;
+                return match l {
+                    Value::Bool(true) => Ok(Value::Bool(true)),
+                    Value::Bool(false) => evaluate(*right, env),
+                    _ => Err(SapphireError::RuntimeError { message: "'||' requires booleans".into() }),
+                };
+            }
             let l = evaluate(*left, env.clone())?;
             let r = evaluate(*right, env)?;
             match op.kind {
@@ -495,6 +512,20 @@ mod tests {
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_and() {
+        assert_eq!(run("true && true"), Value::Bool(true));
+        assert_eq!(run("true && false"), Value::Bool(false));
+        assert_eq!(run("false && true"), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_or() {
+        assert_eq!(run("true || false"), Value::Bool(true));
+        assert_eq!(run("false || false"), Value::Bool(false));
+        assert_eq!(run("false || true"), Value::Bool(true));
     }
 
     #[test]

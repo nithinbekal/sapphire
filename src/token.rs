@@ -8,6 +8,8 @@ pub enum TokenKind {
     Star,
     Slash,
     Bang,
+    AmpAmp,
+    PipePipe,
     Eq,
     EqEq,
     BangEq,
@@ -35,6 +37,7 @@ pub enum TokenKind {
     Return,
     Class,
     Attr,
+    SelfKw,
     Print,
 
     Eof,
