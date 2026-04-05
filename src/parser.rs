@@ -581,6 +581,41 @@ impl Parser {
             return Ok(Expr::ListLit(elements));
         }
 
+        if self.check(&TokenKind::LeftBrace) {
+            self.advance(); // consume '{'
+            let mut pairs = Vec::new();
+            if !self.check(&TokenKind::RightBrace) {
+                loop {
+                    let key = match self.peek().kind.clone() {
+                        TokenKind::Identifier(k) => { self.advance(); k }
+                        _ => return Err(SapphireError::ParseError {
+                            message: "expected key name in map literal".into(),
+                            line: self.peek().line,
+                        }),
+                    };
+                    if !self.check(&TokenKind::Colon) {
+                        return Err(SapphireError::ParseError {
+                            message: "expected ':' after map key".into(),
+                            line: self.peek().line,
+                        });
+                    }
+                    self.advance(); // consume ':'
+                    let value = self.logical()?;
+                    pairs.push((key, value));
+                    if !self.check(&TokenKind::Comma) { break; }
+                    self.advance(); // consume ','
+                }
+            }
+            if !self.check(&TokenKind::RightBrace) {
+                return Err(SapphireError::ParseError {
+                    message: "expected '}' after map literal".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume '}'
+            return Ok(Expr::MapLit(pairs));
+        }
+
         Err(SapphireError::ParseError {
             message: format!("unexpected token '{:?}'", self.peek().kind),
             line: self.peek().line,

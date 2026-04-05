@@ -41,6 +41,7 @@ pub enum Value {
         closure: EnvRef,
     },
     List(Rc<RefCell<Vec<Value>>>),
+    Map(Rc<RefCell<HashMap<String, Value>>>),
     NativeMethod {
         receiver: Box<Value>,
         name: String,
@@ -76,6 +77,13 @@ impl fmt::Display for Value {
             Value::List(elements) => {
                 let parts: Vec<String> = elements.borrow().iter().map(|v| format!("{}", v)).collect();
                 write!(f, "[{}]", parts.join(", "))
+            }
+            Value::Map(pairs) => {
+                let mut parts: Vec<String> = pairs.borrow().iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                parts.sort();
+                write!(f, "{{{}}}", parts.join(", "))
             }
             Value::Instance { class_name, fields } => {
                 let mut pairs: Vec<String> = fields

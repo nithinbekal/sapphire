@@ -182,6 +182,32 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 };
             }
 
+            // Maps
+            if let Value::Map(ref map) = obj {
+                return match name.as_str() {
+                    "length" => Ok(Value::Int(map.borrow().len() as i64)),
+                    "keys" => {
+                        let mut keys: Vec<Value> = map.borrow().keys().map(|k| Value::Str(k.clone())).collect();
+                        keys.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+                        Ok(Value::List(Rc::new(RefCell::new(keys))))
+                    }
+                    "values" => {
+                        let mut pairs: Vec<(String, Value)> = map.borrow().iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect();
+                        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                        Ok(Value::List(Rc::new(RefCell::new(pairs.into_iter().map(|(_, v)| v).collect()))))
+                    }
+                    "has_key?" | "each" => Ok(Value::NativeMethod {
+                        receiver: Box::new(obj.clone()),
+                        name,
+                    }),
+                    _ => Err(SapphireError::RuntimeError {
+                        message: format!("unknown map method '{}'", name),
+                    }),
+                };
+            }
+
             // Integers
             if let Value::Int(n) = obj {
                 return match name.as_str() {
@@ -249,6 +275,13 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             }
             Ok(Value::List(Rc::new(RefCell::new(vals))))
         }
+        Expr::MapLit(pairs) => {
+            let mut map = HashMap::new();
+            for (key, val_expr) in pairs {
+                map.insert(key, evaluate(val_expr, env.clone())?);
+            }
+            Ok(Value::Map(Rc::new(RefCell::new(map))))
+        }
         Expr::Index { object, index } => {
             let obj = evaluate(*object, env.clone())?;
             let idx = evaluate(*index, env)?;
@@ -260,8 +293,13 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         message: format!("index {} out of bounds", i),
                     })
                 }
+                (Value::Map(map), Value::Str(key)) => {
+                    map.borrow().get(&key).cloned().ok_or_else(|| SapphireError::RuntimeError {
+                        message: format!("key '{}' not found in map", key),
+                    })
+                }
                 _ => Err(SapphireError::RuntimeError {
-                    message: "index operator requires a list and an integer".into(),
+                    message: "index operator requires a list and integer, or map and string".into(),
                 }),
             }
         }
@@ -282,8 +320,12 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     elems[i as usize] = val.clone();
                     Ok(val)
                 }
+                (Value::Map(map), Value::Str(key)) => {
+                    map.borrow_mut().insert(key, val.clone());
+                    Ok(val)
+                }
                 _ => Err(SapphireError::RuntimeError {
-                    message: "index assignment requires a list and an integer".into(),
+                    message: "index assignment requires a list and integer, or map and string".into(),
                 }),
             }
         }
@@ -475,6 +517,28 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             elements.borrow_mut().pop().ok_or_else(|| SapphireError::RuntimeError {
                                 message: "pop called on empty list".into(),
                             })
+                        }
+                        (Value::Map(map), "has_key?") => {
+                            let key = match args.into_iter().next() {
+                                Some(Value::Str(k)) => k,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "has_key? requires a string argument".into(),
+                                }),
+                            };
+                            Ok(Value::Bool(map.borrow().contains_key(&key)))
+                        }
+                        (Value::Map(map), "each") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "each requires a block".into(),
+                            })?;
+                            let mut pairs: Vec<(String, Value)> = map.borrow().iter()
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect();
+                            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                            for (k, v) in pairs {
+                                run_block(&blk, vec![Value::Str(k), v], env.clone())?;
+                            }
+                            Ok(Value::Nil)
                         }
                         (Value::List(elements), "any?") => {
                             let blk = block.ok_or_else(|| SapphireError::RuntimeError {
