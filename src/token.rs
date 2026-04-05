@@ -26,6 +26,7 @@ pub enum TokenKind {
     False,
     If,
     Else,
+    While,
     Print,
 
     Eof,

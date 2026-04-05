@@ -12,6 +12,23 @@ pub fn execute(stmt: Stmt, env: &mut Environment) -> Result<Option<Value>, Sapph
             Ok(None)
         }
         Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
+        Stmt::While { condition, body } => {
+            loop {
+                let cond = evaluate(condition.clone(), env)?;
+                match cond {
+                    Value::Bool(true) => {
+                        for stmt in body.clone() {
+                            execute(stmt, env)?;
+                        }
+                    }
+                    Value::Bool(false) => break,
+                    _ => return Err(SapphireError::RuntimeError {
+                        message: "while condition must be a boolean".into(),
+                    }),
+                }
+            }
+            Ok(None)
+        }
         Stmt::If { condition, then_branch, else_branch } => {
             let cond = evaluate(condition, env)?;
             let branch = match cond {
@@ -221,6 +238,16 @@ mod tests {
         let mut stmts = Parser::new(tokens).parse().unwrap();
         execute(stmts.remove(0), &mut env).unwrap();
         assert_eq!(env.get("x"), Some(Value::Int(2)));
+    }
+
+    #[test]
+    fn test_while() {
+        let mut env = Environment::new();
+        run_env("x = 0", &mut env);
+        let tokens = Lexer::new("while x < 3 { x = x + 1 }").scan_tokens();
+        let mut stmts = Parser::new(tokens).parse().unwrap();
+        execute(stmts.remove(0), &mut env).unwrap();
+        assert_eq!(env.get("x"), Some(Value::Int(3)));
     }
 
     #[test]

@@ -88,6 +88,7 @@ impl Lexer {
             "false" => TokenKind::False,
             "if"    => TokenKind::If,
             "else"  => TokenKind::Else,
+            "while" => TokenKind::While,
             "print" => TokenKind::Print,
             _ => TokenKind::Identifier(s),
         }

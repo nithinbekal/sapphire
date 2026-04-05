@@ -47,6 +47,9 @@ impl Parser {
         if self.check(&TokenKind::If) {
             return self.if_statement();
         }
+        if self.check(&TokenKind::While) {
+            return self.while_statement();
+        }
         if self.check(&TokenKind::Print) {
             self.advance();
             return Ok(Stmt::Print(self.equality()?));
@@ -65,6 +68,13 @@ impl Parser {
             None
         };
         Ok(Stmt::If { condition, then_branch, else_branch })
+    }
+
+    fn while_statement(&mut self) -> Result<Stmt, SapphireError> {
+        self.advance(); // consume 'while'
+        let condition = self.equality()?;
+        let body = self.block()?;
+        Ok(Stmt::While { condition, body })
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>, SapphireError> {

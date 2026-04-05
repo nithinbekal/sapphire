@@ -1,6 +1,7 @@
 use crate::token::Token;
 use crate::value::Value;
 
+#[derive(Clone)]
 pub enum Stmt {
     Expression(Expr),
     Print(Expr),
@@ -9,8 +10,13 @@ pub enum Stmt {
         then_branch: Vec<Stmt>,
         else_branch: Option<Vec<Stmt>>,
     },
+    While {
+        condition: Expr,
+        body: Vec<Stmt>,
+    },
 }
 
+#[derive(Clone)]
 pub enum Expr {
     Literal(Value),
     Grouping(Box<Expr>),
