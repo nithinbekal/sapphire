@@ -29,7 +29,7 @@ fn run_file(path: &str) {
             std::process::exit(1);
         }
     };
-    let env = environment::Environment::new();
+    let env = interpreter::global_env();
     let tokens = lexer::Lexer::new(&source).scan_tokens();
     match parser::Parser::new(tokens).parse() {
         Err(e) => {
@@ -50,7 +50,7 @@ fn run_file(path: &str) {
 fn run_repl() {
     println!("Sapphire 0.1.0 — :q to quit");
 
-    let env = environment::Environment::new();
+    let env = interpreter::global_env();
 
     loop {
         print!("> ");

@@ -45,6 +45,7 @@ pub enum Value {
         receiver: Box<Value>,
         name: String,
     },
+    NativeFunction(String),
 }
 
 impl PartialEq for Value {
@@ -71,6 +72,7 @@ impl fmt::Display for Value {
             Value::Constructor { class_name, .. } => write!(f, "<new {}>", class_name),
             Value::BoundMethod { .. } => write!(f, "<method>"),
             Value::NativeMethod { name, .. } => write!(f, "<method {}>", name),
+            Value::NativeFunction(name) => write!(f, "<fn {}>", name),
             Value::Array(elements) => {
                 let parts: Vec<String> = elements.borrow().iter().map(|v| format!("{}", v)).collect();
                 write!(f, "[{}]", parts.join(", "))

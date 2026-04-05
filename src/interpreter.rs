@@ -1,12 +1,19 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::io::{self, Write};
 use crate::ast::{Expr, MethodDef, Stmt, StringPart};
 use crate::environment::Environment;
 use crate::value::EnvRef;
 use crate::error::SapphireError;
 use crate::token::TokenKind;
 use crate::value::Value;
+
+pub fn global_env() -> EnvRef {
+    let env = Environment::new();
+    env.borrow_mut().set("read_line".to_string(), Value::NativeFunction("read_line".to_string()));
+    env
+}
 
 pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> {
     match stmt {
@@ -305,6 +312,21 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         }
                     }
                     Ok(Value::Instance { class_name, fields: Rc::new(RefCell::new(instance_fields)) })
+                }
+                Value::NativeFunction(name) => {
+                    match name.as_str() {
+                        "read_line" => {
+                            io::stdout().flush().ok();
+                            let mut line = String::new();
+                            io::stdin().read_line(&mut line).map_err(|e| SapphireError::RuntimeError {
+                                message: format!("read_line failed: {}", e),
+                            })?;
+                            Ok(Value::Str(line.trim_end_matches('\n').trim_end_matches('\r').to_string()))
+                        }
+                        _ => Err(SapphireError::RuntimeError {
+                            message: format!("unknown native function '{}'", name),
+                        }),
+                    }
                 }
                 Value::NativeMethod { receiver, name } => {
                     let args: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
