@@ -133,9 +133,23 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
     match expr {
         Expr::Literal(v) => Ok(v),
         Expr::Grouping(inner) => evaluate(*inner, env),
-        Expr::Variable(name) => env.borrow().get(&name).ok_or_else(|| SapphireError::RuntimeError {
-            message: format!("undefined variable '{}'", name),
-        }),
+        Expr::Variable(name) => {
+            if let Some(v) = env.borrow().get(&name) {
+                return Ok(v);
+            }
+            // Implicit self: if inside a method, fall back to self.name
+            if let Some(self_val) = env.borrow().get("self") {
+                if let Ok(v) = evaluate(
+                    Expr::Get { object: Box::new(Expr::Literal(self_val)), name: name.clone() },
+                    env.clone(),
+                ) {
+                    return Ok(v);
+                }
+            }
+            Err(SapphireError::RuntimeError {
+                message: format!("undefined variable '{}'", name),
+            })
+        }
         Expr::Assign { name, value } => {
             let result = evaluate(*value, env.clone())?;
             if !env.borrow_mut().assign(&name, result.clone()) {
@@ -1464,5 +1478,34 @@ mod tests {
         let tokens = crate::lexer::Lexer::new("class Map { attr x }").scan_tokens();
         let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
         assert!(execute(stmts.remove(0), env).is_err());
+    }
+
+    #[test]
+    fn test_implicit_self_field_read() {
+        let env = Environment::new();
+        exec_env("class Point { attr x; attr y; def sum() { x + y } }", env.clone());
+        exec_env("p = Point.new(x: 3, y: 4)", env.clone());
+        assert_eq!(run_env("p.sum()", env.clone()), Value::Int(7));
+    }
+
+    #[test]
+    fn test_implicit_self_method_call() {
+        let env = Environment::new();
+        exec_env("class Counter { attr count; def increment() { self.count = count + 1 }; def value() { count } }", env.clone());
+        exec_env("c = Counter.new(count: 0)", env.clone());
+        exec_env("c.increment()", env.clone());
+        exec_env("c.increment()", env.clone());
+        assert_eq!(run_env("c.value()", env.clone()), Value::Int(2));
+    }
+
+    #[test]
+    fn test_implicit_self_local_shadows_field() {
+        let env = Environment::new();
+        exec_env("class Box { attr x; def doubled() { x = 99; x } }", env.clone());
+        exec_env("b = Box.new(x: 10)", env.clone());
+        // local x = 99 should shadow self.x inside the method
+        assert_eq!(run_env("b.doubled()", env.clone()), Value::Int(99));
+        // self.x should be unchanged
+        assert_eq!(run_env("b.x", env.clone()), Value::Int(10));
     }
 }

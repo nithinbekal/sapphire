@@ -557,7 +557,7 @@ print c.color   # red
 
 ### Methods
 
-Define methods with `def` inside the class body. Use `self` to refer to the current instance.
+Define methods with `def` inside the class body. Fields and other methods are accessible by name — no `self.` prefix needed for reads.
 
 ```
 class Point {
@@ -565,13 +565,13 @@ class Point {
   attr y
 
   def distance_from_origin() {
-    dx = self.x * self.x
-    dy = self.y * self.y
+    dx = x * x
+    dy = y * y
     dx + dy   # returns dx^2 + dy^2 (no sqrt yet)
   }
 
   def to_s() {
-    "(#{self.x}, #{self.y})"
+    "(#{x}, #{y})"
   }
 }
 
@@ -582,14 +582,14 @@ print p.to_s()                   # (3, 4)
 
 ### Mutating fields
 
-Assign to `self.field` inside a method to update an instance field.
+Reading a field uses the bare name. Writing to a field requires `self.field =`.
 
 ```
 class Counter {
   attr count
 
   def increment() {
-    self.count = self.count + 1
+    self.count = count + 1
   }
 
   def reset() {
@@ -621,7 +621,7 @@ class Animal {
   }
 
   def greet() {
-    print "I am #{self.name}"
+    print "I am #{name}"
   }
 }
 
@@ -657,7 +657,7 @@ class ElectricVehicle < Vehicle {
   attr range_km
 
   def describe() {
-    print "#{self.make} #{self.model}, range: #{self.range_km}km"
+    print "#{make} #{model}, range: #{range_km}km"
   }
 }
 
@@ -674,7 +674,7 @@ class Animal {
   attr name
 
   def describe() {
-    self.name
+    name
   }
 }
 
@@ -682,7 +682,7 @@ class Dog < Animal {
   attr breed
 
   def describe() {
-    super.describe() + " (" + self.breed + ")"
+    super.describe() + " (" + breed + ")"
   }
 }
 
@@ -744,10 +744,10 @@ class NumberList {
   attr items
 
   def each() {
-    len = self.items.length
+    len = items.length
     i = 0
     while i < len {
-      yield(self.items[i])
+      yield(items[i])
       i = i + 1
     }
   }
@@ -770,16 +770,16 @@ class TodoList {
   attr items
 
   def add(item) {
-    self.items.push(item)
+    items.push(item)
   }
 
   def count() {
-    self.items.reduce(0) { |acc, item| acc + 1 }
+    items.reduce(0) { |acc, item| acc + 1 }
   }
 
   def print_all() {
     i = 0
-    self.items.each { |item|
+    items.each { |item|
       i = i + 1
       print "#{i}. #{item}"
     }
