@@ -111,14 +111,74 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
         }),
         Expr::Get { object, name } => {
             let obj = evaluate(*object, env.clone())?;
-            if name == "nil?" {
-                return Ok(Value::Bool(obj == Value::Nil));
+
+            // Instances: fields → class methods → built-in fallbacks
+            if let Value::Instance { ref class_name, ref fields } = obj {
+                if let Some(v) = fields.borrow().get(&name).cloned() {
+                    return Ok(v);
+                }
+                let class_val = env.borrow().get(class_name).ok_or_else(|| SapphireError::RuntimeError {
+                    message: format!("class '{}' not found", class_name),
+                })?;
+                if let Value::Class { methods, closure, .. } = class_val {
+                    if let Some(method) = methods.iter().find(|m| m.name == name) {
+                        return Ok(Value::BoundMethod {
+                            receiver: Box::new(obj),
+                            params: method.params.clone(),
+                            body: method.body.clone(),
+                            closure,
+                        });
+                    }
+                }
+                // Built-in fallbacks for instances
+                return match name.as_str() {
+                    "nil?" => Ok(Value::Bool(false)),
+                    "to_s" => Ok(Value::Str(format!("{}", obj))),
+                    "to_i" => Err(SapphireError::RuntimeError {
+                        message: format!("cannot convert {} to integer", obj),
+                    }),
+                    _ => Err(SapphireError::RuntimeError {
+                        message: format!("undefined field or method '{}'", name),
+                    }),
+                };
             }
-            if name == "to_s" {
-                return Ok(Value::Str(format!("{}", obj)));
+
+            // Arrays
+            if let Value::Array(ref elements) = obj {
+                return match name.as_str() {
+                    "length" => Ok(Value::Int(elements.borrow().len() as i64)),
+                    "first" => elements.borrow().first().cloned().ok_or_else(|| SapphireError::RuntimeError {
+                        message: "first called on empty array".into(),
+                    }),
+                    "last" => elements.borrow().last().cloned().ok_or_else(|| SapphireError::RuntimeError {
+                        message: "last called on empty array".into(),
+                    }),
+                    "push" | "pop" | "each" | "map" | "select" => Ok(Value::NativeMethod {
+                        receiver: Box::new(obj.clone()),
+                        name,
+                    }),
+                    _ => Err(SapphireError::RuntimeError {
+                        message: format!("unknown array method '{}'", name),
+                    }),
+                };
             }
-            if name == "to_i" {
-                return match obj {
+
+            // Class: only .new
+            if let Value::Class { name: class_name, fields, methods, closure } = obj {
+                return if name == "new" {
+                    Ok(Value::Constructor { class_name, fields, methods, closure })
+                } else {
+                    Err(SapphireError::RuntimeError {
+                        message: format!("unknown class method '{}'", name),
+                    })
+                };
+            }
+
+            // Universal built-ins for all other values
+            match name.as_str() {
+                "nil?" => Ok(Value::Bool(obj == Value::Nil)),
+                "to_s" => Ok(Value::Str(format!("{}", obj))),
+                "to_i" => match obj {
                     Value::Int(n) => Ok(Value::Int(n)),
                     Value::Str(s) => s.trim().parse::<i64>().map(Value::Int).map_err(|_| SapphireError::RuntimeError {
                         message: format!("cannot convert {:?} to integer", s),
@@ -126,58 +186,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     _ => Err(SapphireError::RuntimeError {
                         message: format!("cannot convert {} to integer", obj),
                     }),
-                };
-            }
-            match &obj {
-                Value::Array(elements) => {
-                    return match name.as_str() {
-                        "length" => Ok(Value::Int(elements.borrow().len() as i64)),
-                        "push" | "pop" | "first" | "last" | "each" | "map" | "select" => Ok(Value::NativeMethod {
-                            receiver: Box::new(obj.clone()),
-                            name,
-                        }),
-                        _ => Err(SapphireError::RuntimeError {
-                            message: format!("unknown array method '{}'", name),
-                        }),
-                    };
-                }
-                _ => {}
-            }
-            match obj {
-                Value::Class { name: class_name, fields, methods, closure } => {
-                    if name == "new" {
-                        Ok(Value::Constructor { class_name, fields, methods, closure })
-                    } else {
-                        Err(SapphireError::RuntimeError {
-                            message: format!("unknown class method '{}'", name),
-                        })
-                    }
-                }
-                Value::Instance { ref class_name, ref fields } => {
-                    // Check fields first
-                    if let Some(v) = fields.borrow().get(&name).cloned() {
-                        return Ok(v);
-                    }
-                    // Look up method on the class
-                    let class_val = env.borrow().get(class_name).ok_or_else(|| SapphireError::RuntimeError {
-                        message: format!("class '{}' not found", class_name),
-                    })?;
-                    if let Value::Class { methods, closure, .. } = class_val {
-                        if let Some(method) = methods.iter().find(|m| m.name == name) {
-                            return Ok(Value::BoundMethod {
-                                receiver: Box::new(obj),
-                                params: method.params.clone(),
-                                body: method.body.clone(),
-                                closure,
-                            });
-                        }
-                    }
-                    Err(SapphireError::RuntimeError {
-                        message: format!("undefined field or method '{}'", name),
-                    })
-                }
+                },
                 _ => Err(SapphireError::RuntimeError {
-                    message: format!("cannot access '{}' on this value", name),
+                    message: format!("cannot access '{}' on this value", obj),
                 }),
             }
         }
@@ -406,21 +417,15 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 message: "pop called on empty array".into(),
                             })
                         }
-                        (Value::Array(elements), "first") => {
-                            elements.borrow().first().cloned().ok_or_else(|| SapphireError::RuntimeError {
-                                message: "first called on empty array".into(),
-                            })
-                        }
-                        (Value::Array(elements), "last") => {
-                            elements.borrow().last().cloned().ok_or_else(|| SapphireError::RuntimeError {
-                                message: "last called on empty array".into(),
-                            })
-                        }
                         _ => Err(SapphireError::RuntimeError {
                             message: "unknown native method".into(),
                         }),
                     }
                 }
+                // Allow calling a plain value with () as long as there are no args/block —
+                // this makes x.to_s(), arr.length(), arr.first() etc. work identically to
+                // their no-parens forms.
+                v if eval_args.is_empty() && block.is_none() => Ok(v),
                 _ => Err(SapphireError::RuntimeError {
                     message: "can only call functions".into(),
                 }),
