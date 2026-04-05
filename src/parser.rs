@@ -1,4 +1,4 @@
-use crate::ast::{CallArg, Expr, FieldDef, Stmt};
+use crate::ast::{CallArg, Expr, FieldDef, MethodDef, Stmt};
 use crate::error::SapphireError;
 use crate::token::{Token, TokenKind};
 use crate::value::Value;
@@ -84,41 +84,49 @@ impl Parser {
         }
         self.advance(); // consume '{'
         let mut fields = Vec::new();
+        let mut methods = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-            if !self.check(&TokenKind::Attr) {
+            if self.check(&TokenKind::Semicolon) {
+                self.advance();
+                continue;
+            }
+            if self.check(&TokenKind::Attr) {
+                self.advance(); // consume 'attr'
+                let field_name = match self.peek().kind.clone() {
+                    TokenKind::Identifier(n) => { self.advance(); n }
+                    _ => return Err(SapphireError::ParseError {
+                        message: "expected field name after 'attr'".into(),
+                        line: self.peek().line,
+                    }),
+                };
+                let type_name = if self.check(&TokenKind::Colon) {
+                    self.advance();
+                    match self.peek().kind.clone() {
+                        TokenKind::Identifier(t) => { self.advance(); Some(t) }
+                        _ => return Err(SapphireError::ParseError {
+                            message: "expected type name after ':'".into(),
+                            line: self.peek().line,
+                        }),
+                    }
+                } else {
+                    None
+                };
+                let default = if self.check(&TokenKind::Eq) {
+                    self.advance();
+                    Some(self.equality()?)
+                } else {
+                    None
+                };
+                if self.check(&TokenKind::Semicolon) { self.advance(); }
+                fields.push(FieldDef { name: field_name, type_name, default });
+            } else if self.check(&TokenKind::Def) {
+                methods.push(self.method_def()?);
+            } else {
                 return Err(SapphireError::ParseError {
-                    message: "expected 'attr' in class body".into(),
+                    message: "expected 'attr' or 'def' in class body".into(),
                     line: self.peek().line,
                 });
             }
-            self.advance(); // consume 'attr'
-            let field_name = match self.peek().kind.clone() {
-                TokenKind::Identifier(n) => { self.advance(); n }
-                _ => return Err(SapphireError::ParseError {
-                    message: "expected field name after 'attr'".into(),
-                    line: self.peek().line,
-                }),
-            };
-            let type_name = if self.check(&TokenKind::Colon) {
-                self.advance(); // consume ':'
-                match self.peek().kind.clone() {
-                    TokenKind::Identifier(t) => { self.advance(); Some(t) }
-                    _ => return Err(SapphireError::ParseError {
-                        message: "expected type name after ':'".into(),
-                        line: self.peek().line,
-                    }),
-                }
-            } else {
-                None
-            };
-            let default = if self.check(&TokenKind::Eq) {
-                self.advance(); // consume '='
-                Some(self.equality()?)
-            } else {
-                None
-            };
-            if self.check(&TokenKind::Semicolon) { self.advance(); }
-            fields.push(FieldDef { name: field_name, type_name, default });
         }
         if !self.check(&TokenKind::RightBrace) {
             return Err(SapphireError::ParseError {
@@ -127,7 +135,7 @@ impl Parser {
             });
         }
         self.advance(); // consume '}'
-        Ok(Stmt::Class { name, fields })
+        Ok(Stmt::Class { name, fields, methods })
     }
 
     fn if_statement(&mut self) -> Result<Stmt, SapphireError> {
@@ -182,6 +190,47 @@ impl Parser {
         self.advance(); // consume ')'
         let body = self.block()?;
         Ok(Stmt::Function { name, params, body })
+    }
+
+    fn method_def(&mut self) -> Result<MethodDef, SapphireError> {
+        self.advance(); // consume 'def'
+        let name = match self.peek().kind.clone() {
+            TokenKind::Identifier(n) => { self.advance(); n }
+            _ => return Err(SapphireError::ParseError {
+                message: "expected method name".into(),
+                line: self.peek().line,
+            }),
+        };
+        if !self.check(&TokenKind::LeftParen) {
+            return Err(SapphireError::ParseError {
+                message: "expected '(' after method name".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume '('
+        let mut params = Vec::new();
+        if !self.check(&TokenKind::RightParen) {
+            loop {
+                match self.peek().kind.clone() {
+                    TokenKind::Identifier(p) => { self.advance(); params.push(p); }
+                    _ => return Err(SapphireError::ParseError {
+                        message: "expected parameter name".into(),
+                        line: self.peek().line,
+                    }),
+                }
+                if !self.check(&TokenKind::Comma) { break; }
+                self.advance();
+            }
+        }
+        if !self.check(&TokenKind::RightParen) {
+            return Err(SapphireError::ParseError {
+                message: "expected ')' after parameters".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume ')'
+        let body = self.block()?;
+        Ok(MethodDef { name, params, body })
     }
 
     fn while_statement(&mut self) -> Result<Stmt, SapphireError> {
@@ -287,6 +336,12 @@ impl Parser {
                         line: self.peek().line,
                     }),
                 };
+                if self.check(&TokenKind::Eq) {
+                    self.advance(); // consume '='
+                    let value = self.equality()?;
+                    expr = Expr::Set { object: Box::new(expr), name, value: Box::new(value) };
+                    break;
+                }
                 expr = Expr::Get { object: Box::new(expr), name };
             } else {
                 break;
@@ -349,6 +404,11 @@ impl Parser {
         if self.check(&TokenKind::False) {
             self.advance();
             return Ok(Expr::Literal(Value::Bool(false)));
+        }
+
+        if self.check(&TokenKind::SelfKw) {
+            self.advance();
+            return Ok(Expr::SelfExpr);
         }
 
         if let TokenKind::Identifier(name) = self.peek().kind.clone() {

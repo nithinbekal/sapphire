@@ -9,6 +9,13 @@ pub struct FieldDef {
 }
 
 #[derive(Debug, Clone)]
+pub struct MethodDef {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone)]
 pub struct CallArg {
     pub name: Option<String>,
     pub value: Expr,
@@ -36,6 +43,7 @@ pub enum Stmt {
     Class {
         name: String,
         fields: Vec<FieldDef>,
+        methods: Vec<MethodDef>,
     },
 }
 
@@ -43,6 +51,7 @@ pub enum Stmt {
 pub enum Expr {
     Literal(Value),
     Grouping(Box<Expr>),
+    SelfExpr,
     Unary {
         op: Token,
         right: Box<Expr>,
@@ -64,5 +73,10 @@ pub enum Expr {
     Get {
         object: Box<Expr>,
         name: String,
+    },
+    Set {
+        object: Box<Expr>,
+        name: String,
+        value: Box<Expr>,
     },
 }

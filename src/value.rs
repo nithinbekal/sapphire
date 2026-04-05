@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::ast::{FieldDef, Stmt};
+use crate::ast::{FieldDef, MethodDef, Stmt};
 use crate::environment::Environment;
+
+pub type EnvRef = Rc<RefCell<Environment>>;
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -14,19 +16,29 @@ pub enum Value {
     Function {
         params: Vec<String>,
         body: Vec<Stmt>,
-        closure: Rc<RefCell<Environment>>,
+        closure: EnvRef,
     },
     Class {
         name: String,
         fields: Vec<FieldDef>,
+        methods: Vec<MethodDef>,
+        closure: EnvRef,
     },
     Constructor {
         class_name: String,
         fields: Vec<FieldDef>,
+        methods: Vec<MethodDef>,
+        closure: EnvRef,
     },
     Instance {
         class_name: String,
-        fields: HashMap<String, Value>,
+        fields: Rc<RefCell<HashMap<String, Value>>>,
+    },
+    BoundMethod {
+        receiver: Box<Value>,
+        params: Vec<String>,
+        body: Vec<Stmt>,
+        closure: EnvRef,
     },
 }
 
@@ -52,11 +64,14 @@ impl fmt::Display for Value {
             Value::Function { params, .. } => write!(f, "<fn({})>", params.join(", ")),
             Value::Class { name, .. } => write!(f, "<class {}>", name),
             Value::Constructor { class_name, .. } => write!(f, "<new {}>", class_name),
+            Value::BoundMethod { .. } => write!(f, "<method>"),
             Value::Instance { class_name, fields } => {
-                let pairs: Vec<String> = fields
+                let mut pairs: Vec<String> = fields
+                    .borrow()
                     .iter()
                     .map(|(k, v)| format!("{}={}", k, v))
                     .collect();
+                pairs.sort();
                 write!(f, "#<{} {}>", class_name, pairs.join(", "))
             }
         }

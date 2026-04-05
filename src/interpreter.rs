@@ -1,6 +1,9 @@
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 use crate::ast::{Expr, Stmt};
-use crate::environment::{EnvRef, Environment};
+use crate::environment::Environment;
+use crate::value::EnvRef;
 use crate::error::SapphireError;
 use crate::token::TokenKind;
 use crate::value::Value;
@@ -13,8 +16,9 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             Ok(None)
         }
         Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
-        Stmt::Class { name, fields } => {
-            env.borrow_mut().set(name.clone(), Value::Class { name, fields });
+        Stmt::Class { name, fields, methods } => {
+            let class = Value::Class { name: name.clone(), fields, methods, closure: env.clone() };
+            env.borrow_mut().set(name, class);
             Ok(None)
         }
         Stmt::Function { name, params, body } => {
@@ -74,25 +78,59 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             env.borrow_mut().set(name, result.clone());
             Ok(result)
         }
+        Expr::SelfExpr => env.borrow().get("self").ok_or_else(|| SapphireError::RuntimeError {
+            message: "self used outside of a method".into(),
+        }),
         Expr::Get { object, name } => {
             let obj = evaluate(*object, env.clone())?;
             match obj {
-                Value::Class { name: class_name, fields } => {
+                Value::Class { name: class_name, fields, methods, closure } => {
                     if name == "new" {
-                        Ok(Value::Constructor { class_name, fields })
+                        Ok(Value::Constructor { class_name, fields, methods, closure })
                     } else {
                         Err(SapphireError::RuntimeError {
                             message: format!("unknown class method '{}'", name),
                         })
                     }
                 }
-                Value::Instance { fields, .. } => {
-                    fields.get(&name).cloned().ok_or_else(|| SapphireError::RuntimeError {
-                        message: format!("undefined field '{}'", name),
+                Value::Instance { ref class_name, ref fields } => {
+                    // Check fields first
+                    if let Some(v) = fields.borrow().get(&name).cloned() {
+                        return Ok(v);
+                    }
+                    // Look up method on the class
+                    let class_val = env.borrow().get(class_name).ok_or_else(|| SapphireError::RuntimeError {
+                        message: format!("class '{}' not found", class_name),
+                    })?;
+                    if let Value::Class { methods, closure, .. } = class_val {
+                        if let Some(method) = methods.iter().find(|m| m.name == name) {
+                            return Ok(Value::BoundMethod {
+                                receiver: Box::new(obj),
+                                params: method.params.clone(),
+                                body: method.body.clone(),
+                                closure,
+                            });
+                        }
+                    }
+                    Err(SapphireError::RuntimeError {
+                        message: format!("undefined field or method '{}'", name),
                     })
                 }
                 _ => Err(SapphireError::RuntimeError {
                     message: format!("cannot access '{}' on this value", name),
+                }),
+            }
+        }
+        Expr::Set { object, name, value } => {
+            let obj = evaluate(*object, env.clone())?;
+            let val = evaluate(*value, env)?;
+            match obj {
+                Value::Instance { fields, .. } => {
+                    fields.borrow_mut().insert(name, val.clone());
+                    Ok(val)
+                }
+                _ => Err(SapphireError::RuntimeError {
+                    message: "can only set fields on instances".into(),
                 }),
             }
         }
@@ -125,7 +163,30 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     }
                     Ok(result)
                 }
-                Value::Constructor { class_name, fields } => {
+                Value::BoundMethod { receiver, params, body, closure } => {
+                    let arg_vals: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
+                    if params.len() != arg_vals.len() {
+                        return Err(SapphireError::RuntimeError {
+                            message: format!("expected {} argument(s), got {}", params.len(), arg_vals.len()),
+                        });
+                    }
+                    let call_env = Environment::new_child(closure);
+                    call_env.borrow_mut().set("self".to_string(), *receiver);
+                    for (param, val) in params.iter().zip(arg_vals) {
+                        call_env.borrow_mut().set(param.clone(), val);
+                    }
+                    let mut result = Value::Nil;
+                    for stmt in body {
+                        match execute(stmt, call_env.clone()) {
+                            Ok(Some(v)) => result = v,
+                            Ok(None) => {}
+                            Err(SapphireError::Return(v)) => return Ok(v),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    Ok(result)
+                }
+                Value::Constructor { class_name, fields, .. } => {
                     let mut instance_fields: HashMap<String, Value> = HashMap::new();
                     // Apply declared defaults first
                     for field in &fields {
@@ -151,7 +212,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             }),
                         }
                     }
-                    Ok(Value::Instance { class_name, fields: instance_fields })
+                    Ok(Value::Instance { class_name, fields: Rc::new(RefCell::new(instance_fields)) })
                 }
                 _ => Err(SapphireError::RuntimeError {
                     message: "can only call functions".into(),
@@ -399,6 +460,31 @@ mod tests {
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.x", env.clone()), Value::Int(3));
         assert_eq!(run_env("p.y", env.clone()), Value::Int(2));
+    }
+
+    #[test]
+    fn test_instance_method() {
+        let env = Environment::new();
+        exec_env("class Point { attr x: Int; attr y: Int; def sum() { self.x + self.y } }", env.clone());
+        exec_env("p = Point.new(x: 3, y: 2)", env.clone());
+        assert_eq!(run_env("p.sum()", env.clone()), Value::Int(5));
+    }
+
+    #[test]
+    fn test_method_with_arg() {
+        let env = Environment::new();
+        exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
+        exec_env("p = Point.new(x: 3, y: 2)", env.clone());
+        assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_field_mutation() {
+        let env = Environment::new();
+        exec_env("class Counter { attr n; def inc() { self.n = self.n + 1 } }", env.clone());
+        exec_env("c = Counter.new(n: 0)", env.clone());
+        exec_env("c.inc()", env.clone());
+        assert_eq!(run_env("c.n", env.clone()), Value::Int(1));
     }
 
     #[test]
