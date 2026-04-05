@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Stmt};
+use crate::ast::{CallArg, Expr, FieldDef, Stmt};
 use crate::error::SapphireError;
 use crate::token::{Token, TokenKind};
 use crate::value::Value;
@@ -48,6 +48,9 @@ impl Parser {
             self.advance();
             return Ok(Stmt::Return(self.equality()?));
         }
+        if self.check(&TokenKind::Class) {
+            return self.class_def();
+        }
         if self.check(&TokenKind::Def) {
             return self.function_def();
         }
@@ -64,12 +67,75 @@ impl Parser {
         Ok(Stmt::Expression(self.equality()?))
     }
 
+    fn class_def(&mut self) -> Result<Stmt, SapphireError> {
+        self.advance(); // consume 'class'
+        let name = match self.peek().kind.clone() {
+            TokenKind::Identifier(n) => { self.advance(); n }
+            _ => return Err(SapphireError::ParseError {
+                message: "expected class name".into(),
+                line: self.peek().line,
+            }),
+        };
+        if !self.check(&TokenKind::LeftBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '{' after class name".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume '{'
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            if !self.check(&TokenKind::Attr) {
+                return Err(SapphireError::ParseError {
+                    message: "expected 'attr' in class body".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume 'attr'
+            let field_name = match self.peek().kind.clone() {
+                TokenKind::Identifier(n) => { self.advance(); n }
+                _ => return Err(SapphireError::ParseError {
+                    message: "expected field name after 'attr'".into(),
+                    line: self.peek().line,
+                }),
+            };
+            let type_name = if self.check(&TokenKind::Colon) {
+                self.advance(); // consume ':'
+                match self.peek().kind.clone() {
+                    TokenKind::Identifier(t) => { self.advance(); Some(t) }
+                    _ => return Err(SapphireError::ParseError {
+                        message: "expected type name after ':'".into(),
+                        line: self.peek().line,
+                    }),
+                }
+            } else {
+                None
+            };
+            let default = if self.check(&TokenKind::Eq) {
+                self.advance(); // consume '='
+                Some(self.equality()?)
+            } else {
+                None
+            };
+            if self.check(&TokenKind::Semicolon) { self.advance(); }
+            fields.push(FieldDef { name: field_name, type_name, default });
+        }
+        if !self.check(&TokenKind::RightBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '}'".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume '}'
+        Ok(Stmt::Class { name, fields })
+    }
+
     fn if_statement(&mut self) -> Result<Stmt, SapphireError> {
         self.advance(); // consume 'if'
         let condition = self.equality()?;
         let then_branch = self.block()?;
         let else_branch = if self.check(&TokenKind::Else) {
-            self.advance(); // consume 'else'
+            self.advance();
             Some(self.block()?)
         } else {
             None
@@ -177,48 +243,93 @@ impl Parser {
     // term: factor (('+' | '-') factor)*
     fn term(&mut self) -> Result<Expr, SapphireError> {
         let mut left = self.factor()?;
-
         while self.check(&TokenKind::Plus) || self.check(&TokenKind::Minus) {
             let op = self.advance().clone();
             let right = self.factor()?;
-            left = Expr::Binary {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            };
+            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
         }
-
         Ok(left)
     }
 
     // factor: unary (('*' | '/') unary)*
     fn factor(&mut self) -> Result<Expr, SapphireError> {
         let mut left = self.unary()?;
-
         while self.check(&TokenKind::Star) || self.check(&TokenKind::Slash) {
             let op = self.advance().clone();
             let right = self.unary()?;
-            left = Expr::Binary {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            };
+            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
         }
-
         Ok(left)
     }
 
-    // unary: ('!' | '-') unary | primary
+    // unary: ('!' | '-') unary | call
     fn unary(&mut self) -> Result<Expr, SapphireError> {
         if self.check(&TokenKind::Bang) || self.check(&TokenKind::Minus) {
             let op = self.advance().clone();
             let right = self.unary()?;
             return Ok(Expr::Unary { op, right: Box::new(right) });
         }
-        self.primary()
+        self.call()
     }
 
-    // primary: NUMBER | BOOL | IDENTIFIER ('=' equality)? | '(' equality ')'
+    // call: primary ('(' args ')' | '.' IDENTIFIER)*
+    fn call(&mut self) -> Result<Expr, SapphireError> {
+        let mut expr = self.primary()?;
+        loop {
+            if self.check(&TokenKind::LeftParen) {
+                expr = self.finish_call(expr)?;
+            } else if self.check(&TokenKind::Dot) {
+                self.advance(); // consume '.'
+                let name = match self.peek().kind.clone() {
+                    TokenKind::Identifier(n) => { self.advance(); n }
+                    _ => return Err(SapphireError::ParseError {
+                        message: "expected field or method name after '.'".into(),
+                        line: self.peek().line,
+                    }),
+                };
+                expr = Expr::Get { object: Box::new(expr), name };
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr, SapphireError> {
+        self.advance(); // consume '('
+        let mut args = Vec::new();
+        if !self.check(&TokenKind::RightParen) {
+            args.push(self.parse_arg()?);
+            while self.check(&TokenKind::Comma) {
+                self.advance();
+                args.push(self.parse_arg()?);
+            }
+        }
+        if !self.check(&TokenKind::RightParen) {
+            return Err(SapphireError::ParseError {
+                message: "expected ')' after arguments".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume ')'
+        Ok(Expr::Call { callee: Box::new(callee), args })
+    }
+
+    fn parse_arg(&mut self) -> Result<CallArg, SapphireError> {
+        // Named arg: identifier ':' expr
+        if let TokenKind::Identifier(name) = self.peek().kind.clone() {
+            if self.current + 1 < self.tokens.len()
+                && self.tokens[self.current + 1].kind == TokenKind::Colon
+            {
+                self.advance(); // consume identifier
+                self.advance(); // consume ':'
+                return Ok(CallArg { name: Some(name), value: self.equality()? });
+            }
+        }
+        Ok(CallArg { name: None, value: self.equality()? })
+    }
+
+    // primary: NUMBER | STRING | BOOL | IDENTIFIER ('=' equality)? | '(' equality ')'
     fn primary(&mut self) -> Result<Expr, SapphireError> {
         if let TokenKind::Number(n) = self.peek().kind {
             self.advance();
@@ -242,25 +353,6 @@ impl Parser {
 
         if let TokenKind::Identifier(name) = self.peek().kind.clone() {
             self.advance();
-            if self.check(&TokenKind::LeftParen) {
-                self.advance(); // consume '('
-                let mut args = Vec::new();
-                if !self.check(&TokenKind::RightParen) {
-                    args.push(self.equality()?);
-                    while self.check(&TokenKind::Comma) {
-                        self.advance();
-                        args.push(self.equality()?);
-                    }
-                }
-                if !self.check(&TokenKind::RightParen) {
-                    return Err(SapphireError::ParseError {
-                        message: "expected ')' after arguments".into(),
-                        line: self.peek().line,
-                    });
-                }
-                self.advance(); // consume ')'
-                return Ok(Expr::Call { callee: Box::new(Expr::Variable(name)), args });
-            }
             if self.check(&TokenKind::Eq) {
                 self.advance(); // consume '='
                 let value = self.equality()?;
@@ -348,5 +440,24 @@ mod tests {
         let tokens = Lexer::new("x = 1; x + 2").scan_tokens();
         let stmts = Parser::new(tokens).parse().unwrap();
         assert_eq!(stmts.len(), 2);
+    }
+
+    #[test]
+    fn test_class_def() {
+        let tokens = Lexer::new("class Point { attr x: Int; attr y: Int }").scan_tokens();
+        let mut stmts = Parser::new(tokens).parse().unwrap();
+        assert!(matches!(stmts.remove(0), Stmt::Class { name, .. } if name == "Point"));
+    }
+
+    #[test]
+    fn test_field_access() {
+        let expr = parse_expr("p.x");
+        assert!(matches!(expr, Expr::Get { name, .. } if name == "x"));
+    }
+
+    #[test]
+    fn test_named_arg_call() {
+        let expr = parse_expr("Point.new(x: 1, y: 2)");
+        assert!(matches!(expr, Expr::Call { .. }));
     }
 }

@@ -2,6 +2,19 @@ use crate::token::Token;
 use crate::value::Value;
 
 #[derive(Debug, Clone)]
+pub struct FieldDef {
+    pub name: String,
+    pub type_name: Option<String>,
+    pub default: Option<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CallArg {
+    pub name: Option<String>,
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Expression(Expr),
     Print(Expr),
@@ -20,6 +33,10 @@ pub enum Stmt {
         body: Vec<Stmt>,
     },
     Return(Expr),
+    Class {
+        name: String,
+        fields: Vec<FieldDef>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +59,10 @@ pub enum Expr {
     },
     Call {
         callee: Box<Expr>,
-        args: Vec<Expr>,
+        args: Vec<CallArg>,
+    },
+    Get {
+        object: Box<Expr>,
+        name: String,
     },
 }

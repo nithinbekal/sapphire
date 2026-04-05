@@ -37,6 +37,8 @@ impl Lexer {
                 '>' => if self.match_next('=') { TokenKind::GreaterEq } else { TokenKind::Greater },
                 '{' => TokenKind::LeftBrace,
                 '}' => TokenKind::RightBrace,
+                '.' => TokenKind::Dot,
+                ':' => TokenKind::Colon,
                 ';' => TokenKind::Semicolon,
                 ',' => TokenKind::Comma,
                 '"' => match self.string() {
@@ -111,6 +113,8 @@ impl Lexer {
             "while" => TokenKind::While,
             "def"    => TokenKind::Def,
             "return" => TokenKind::Return,
+            "class"  => TokenKind::Class,
+            "attr"   => TokenKind::Attr,
             "print" => TokenKind::Print,
             _ => TokenKind::Identifier(s),
         }

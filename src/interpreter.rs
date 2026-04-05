@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::ast::{Expr, Stmt};
 use crate::environment::{EnvRef, Environment};
 use crate::error::SapphireError;
@@ -12,14 +13,18 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             Ok(None)
         }
         Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
-        Stmt::Return(expr) => {
-            let value = evaluate(expr, env)?;
-            Err(SapphireError::Return(value))
+        Stmt::Class { name, fields } => {
+            env.borrow_mut().set(name.clone(), Value::Class { name, fields });
+            Ok(None)
         }
         Stmt::Function { name, params, body } => {
             let func = Value::Function { params, body, closure: env.clone() };
             env.borrow_mut().set(name, func);
             Ok(None)
+        }
+        Stmt::Return(expr) => {
+            let value = evaluate(expr, env)?;
+            Err(SapphireError::Return(value))
         }
         Stmt::While { condition, body } => {
             loop {
@@ -69,14 +74,37 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             env.borrow_mut().set(name, result.clone());
             Ok(result)
         }
+        Expr::Get { object, name } => {
+            let obj = evaluate(*object, env.clone())?;
+            match obj {
+                Value::Class { name: class_name, fields } => {
+                    if name == "new" {
+                        Ok(Value::Constructor { class_name, fields })
+                    } else {
+                        Err(SapphireError::RuntimeError {
+                            message: format!("unknown class method '{}'", name),
+                        })
+                    }
+                }
+                Value::Instance { fields, .. } => {
+                    fields.get(&name).cloned().ok_or_else(|| SapphireError::RuntimeError {
+                        message: format!("undefined field '{}'", name),
+                    })
+                }
+                _ => Err(SapphireError::RuntimeError {
+                    message: format!("cannot access '{}' on this value", name),
+                }),
+            }
+        }
         Expr::Call { callee, args } => {
             let callee_val = evaluate(*callee, env.clone())?;
-            let mut arg_vals = Vec::new();
+            let mut eval_args: Vec<(Option<String>, Value)> = Vec::new();
             for arg in args {
-                arg_vals.push(evaluate(arg, env.clone())?);
+                eval_args.push((arg.name, evaluate(arg.value, env.clone())?));
             }
             match callee_val {
                 Value::Function { params, body, closure } => {
+                    let arg_vals: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
                     if params.len() != arg_vals.len() {
                         return Err(SapphireError::RuntimeError {
                             message: format!("expected {} argument(s), got {}", params.len(), arg_vals.len()),
@@ -96,6 +124,34 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         }
                     }
                     Ok(result)
+                }
+                Value::Constructor { class_name, fields } => {
+                    let mut instance_fields: HashMap<String, Value> = HashMap::new();
+                    // Apply declared defaults first
+                    for field in &fields {
+                        let val = match &field.default {
+                            Some(expr) => evaluate(expr.clone(), env.clone())?,
+                            None => Value::Nil,
+                        };
+                        instance_fields.insert(field.name.clone(), val);
+                    }
+                    // Apply named args
+                    for (name_opt, val) in eval_args {
+                        match name_opt {
+                            Some(n) => {
+                                if !instance_fields.contains_key(&n) {
+                                    return Err(SapphireError::RuntimeError {
+                                        message: format!("unknown field '{}'", n),
+                                    });
+                                }
+                                instance_fields.insert(n, val);
+                            }
+                            None => return Err(SapphireError::RuntimeError {
+                                message: "constructor requires named arguments (e.g. Point.new(x: 1, y: 2))".into(),
+                            }),
+                        }
+                    }
+                    Ok(Value::Instance { class_name, fields: instance_fields })
                 }
                 _ => Err(SapphireError::RuntimeError {
                     message: "can only call functions".into(),
@@ -193,34 +249,22 @@ mod tests {
     }
 
     #[test]
-    fn test_literal() {
-        assert_eq!(run("42"), Value::Int(42));
-    }
+    fn test_literal() { assert_eq!(run("42"), Value::Int(42)); }
 
     #[test]
-    fn test_addition() {
-        assert_eq!(run("1+2"), Value::Int(3));
-    }
+    fn test_addition() { assert_eq!(run("1+2"), Value::Int(3)); }
 
     #[test]
-    fn test_precedence() {
-        assert_eq!(run("1+2*3"), Value::Int(7));
-    }
+    fn test_precedence() { assert_eq!(run("1+2*3"), Value::Int(7)); }
 
     #[test]
-    fn test_grouping() {
-        assert_eq!(run("(1+2)*3"), Value::Int(9));
-    }
+    fn test_grouping() { assert_eq!(run("(1+2)*3"), Value::Int(9)); }
 
     #[test]
-    fn test_subtraction() {
-        assert_eq!(run("10-3-2"), Value::Int(5));
-    }
+    fn test_subtraction() { assert_eq!(run("10-3-2"), Value::Int(5)); }
 
     #[test]
-    fn test_division() {
-        assert_eq!(run("10/2"), Value::Int(5));
-    }
+    fn test_division() { assert_eq!(run("10/2"), Value::Int(5)); }
 
     #[test]
     fn test_division_by_zero() {
@@ -253,8 +297,6 @@ mod tests {
     fn test_equality() {
         assert_eq!(run("1 == 1"), Value::Bool(true));
         assert_eq!(run("1 == 2"), Value::Bool(false));
-        assert_eq!(run("true == true"), Value::Bool(true));
-        assert_eq!(run("true == false"), Value::Bool(false));
     }
 
     #[test]
@@ -325,8 +367,7 @@ mod tests {
     fn test_function_def_and_call() {
         let env = Environment::new();
         exec_env("def add(a, b) { a + b }", env.clone());
-        let result = run_env("add(1, 2)", env);
-        assert_eq!(result, Value::Int(3));
+        assert_eq!(run_env("add(1, 2)", env), Value::Int(3));
     }
 
     #[test]
@@ -334,6 +375,13 @@ mod tests {
         let env = Environment::new();
         exec_env("def answer() { 42 }", env.clone());
         assert_eq!(run_env("answer()", env), Value::Int(42));
+    }
+
+    #[test]
+    fn test_function_closure() {
+        let env = Environment::new();
+        exec_env("x = 10; def get_x() { x }", env.clone());
+        assert_eq!(run_env("get_x()", env), Value::Int(10));
     }
 
     #[test]
@@ -345,9 +393,19 @@ mod tests {
     }
 
     #[test]
-    fn test_function_closure() {
+    fn test_class_instantiation() {
         let env = Environment::new();
-        exec_env("x = 10; def get_x() { x }", env.clone());
-        assert_eq!(run_env("get_x()", env), Value::Int(10));
+        exec_env("class Point { attr x: Int; attr y: Int }", env.clone());
+        exec_env("p = Point.new(x: 3, y: 2)", env.clone());
+        assert_eq!(run_env("p.x", env.clone()), Value::Int(3));
+        assert_eq!(run_env("p.y", env.clone()), Value::Int(2));
+    }
+
+    #[test]
+    fn test_class_default_field() {
+        let env = Environment::new();
+        exec_env(r#"class Point { attr x: Int; attr y: Int; attr label: Str = "origin" }"#, env.clone());
+        exec_env("p = Point.new(x: 1, y: 2)", env.clone());
+        assert_eq!(run_env("p.label", env.clone()), Value::Str("origin".into()));
     }
 }

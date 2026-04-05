@@ -20,6 +20,8 @@ pub enum TokenKind {
 
     LeftBrace,
     RightBrace,
+    Dot,
+    Colon,
 
     Number(i64),
     StringLit(String),
@@ -31,6 +33,8 @@ pub enum TokenKind {
     While,
     Def,
     Return,
+    Class,
+    Attr,
     Print,
 
     Eof,

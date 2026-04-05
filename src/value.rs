@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::ast::Stmt;
+use crate::ast::{FieldDef, Stmt};
 use crate::environment::Environment;
 
 #[derive(Debug, Clone)]
@@ -14,6 +15,18 @@ pub enum Value {
         params: Vec<String>,
         body: Vec<Stmt>,
         closure: Rc<RefCell<Environment>>,
+    },
+    Class {
+        name: String,
+        fields: Vec<FieldDef>,
+    },
+    Constructor {
+        class_name: String,
+        fields: Vec<FieldDef>,
+    },
+    Instance {
+        class_name: String,
+        fields: HashMap<String, Value>,
     },
 }
 
@@ -37,6 +50,15 @@ impl fmt::Display for Value {
             Value::Str(s) => write!(f, "{}", s),
             Value::Nil => write!(f, "nil"),
             Value::Function { params, .. } => write!(f, "<fn({})>", params.join(", ")),
+            Value::Class { name, .. } => write!(f, "<class {}>", name),
+            Value::Constructor { class_name, .. } => write!(f, "<new {}>", class_name),
+            Value::Instance { class_name, fields } => {
+                let pairs: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect();
+                write!(f, "#<{} {}>", class_name, pairs.join(", "))
+            }
         }
     }
 }
