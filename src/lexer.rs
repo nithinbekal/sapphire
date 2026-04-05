@@ -194,6 +194,8 @@ impl Lexer {
             "while" => TokenKind::While,
             "def"    => TokenKind::Def,
             "return" => TokenKind::Return,
+            "break"  => TokenKind::Break,
+            "next"   => TokenKind::Next,
             "class"  => TokenKind::Class,
             "attr"   => TokenKind::Attr,
             "self"   => TokenKind::SelfKw,

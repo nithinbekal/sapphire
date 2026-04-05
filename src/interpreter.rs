@@ -56,13 +56,26 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             let value = evaluate(expr, env)?;
             Err(SapphireError::Return(value))
         }
+        Stmt::Break(expr) => {
+            let value = evaluate(expr, env)?;
+            Err(SapphireError::Break(value))
+        }
+        Stmt::Next(expr) => {
+            let value = evaluate(expr, env)?;
+            Err(SapphireError::Next(value))
+        }
         Stmt::While { condition, body } => {
-            loop {
+            'while_loop: loop {
                 let cond = evaluate(condition.clone(), env.clone())?;
                 match cond {
                     Value::Bool(true) => {
                         for stmt in body.clone() {
-                            execute(stmt, env.clone())?;
+                            match execute(stmt, env.clone()) {
+                                Ok(_) => {}
+                                Err(SapphireError::Break(_)) => break 'while_loop,
+                                Err(SapphireError::Next(_)) => continue 'while_loop,
+                                Err(e) => return Err(e),
+                            }
                         }
                     }
                     Value::Bool(false) => break,
@@ -452,7 +465,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 message: "each requires a block".into(),
                             })?;
                             for val in elements.borrow().clone().iter() {
-                                run_block(&blk, vec![val.clone()], env.clone())?;
+                                match run_block(&blk, vec![val.clone()], env.clone()) {
+                                    Ok(_) => {}
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
+                                }
                             }
                             Ok(Value::Nil)
                         }
@@ -462,7 +479,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             })?;
                             let mut result = Vec::new();
                             for val in elements.borrow().clone().iter() {
-                                result.push(run_block(&blk, vec![val.clone()], env.clone())?);
+                                match run_block(&blk, vec![val.clone()], env.clone()) {
+                                    Ok(v) => result.push(v),
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
+                                }
                             }
                             Ok(Value::List(Rc::new(RefCell::new(result))))
                         }
@@ -472,12 +493,14 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             })?;
                             let mut result = Vec::new();
                             for val in elements.borrow().clone().iter() {
-                                match run_block(&blk, vec![val.clone()], env.clone())? {
-                                    Value::Bool(true) => result.push(val.clone()),
-                                    Value::Bool(false) => {}
-                                    _ => return Err(SapphireError::RuntimeError {
+                                match run_block(&blk, vec![val.clone()], env.clone()) {
+                                    Ok(Value::Bool(true)) => result.push(val.clone()),
+                                    Ok(Value::Bool(false)) => {}
+                                    Ok(_) => return Err(SapphireError::RuntimeError {
                                         message: "select block must return a boolean".into(),
                                     }),
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
                                 }
                             }
                             Ok(Value::List(Rc::new(RefCell::new(result))))
@@ -500,7 +523,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 });
                             };
                             for val in rest {
-                                acc = run_block(&blk, vec![acc, val.clone()], env.clone())?;
+                                match run_block(&blk, vec![acc.clone(), val.clone()], env.clone()) {
+                                    Ok(v) => acc = v,
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
+                                }
                             }
                             Ok(acc)
                         }
@@ -536,7 +563,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 .collect();
                             pairs.sort_by(|a, b| a.0.cmp(&b.0));
                             for (k, v) in pairs {
-                                run_block(&blk, vec![Value::Str(k), v], env.clone())?;
+                                match run_block(&blk, vec![Value::Str(k), v], env.clone()) {
+                                    Ok(_) => {}
+                                    Err(SapphireError::Break(val)) => return Ok(val),
+                                    Err(e) => return Err(e),
+                                }
                             }
                             Ok(Value::Nil)
                         }
@@ -545,8 +576,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 message: "any? requires a block".into(),
                             })?;
                             for val in elements.borrow().clone().iter() {
-                                if run_block(&blk, vec![val.clone()], env.clone())? == Value::Bool(true) {
-                                    return Ok(Value::Bool(true));
+                                match run_block(&blk, vec![val.clone()], env.clone()) {
+                                    Ok(Value::Bool(true)) => return Ok(Value::Bool(true)),
+                                    Ok(_) => {}
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
                                 }
                             }
                             Ok(Value::Bool(false))
@@ -556,8 +590,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 message: "all? requires a block".into(),
                             })?;
                             for val in elements.borrow().clone().iter() {
-                                if run_block(&blk, vec![val.clone()], env.clone())? == Value::Bool(false) {
-                                    return Ok(Value::Bool(false));
+                                match run_block(&blk, vec![val.clone()], env.clone()) {
+                                    Ok(Value::Bool(false)) => return Ok(Value::Bool(false)),
+                                    Ok(_) => {}
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
                                 }
                             }
                             Ok(Value::Bool(true))
@@ -567,8 +604,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 message: "none? requires a block".into(),
                             })?;
                             for val in elements.borrow().clone().iter() {
-                                if run_block(&blk, vec![val.clone()], env.clone())? == Value::Bool(true) {
-                                    return Ok(Value::Bool(false));
+                                match run_block(&blk, vec![val.clone()], env.clone()) {
+                                    Ok(Value::Bool(true)) => return Ok(Value::Bool(false)),
+                                    Ok(_) => {}
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
                                 }
                             }
                             Ok(Value::Bool(true))
@@ -578,7 +618,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 message: "times requires a block".into(),
                             })?;
                             for i in 0..n {
-                                run_block(&blk, vec![Value::Int(i)], env.clone())?;
+                                match run_block(&blk, vec![Value::Int(i)], env.clone()) {
+                                    Ok(_) => {}
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
+                                }
                             }
                             Ok(Value::Nil)
                         }
@@ -736,6 +780,7 @@ fn run_block(block: &Block, args: Vec<Value>, env: EnvRef) -> Result<Value, Sapp
             Ok(Some(v)) => result = v,
             Ok(None) => {}
             Err(SapphireError::Return(v)) => return Ok(v),
+            Err(SapphireError::Next(v)) => return Ok(v),
             Err(e) => return Err(e),
         }
     }
@@ -1181,5 +1226,42 @@ mod tests {
         exec_env(r#"class Point { attr x: Int; attr y: Int; attr label: Str = "origin" }"#, env.clone());
         exec_env("p = Point.new(x: 1, y: 2)", env.clone());
         assert_eq!(run_env("p.label", env.clone()), Value::Str("origin".into()));
+    }
+
+    #[test]
+    fn test_while_break() {
+        let env = Environment::new();
+        exec_env("x = 0; while true { x = x + 1; break if x == 3 }", env.clone());
+        assert_eq!(env.borrow().get("x"), Some(Value::Int(3)));
+    }
+
+    #[test]
+    fn test_while_next() {
+        let env = Environment::new();
+        exec_env("x = 0; sum = 0; while x < 5 { x = x + 1; next if x == 3; sum = sum + x }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(12))); // 1+2+4+5
+    }
+
+    #[test]
+    fn test_each_next() {
+        let env = Environment::new();
+        exec_env("sum = 0; [1, 2, 3, 4, 5].each { |x| next if x == 3; sum = sum + x }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(12))); // 1+2+4+5
+    }
+
+    #[test]
+    fn test_each_break() {
+        let env = Environment::new();
+        exec_env("sum = 0; [1, 2, 3, 4, 5].each { |x| break if x == 4; sum = sum + x }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(6))); // 1+2+3
+    }
+
+    #[test]
+    fn test_map_next() {
+        let env = Environment::new();
+        exec_env("result = [1, 2, 3].map { |x| next 0 if x == 2; x * 2 }", env.clone());
+        assert_eq!(run_env("result[0]", env.clone()), Value::Int(2));
+        assert_eq!(run_env("result[1]", env.clone()), Value::Int(0));
+        assert_eq!(run_env("result[2]", env.clone()), Value::Int(6));
     }
 }

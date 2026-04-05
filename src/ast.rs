@@ -52,6 +52,8 @@ pub enum Stmt {
         body: Vec<Stmt>,
     },
     Return(Expr),
+    Break(Expr),
+    Next(Expr),
     Class {
         name: String,
         superclass: Option<String>,

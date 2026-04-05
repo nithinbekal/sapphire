@@ -42,6 +42,8 @@ pub enum TokenKind {
     While,
     Def,
     Return,
+    Break,
+    Next,
     Class,
     Attr,
     SelfKw,

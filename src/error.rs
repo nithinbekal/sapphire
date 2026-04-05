@@ -6,6 +6,8 @@ pub enum SapphireError {
     ParseError { message: String, line: usize },
     RuntimeError { message: String },
     Return(Value),
+    Break(Value),
+    Next(Value),
 }
 
 impl fmt::Display for SapphireError {
@@ -17,9 +19,9 @@ impl fmt::Display for SapphireError {
             SapphireError::RuntimeError { message } => {
                 write!(f, "runtime error: {}", message)
             }
-            SapphireError::Return(_) => {
-                write!(f, "return outside of function")
-            }
+            SapphireError::Return(_) => write!(f, "return outside of function"),
+            SapphireError::Break(_)  => write!(f, "break outside of loop"),
+            SapphireError::Next(_)   => write!(f, "next outside of loop"),
         }
     }
 }
