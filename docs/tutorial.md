@@ -222,6 +222,51 @@ while i < 5 {
 }
 ```
 
+### break
+
+`break` exits the enclosing loop or block iteration immediately. When used with a value, that value is returned from the iterator.
+
+```
+i = 0
+while true {
+  i = i + 1
+  break if i == 3
+}
+print i   # 3
+```
+
+```
+result = [1, 2, 3, 4, 5].each { |x|
+  break "found it" if x == 3
+}
+print result   # found it
+```
+
+### next
+
+`next` skips the rest of the current iteration and moves to the next one.
+
+```
+i = 0
+sum = 0
+while i < 5 {
+  i = i + 1
+  next if i == 3
+  sum = sum + i
+}
+print sum   # 12  (1+2+4+5, skipped 3)
+```
+
+Inside a `map` block, `next val` sets the value for that element instead of computing the rest of the block:
+
+```
+result = [1, 2, 3, 4].map { |x|
+  next 0 if x == 2
+  x * 10
+}
+print result   # [10, 0, 30, 40]
+```
+
 ---
 
 ## Functions
@@ -619,6 +664,33 @@ class ElectricVehicle < Vehicle {
 ev = ElectricVehicle.new(make: "Tesla", model: "Model 3", range_km: 500)
 ev.describe()   # Tesla Model 3, range: 500km
 ```
+
+### super
+
+Use `super.method_name(args)` inside a method to call the same or a different method from the parent class. `self` is passed through automatically.
+
+```
+class Animal {
+  attr name
+
+  def describe() {
+    self.name
+  }
+}
+
+class Dog < Animal {
+  attr breed
+
+  def describe() {
+    super.describe() + " (" + self.breed + ")"
+  }
+}
+
+d = Dog.new(name: "Rex", breed: "Lab")
+print d.describe()   # Rex (Lab)
+```
+
+`super` always operates on the same `self` instance, so field changes in the subclass are visible to the superclass method and vice versa.
 
 ---
 
