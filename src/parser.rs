@@ -1,4 +1,4 @@
-use crate::ast::{CallArg, Expr, FieldDef, MethodDef, Stmt, StringPart};
+use crate::ast::{Block, CallArg, Expr, FieldDef, MethodDef, Stmt, StringPart};
 use crate::error::SapphireError;
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
@@ -366,6 +366,12 @@ impl Parser {
                     expr = Expr::Set { object: Box::new(expr), name, value: Box::new(value) };
                     break;
                 }
+                if self.check(&TokenKind::LeftBrace) {
+                    let block = self.parse_block()?;
+                    let get = Expr::Get { object: Box::new(expr), name };
+                    expr = Expr::Call { callee: Box::new(get), args: Vec::new(), block };
+                    break;
+                }
                 expr = Expr::Get { object: Box::new(expr), name };
             } else if self.check(&TokenKind::LeftBracket) {
                 self.advance(); // consume '['
@@ -408,7 +414,48 @@ impl Parser {
             });
         }
         self.advance(); // consume ')'
-        Ok(Expr::Call { callee: Box::new(callee), args })
+        let block = self.parse_block()?;
+        Ok(Expr::Call { callee: Box::new(callee), args, block })
+    }
+
+    fn parse_block(&mut self) -> Result<Option<Block>, SapphireError> {
+        if !self.check(&TokenKind::LeftBrace) {
+            return Ok(None);
+        }
+        self.advance(); // consume '{'
+        let param = if self.check(&TokenKind::Pipe) {
+            self.advance(); // consume '|'
+            let p = match self.peek().kind.clone() {
+                TokenKind::Identifier(n) => { self.advance(); Some(n) }
+                _ => return Err(SapphireError::ParseError {
+                    message: "expected parameter name after '|'".into(),
+                    line: self.peek().line,
+                }),
+            };
+            if !self.check(&TokenKind::Pipe) {
+                return Err(SapphireError::ParseError {
+                    message: "expected '|' after block parameter".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume '|'
+            p
+        } else {
+            None
+        };
+        let mut body = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            body.push(self.statement()?);
+            if self.check(&TokenKind::Semicolon) { self.advance(); }
+        }
+        if !self.check(&TokenKind::RightBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '}'".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume '}'
+        Ok(Some(Block { param, body }))
     }
 
     fn parse_arg(&mut self) -> Result<CallArg, SapphireError> {

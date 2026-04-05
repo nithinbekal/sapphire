@@ -8,6 +8,7 @@ pub enum TokenKind {
     Star,
     Slash,
     Bang,
+    Pipe,
     AmpAmp,
     PipePipe,
     Eq,

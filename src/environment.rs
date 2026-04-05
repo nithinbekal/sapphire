@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::value::Value;
-
-pub type EnvRef = Rc<RefCell<Environment>>;
+use crate::value::{EnvRef, Value};
 
 #[derive(Debug, Clone)]
 pub struct Environment {
@@ -22,6 +20,19 @@ impl Environment {
 
     pub fn set(&mut self, name: String, value: Value) {
         self.values.insert(name, value);
+    }
+
+    // Update an existing binding anywhere in the scope chain.
+    // Returns true if found and updated, false if not found.
+    pub fn assign(&mut self, name: &str, value: Value) -> bool {
+        if self.values.contains_key(name) {
+            self.values.insert(name.to_string(), value);
+            true
+        } else if let Some(parent) = &self.parent {
+            parent.borrow_mut().assign(name, value)
+        } else {
+            false
+        }
     }
 
     pub fn get(&self, name: &str) -> Option<Value> {

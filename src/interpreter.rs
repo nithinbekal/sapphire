@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::io::{self, Write};
-use crate::ast::{Expr, MethodDef, Stmt, StringPart};
+use crate::ast::{Block, Expr, MethodDef, Stmt, StringPart};
 use crate::environment::Environment;
 use crate::value::EnvRef;
 use crate::error::SapphireError;
@@ -101,7 +101,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
         }),
         Expr::Assign { name, value } => {
             let result = evaluate(*value, env.clone())?;
-            env.borrow_mut().set(name, result.clone());
+            if !env.borrow_mut().assign(&name, result.clone()) {
+                env.borrow_mut().set(name, result.clone());
+            }
             Ok(result)
         }
         Expr::SelfExpr => env.borrow().get("self").ok_or_else(|| SapphireError::RuntimeError {
@@ -113,7 +115,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 Value::Array(elements) => {
                     return match name.as_str() {
                         "length" => Ok(Value::Int(elements.borrow().len() as i64)),
-                        "push" | "pop" | "first" | "last" => Ok(Value::NativeMethod {
+                        "push" | "pop" | "first" | "last" | "each" | "map" | "select" => Ok(Value::NativeMethod {
                             receiver: Box::new(obj.clone()),
                             name,
                         }),
@@ -233,7 +235,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 }),
             }
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, block } => {
             let callee_val = evaluate(*callee, env.clone())?;
             let mut eval_args: Vec<(Option<String>, Value)> = Vec::new();
             for arg in args {
@@ -331,6 +333,41 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 Value::NativeMethod { receiver, name } => {
                     let args: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
                     match (*receiver, name.as_str()) {
+                        (Value::Array(elements), "each") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "each requires a block".into(),
+                            })?;
+                            for val in elements.borrow().clone().iter() {
+                                run_block(&blk, val.clone(), env.clone())?;
+                            }
+                            Ok(Value::Nil)
+                        }
+                        (Value::Array(elements), "map") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "map requires a block".into(),
+                            })?;
+                            let mut result = Vec::new();
+                            for val in elements.borrow().clone().iter() {
+                                result.push(run_block(&blk, val.clone(), env.clone())?);
+                            }
+                            Ok(Value::Array(Rc::new(RefCell::new(result))))
+                        }
+                        (Value::Array(elements), "select") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "select requires a block".into(),
+                            })?;
+                            let mut result = Vec::new();
+                            for val in elements.borrow().clone().iter() {
+                                match run_block(&blk, val.clone(), env.clone())? {
+                                    Value::Bool(true) => result.push(val.clone()),
+                                    Value::Bool(false) => {}
+                                    _ => return Err(SapphireError::RuntimeError {
+                                        message: "select block must return a boolean".into(),
+                                    }),
+                                }
+                            }
+                            Ok(Value::Array(Rc::new(RefCell::new(result))))
+                        }
                         (Value::Array(elements), "push") => {
                             if args.len() != 1 {
                                 return Err(SapphireError::RuntimeError {
@@ -444,6 +481,23 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             }
         }
     }
+}
+
+fn run_block(block: &Block, arg: Value, env: EnvRef) -> Result<Value, SapphireError> {
+    let block_env = Environment::new_child(env);
+    if let Some(ref param) = block.param {
+        block_env.borrow_mut().set(param.clone(), arg);
+    }
+    let mut result = Value::Nil;
+    for stmt in &block.body {
+        match execute(stmt.clone(), block_env.clone()) {
+            Ok(Some(v)) => result = v,
+            Ok(None) => {}
+            Err(SapphireError::Return(v)) => return Ok(v),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -639,6 +693,29 @@ mod tests {
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_each() {
+        let env = Environment::new();
+        exec_env("sum = 0; [1, 2, 3].each { |x| sum = sum + x }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(6)));
+    }
+
+    #[test]
+    fn test_map() {
+        let env = Environment::new();
+        exec_env("result = [1, 2, 3].map { |x| x * 2 }", env.clone());
+        assert_eq!(run_env("result[0]", env.clone()), Value::Int(2));
+        assert_eq!(run_env("result[2]", env.clone()), Value::Int(6));
+    }
+
+    #[test]
+    fn test_select() {
+        let env = Environment::new();
+        exec_env("result = [1, 2, 3, 4].select { |x| x > 2 }", env.clone());
+        assert_eq!(run_env("result.length", env.clone()), Value::Int(2));
+        assert_eq!(run_env("result[0]", env.clone()), Value::Int(3));
     }
 
     #[test]

@@ -2,6 +2,12 @@ use crate::token::Token;
 use crate::value::Value;
 
 #[derive(Debug, Clone)]
+pub struct Block {
+    pub param: Option<String>,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone)]
 pub enum StringPart {
     Lit(String),
     Expr(Box<Expr>),
@@ -76,6 +82,7 @@ pub enum Expr {
     Call {
         callee: Box<Expr>,
         args: Vec<CallArg>,
+        block: Option<Block>,
     },
     Get {
         object: Box<Expr>,
