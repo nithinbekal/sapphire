@@ -509,6 +509,11 @@ impl Parser {
             return Ok(Expr::Literal(Value::Bool(false)));
         }
 
+        if self.check(&TokenKind::Nil) {
+            self.advance();
+            return Ok(Expr::Literal(Value::Nil));
+        }
+
         if self.check(&TokenKind::SelfKw) {
             self.advance();
             return Ok(Expr::SelfExpr);

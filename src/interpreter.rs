@@ -111,6 +111,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
         }),
         Expr::Get { object, name } => {
             let obj = evaluate(*object, env.clone())?;
+            if name == "nil?" {
+                return Ok(Value::Bool(obj == Value::Nil));
+            }
             match &obj {
                 Value::Array(elements) => {
                     return match name.as_str() {
@@ -693,6 +696,14 @@ mod tests {
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_nil_check() {
+        assert_eq!(run("nil.nil?"), Value::Bool(true));
+        assert_eq!(run("42.nil?"), Value::Bool(false));
+        assert_eq!(run("\"hello\".nil?"), Value::Bool(false));
+        assert_eq!(run("false.nil?"), Value::Bool(false));
     }
 
     #[test]

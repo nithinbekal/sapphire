@@ -34,6 +34,7 @@ pub enum TokenKind {
     Identifier(String),
     True,
     False,
+    Nil,
     If,
     Else,
     While,

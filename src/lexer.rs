@@ -149,6 +149,7 @@ impl Lexer {
         match s.as_str() {
             "true"  => TokenKind::True,
             "false" => TokenKind::False,
+            "nil"   => TokenKind::Nil,
             "if"    => TokenKind::If,
             "else"  => TokenKind::Else,
             "while" => TokenKind::While,
