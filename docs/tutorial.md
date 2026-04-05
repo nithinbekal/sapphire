@@ -40,7 +40,7 @@ Sapphire has five built-in value types:
 | Int    | `0`, `42`, `-7`             |
 | Bool   | `true`, `false`             |
 | Str    | `"hello"`                   |
-| Array  | `[1, 2, 3]`                 |
+| List   | `[1, 2, 3]`                 |
 | Nil    | `nil`                       |
 
 ---
@@ -124,7 +124,24 @@ Any value is automatically converted to a string in interpolation.
 
 ```
 nums = [1, 2, 3]
-print "Array: #{nums}"   # Array: [1, 2, 3]
+print "List: #{nums}"   # List: [1, 2, 3]
+```
+
+### String methods
+
+```
+"hello".length          # 5
+"hello".upcase          # "HELLO"
+"HELLO".downcase        # "hello"
+"  hi  ".strip          # "hi"
+"hello".empty?          # false
+"".empty?               # true
+
+"hello".include?("ell")       # true
+"hello".starts_with?("hel")   # true
+"hello".ends_with?("llo")     # true
+
+"a,b,c".split(",")      # ["a", "b", "c"]
 ```
 
 ### Type conversions
@@ -248,9 +265,9 @@ print zero?(1)   # false
 
 ---
 
-## Arrays
+## Lists
 
-Array literals use square brackets.
+List literals use square brackets.
 
 ```
 nums = [1, 2, 3, 4, 5]
@@ -279,7 +296,7 @@ nums[0] = 99
 nums.length   # 5
 nums.first    # 1
 nums.last     # 5
-nums.push(6)  # appends 6, returns 6
+nums.push(6)  # appends 6
 nums.pop()    # removes and returns the last element
 ```
 
@@ -297,7 +314,7 @@ nums.each { |n| print n }
 
 ### map
 
-Returns a new array with each element transformed.
+Returns a new list with each element transformed.
 
 ```
 doubled = nums.map { |n| n * 2 }
@@ -306,11 +323,23 @@ print doubled   # [2, 4, 6, 8, 10]
 
 ### select
 
-Returns a new array with only the elements for which the block returns `true`.
+Returns a new list with only the elements for which the block returns `true`.
 
 ```
 evens = nums.select { |n| n % 2 == 0 }
 print evens   # [2, 4]
+```
+
+### reduce
+
+Folds a list into a single value. Pass an initial accumulator, or omit it to use the first element.
+
+```
+sum = nums.reduce(0) { |acc, n| acc + n }
+print sum   # 15
+
+product = nums.reduce { |acc, n| acc * n }
+print product   # 120
 ```
 
 ### Blocks can mutate outer variables
@@ -527,10 +556,8 @@ class TodoList {
     self.items.push(item)
   }
 
-  def done_count() {
-    count = 0
-    self.items.each { |item| count = count + 1 }
-    count
+  def count() {
+    self.items.reduce(0) { |acc, item| acc + 1 }
   }
 
   def print_all() {
@@ -552,6 +579,6 @@ list.print_all()
 # 2. Write tests
 # 3. Ship it
 
-print "Total: #{list.done_count()}"
+print "Total: #{list.count()}"
 # Total: 3
 ```
