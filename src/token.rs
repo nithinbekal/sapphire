@@ -48,6 +48,7 @@ pub enum TokenKind {
     Attr,
     SelfKw,
     SuperKw,
+    Yield,
     Print,
 
     Newline,

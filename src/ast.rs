@@ -116,4 +116,7 @@ pub enum Expr {
         index: Box<Expr>,
         value: Box<Expr>,
     },
+    Yield {
+        args: Vec<CallArg>,
+    },
 }

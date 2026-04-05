@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::ast::{FieldDef, MethodDef, Stmt};
+use crate::ast::{Block, FieldDef, MethodDef, Stmt};
 use crate::environment::Environment;
 
 pub type EnvRef = Rc<RefCell<Environment>>;
@@ -50,6 +50,7 @@ pub enum Value {
         name: String,
     },
     NativeFunction(String),
+    Block(Block, EnvRef),
 }
 
 impl PartialEq for Value {
@@ -88,6 +89,7 @@ impl fmt::Display for Value {
                 parts.sort();
                 write!(f, "{{{}}}", parts.join(", "))
             }
+            Value::Block(..) => write!(f, "<block>"),
             Value::Instance { class_name, fields } => {
                 let mut pairs: Vec<String> = fields
                     .borrow()

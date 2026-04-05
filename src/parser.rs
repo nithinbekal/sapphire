@@ -575,6 +575,32 @@ impl Parser {
             return Ok(Expr::SelfExpr);
         }
 
+        if self.check(&TokenKind::Yield) {
+            self.advance();
+            let args = if self.check(&TokenKind::LeftParen) {
+                self.advance(); // consume '('
+                let mut args = Vec::new();
+                if !self.check(&TokenKind::RightParen) {
+                    args.push(self.parse_arg()?);
+                    while self.check(&TokenKind::Comma) {
+                        self.advance();
+                        args.push(self.parse_arg()?);
+                    }
+                }
+                if !self.check(&TokenKind::RightParen) {
+                    return Err(SapphireError::ParseError {
+                        message: "expected ')' after yield arguments".into(),
+                        line: self.peek().line,
+                    });
+                }
+                self.advance(); // consume ')'
+                args
+            } else {
+                Vec::new()
+            };
+            return Ok(Expr::Yield { args });
+        }
+
         if self.check(&TokenKind::SuperKw) {
             self.advance();
             // Expect super.method_name(args)

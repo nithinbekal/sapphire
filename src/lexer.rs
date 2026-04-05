@@ -22,7 +22,7 @@ impl Lexer {
             TokenKind::Identifier(_) | TokenKind::Number(_) |
             TokenKind::StringLit(_) | TokenKind::StringInterp(_) |
             TokenKind::True | TokenKind::False | TokenKind::Nil |
-            TokenKind::SelfKw | TokenKind::SuperKw |
+            TokenKind::SelfKw | TokenKind::SuperKw | TokenKind::Yield |
             TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace
         )
     }
@@ -200,6 +200,7 @@ impl Lexer {
             "attr"   => TokenKind::Attr,
             "self"   => TokenKind::SelfKw,
             "super"  => TokenKind::SuperKw,
+            "yield"  => TokenKind::Yield,
             "print" => TokenKind::Print,
             _ => TokenKind::Identifier(s),
         }

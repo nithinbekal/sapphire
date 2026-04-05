@@ -694,6 +694,73 @@ print d.describe()   # Rex (Lab)
 
 ---
 
+## yield
+
+`yield` calls the block that was passed to the current method. This lets you write iterators and higher-order methods in Sapphire itself.
+
+```
+def call_twice() {
+  yield(1)
+  yield(2)
+}
+
+call_twice() { |n| print n }
+# 1
+# 2
+```
+
+`yield(args)` passes arguments to the block and returns the block's value.
+
+```
+def transform(x) {
+  yield(x)
+}
+
+result = transform(5) { |n| n * 10 }
+print result   # 50
+```
+
+### Writing iterators in Sapphire
+
+```
+def my_each(list) {
+  len = list.length
+  i = 0
+  while i < len {
+    yield(list[i])
+    i = i + 1
+  }
+}
+
+sum = 0
+my_each([1, 2, 3]) { |x| sum = sum + x }
+print sum   # 6
+```
+
+`yield` works inside methods too:
+
+```
+class NumberList {
+  attr items
+
+  def each() {
+    len = self.items.length
+    i = 0
+    while i < len {
+      yield(self.items[i])
+      i = i + 1
+    }
+  }
+}
+
+nums = NumberList.new(items: [10, 20, 30])
+total = 0
+nums.each() { |x| total = total + x }
+print total   # 60
+```
+
+---
+
 ## Putting it together
 
 Here is a small program that uses most of the language:

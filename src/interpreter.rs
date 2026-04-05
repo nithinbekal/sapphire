@@ -382,6 +382,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     for (param, val) in params.iter().zip(arg_vals) {
                         call_env.borrow_mut().set(param.clone(), val);
                     }
+                    if let Some(blk) = block {
+                        call_env.borrow_mut().set("__block__".to_string(), Value::Block(blk, env.clone()));
+                    }
                     let mut result = Value::Nil;
                     for stmt in body {
                         match execute(stmt, call_env.clone()) {
@@ -405,6 +408,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     call_env.borrow_mut().set("__class__".to_string(), Value::Str(defined_in));
                     for (param, val) in params.iter().zip(arg_vals) {
                         call_env.borrow_mut().set(param.clone(), val);
+                    }
+                    if let Some(blk) = block {
+                        call_env.borrow_mut().set("__block__".to_string(), Value::Block(blk, env.clone()));
                     }
                     let mut result = Value::Nil;
                     for stmt in body {
@@ -768,6 +774,22 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     }
                 }
             }
+        }
+        Expr::Yield { args } => {
+            let block_val = env.borrow().get("__block__").ok_or_else(|| SapphireError::RuntimeError {
+                message: "yield called outside of a method that received a block".into(),
+            })?;
+            let (blk, block_env) = match block_val {
+                Value::Block(b, e) => (b, e),
+                _ => return Err(SapphireError::RuntimeError {
+                    message: "yield: __block__ is not a block".into(),
+                }),
+            };
+            let mut arg_vals = Vec::new();
+            for arg in args {
+                arg_vals.push(evaluate(arg.value, env.clone())?);
+            }
+            run_block(&blk, arg_vals, block_env)
         }
         Expr::Super { method, args, block } => {
             let self_val = env.borrow().get("self").ok_or_else(|| SapphireError::RuntimeError {
@@ -1342,5 +1364,39 @@ mod tests {
         assert_eq!(run_env("result[0]", env.clone()), Value::Int(2));
         assert_eq!(run_env("result[1]", env.clone()), Value::Int(0));
         assert_eq!(run_env("result[2]", env.clone()), Value::Int(6));
+    }
+
+    #[test]
+    fn test_yield_basic() {
+        let env = Environment::new();
+        exec_env("def call_block() { yield(42) }", env.clone());
+        assert_eq!(run_env("call_block() { |x| x * 2 }", env.clone()), Value::Int(84));
+    }
+
+    #[test]
+    fn test_yield_multiple_args() {
+        let env = Environment::new();
+        exec_env("def call_block(a, b) { yield(a, b) }", env.clone());
+        assert_eq!(run_env("call_block(3, 4) { |x, y| x + y }", env.clone()), Value::Int(7));
+    }
+
+    #[test]
+    fn test_yield_in_loop() {
+        // Implement a custom each using yield
+        // Note: `while i < list.length { }` would cause the parser to treat `{` as a block
+        // for `length`, so we store the length in a variable first.
+        let env = Environment::new();
+        exec_env("def my_each(list) { len = list.length; i = 0; while i < len { yield(list[i]); i = i + 1 } }", env.clone());
+        exec_env("sum = 0; my_each([1, 2, 3]) { |x| sum = sum + x }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(6)));
+    }
+
+    #[test]
+    fn test_yield_in_method() {
+        let env = Environment::new();
+        exec_env("class Wrapper { attr items; def each() { len = self.items.length; i = 0; while i < len { yield(self.items[i]); i = i + 1 } } }", env.clone());
+        exec_env("w = Wrapper.new(items: [10, 20, 30])", env.clone());
+        exec_env("sum = 0; w.each() { |x| sum = sum + x }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(60)));
     }
 }
