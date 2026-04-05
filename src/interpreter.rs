@@ -112,6 +112,25 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
         Expr::Get { object, name } => {
             let obj = evaluate(*object, env.clone())?;
 
+            // Universal built-ins — checked first so they work on every type
+            // (instances can override these by defining a method of the same name)
+            if !matches!(obj, Value::Instance { .. }) {
+                match name.as_str() {
+                    "nil?" => return Ok(Value::Bool(obj == Value::Nil)),
+                    "to_s" => return Ok(Value::Str(format!("{}", obj))),
+                    "to_i" => return match obj {
+                        Value::Int(n) => Ok(Value::Int(n)),
+                        Value::Str(s) => s.trim().parse::<i64>().map(Value::Int).map_err(|_| SapphireError::RuntimeError {
+                            message: format!("cannot convert {:?} to integer", s),
+                        }),
+                        _ => Err(SapphireError::RuntimeError {
+                            message: format!("cannot convert {} to integer", obj),
+                        }),
+                    },
+                    _ => {}
+                }
+            }
+
             // Instances: fields → class methods → built-in fallbacks
             if let Value::Instance { ref class_name, ref fields } = obj {
                 if let Some(v) = fields.borrow().get(&name).cloned() {
@@ -163,6 +182,25 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 };
             }
 
+            // Strings
+            if let Value::Str(ref s) = obj {
+                return match name.as_str() {
+                    "length" | "size" => Ok(Value::Int(s.chars().count() as i64)),
+                    "upcase"          => Ok(Value::Str(s.to_uppercase())),
+                    "downcase"        => Ok(Value::Str(s.to_lowercase())),
+                    "strip"           => Ok(Value::Str(s.trim().to_string())),
+                    "chomp"           => Ok(Value::Str(s.trim_end_matches('\n').trim_end_matches('\r').to_string())),
+                    "empty?"          => Ok(Value::Bool(s.is_empty())),
+                    "split" | "include?" | "starts_with?" | "ends_with?" => Ok(Value::NativeMethod {
+                        receiver: Box::new(obj.clone()),
+                        name,
+                    }),
+                    _ => Err(SapphireError::RuntimeError {
+                        message: format!("unknown string method '{}'", name),
+                    }),
+                };
+            }
+
             // Class: only .new
             if let Value::Class { name: class_name, fields, methods, closure } = obj {
                 return if name == "new" {
@@ -174,23 +212,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 };
             }
 
-            // Universal built-ins for all other values
-            match name.as_str() {
-                "nil?" => Ok(Value::Bool(obj == Value::Nil)),
-                "to_s" => Ok(Value::Str(format!("{}", obj))),
-                "to_i" => match obj {
-                    Value::Int(n) => Ok(Value::Int(n)),
-                    Value::Str(s) => s.trim().parse::<i64>().map(Value::Int).map_err(|_| SapphireError::RuntimeError {
-                        message: format!("cannot convert {:?} to integer", s),
-                    }),
-                    _ => Err(SapphireError::RuntimeError {
-                        message: format!("cannot convert {} to integer", obj),
-                    }),
-                },
-                _ => Err(SapphireError::RuntimeError {
-                    message: format!("cannot access '{}' on this value", obj),
-                }),
-            }
+            Err(SapphireError::RuntimeError {
+                message: format!("cannot access '{}' on this value", obj),
+            })
         }
         Expr::StringInterp(parts) => {
             let mut result = String::new();
@@ -438,6 +462,45 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             elements.borrow_mut().pop().ok_or_else(|| SapphireError::RuntimeError {
                                 message: "pop called on empty list".into(),
                             })
+                        }
+                        (Value::Str(s), "split") => {
+                            let sep = match args.into_iter().next() {
+                                Some(Value::Str(sep)) => sep,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "split requires a string argument".into(),
+                                }),
+                            };
+                            let parts = s.split(sep.as_str())
+                                .map(|p| Value::Str(p.to_string()))
+                                .collect();
+                            Ok(Value::List(Rc::new(RefCell::new(parts))))
+                        }
+                        (Value::Str(s), "include?") => {
+                            let needle = match args.into_iter().next() {
+                                Some(Value::Str(n)) => n,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "include? requires a string argument".into(),
+                                }),
+                            };
+                            Ok(Value::Bool(s.contains(needle.as_str())))
+                        }
+                        (Value::Str(s), "starts_with?") => {
+                            let prefix = match args.into_iter().next() {
+                                Some(Value::Str(p)) => p,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "starts_with? requires a string argument".into(),
+                                }),
+                            };
+                            Ok(Value::Bool(s.starts_with(prefix.as_str())))
+                        }
+                        (Value::Str(s), "ends_with?") => {
+                            let suffix = match args.into_iter().next() {
+                                Some(Value::Str(p)) => p,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "ends_with? requires a string argument".into(),
+                                }),
+                            };
+                            Ok(Value::Bool(s.ends_with(suffix.as_str())))
                         }
                         _ => Err(SapphireError::RuntimeError {
                             message: "unknown native method".into(),
@@ -744,6 +807,52 @@ mod tests {
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_string_length() {
+        assert_eq!(run(r#""hello".length"#), Value::Int(5));
+        assert_eq!(run(r#""hello".size"#), Value::Int(5));
+        assert_eq!(run(r#""".empty?"#), Value::Bool(true));
+        assert_eq!(run(r#""hi".empty?"#), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_string_case() {
+        assert_eq!(run(r#""hello".upcase"#), Value::Str("HELLO".into()));
+        assert_eq!(run(r#""HELLO".downcase"#), Value::Str("hello".into()));
+    }
+
+    #[test]
+    fn test_string_strip() {
+        assert_eq!(run(r#""  hi  ".strip"#), Value::Str("hi".into()));
+        assert_eq!(run(r#""  hi  ".strip"#), Value::Str("hi".into()));
+    }
+
+    #[test]
+    fn test_string_include() {
+        assert_eq!(run(r#""hello".include?("ell")"#), Value::Bool(true));
+        assert_eq!(run(r#""hello".include?("xyz")"#), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_string_starts_ends_with() {
+        assert_eq!(run(r#""hello".starts_with?("hel")"#), Value::Bool(true));
+        assert_eq!(run(r#""hello".ends_with?("llo")"#), Value::Bool(true));
+        assert_eq!(run(r#""hello".starts_with?("xyz")"#), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_string_split() {
+        let result = run(r#""a,b,c".split(",")"#);
+        if let Value::List(parts) = result {
+            let parts = parts.borrow();
+            assert_eq!(parts[0], Value::Str("a".into()));
+            assert_eq!(parts[1], Value::Str("b".into()));
+            assert_eq!(parts[2], Value::Str("c".into()));
+        } else {
+            panic!("expected List");
+        }
     }
 
     #[test]
