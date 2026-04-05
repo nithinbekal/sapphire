@@ -172,7 +172,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     "last" => elements.borrow().last().cloned().ok_or_else(|| SapphireError::RuntimeError {
                         message: "last called on empty list".into(),
                     }),
-                    "push" | "pop" | "each" | "map" | "select" | "reduce" => Ok(Value::NativeMethod {
+                    "push" | "pop" | "each" | "map" | "select" | "reduce" | "any?" | "all?" | "none?" => Ok(Value::NativeMethod {
                         receiver: Box::new(obj.clone()),
                         name,
                     }),
@@ -475,6 +475,39 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             elements.borrow_mut().pop().ok_or_else(|| SapphireError::RuntimeError {
                                 message: "pop called on empty list".into(),
                             })
+                        }
+                        (Value::List(elements), "any?") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "any? requires a block".into(),
+                            })?;
+                            for val in elements.borrow().clone().iter() {
+                                if run_block(&blk, vec![val.clone()], env.clone())? == Value::Bool(true) {
+                                    return Ok(Value::Bool(true));
+                                }
+                            }
+                            Ok(Value::Bool(false))
+                        }
+                        (Value::List(elements), "all?") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "all? requires a block".into(),
+                            })?;
+                            for val in elements.borrow().clone().iter() {
+                                if run_block(&blk, vec![val.clone()], env.clone())? == Value::Bool(false) {
+                                    return Ok(Value::Bool(false));
+                                }
+                            }
+                            Ok(Value::Bool(true))
+                        }
+                        (Value::List(elements), "none?") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "none? requires a block".into(),
+                            })?;
+                            for val in elements.borrow().clone().iter() {
+                                if run_block(&blk, vec![val.clone()], env.clone())? == Value::Bool(true) {
+                                    return Ok(Value::Bool(false));
+                                }
+                            }
+                            Ok(Value::Bool(true))
                         }
                         (Value::Int(n), "times") => {
                             let blk = block.ok_or_else(|| SapphireError::RuntimeError {
