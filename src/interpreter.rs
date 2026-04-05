@@ -153,7 +153,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     "last" => elements.borrow().last().cloned().ok_or_else(|| SapphireError::RuntimeError {
                         message: "last called on empty array".into(),
                     }),
-                    "push" | "pop" | "each" | "map" | "select" => Ok(Value::NativeMethod {
+                    "push" | "pop" | "each" | "map" | "select" | "reduce" => Ok(Value::NativeMethod {
                         receiver: Box::new(obj.clone()),
                         name,
                     }),
@@ -373,7 +373,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 message: "each requires a block".into(),
                             })?;
                             for val in elements.borrow().clone().iter() {
-                                run_block(&blk, val.clone(), env.clone())?;
+                                run_block(&blk, vec![val.clone()], env.clone())?;
                             }
                             Ok(Value::Nil)
                         }
@@ -383,7 +383,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             })?;
                             let mut result = Vec::new();
                             for val in elements.borrow().clone().iter() {
-                                result.push(run_block(&blk, val.clone(), env.clone())?);
+                                result.push(run_block(&blk, vec![val.clone()], env.clone())?);
                             }
                             Ok(Value::Array(Rc::new(RefCell::new(result))))
                         }
@@ -393,7 +393,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             })?;
                             let mut result = Vec::new();
                             for val in elements.borrow().clone().iter() {
-                                match run_block(&blk, val.clone(), env.clone())? {
+                                match run_block(&blk, vec![val.clone()], env.clone())? {
                                     Value::Bool(true) => result.push(val.clone()),
                                     Value::Bool(false) => {}
                                     _ => return Err(SapphireError::RuntimeError {
@@ -402,6 +402,28 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 }
                             }
                             Ok(Value::Array(Rc::new(RefCell::new(result))))
+                        }
+                        (Value::Array(elements), "reduce") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "reduce requires a block".into(),
+                            })?;
+                            let elems = elements.borrow().clone();
+                            let (mut acc, rest) = if args.len() == 1 {
+                                (args.into_iter().next().unwrap(), elems.as_slice())
+                            } else if args.is_empty() {
+                                let mut it = elems.as_slice().split_first().ok_or_else(|| SapphireError::RuntimeError {
+                                    message: "reduce requires an initial value or a non-empty array".into(),
+                                })?;
+                                (it.0.clone(), it.1)
+                            } else {
+                                return Err(SapphireError::RuntimeError {
+                                    message: "reduce takes at most one argument".into(),
+                                });
+                            };
+                            for val in rest {
+                                acc = run_block(&blk, vec![acc, val.clone()], env.clone())?;
+                            }
+                            Ok(acc)
                         }
                         (Value::Array(elements), "push") => {
                             if args.len() != 1 {
@@ -512,10 +534,10 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
     }
 }
 
-fn run_block(block: &Block, arg: Value, env: EnvRef) -> Result<Value, SapphireError> {
+fn run_block(block: &Block, args: Vec<Value>, env: EnvRef) -> Result<Value, SapphireError> {
     let block_env = Environment::new_child(env);
-    if let Some(ref param) = block.param {
-        block_env.borrow_mut().set(param.clone(), arg);
+    for (param, val) in block.params.iter().zip(args) {
+        block_env.borrow_mut().set(param.clone(), val);
     }
     let mut result = Value::Nil;
     for stmt in &block.body {
@@ -780,6 +802,16 @@ mod tests {
         exec_env("result = [1, 2, 3, 4].select { |x| x > 2 }", env.clone());
         assert_eq!(run_env("result.length", env.clone()), Value::Int(2));
         assert_eq!(run_env("result[0]", env.clone()), Value::Int(3));
+    }
+
+    #[test]
+    fn test_reduce_with_initial() {
+        assert_eq!(run("[1, 2, 3, 4, 5].reduce(0) { |acc, n| acc + n }"), Value::Int(15));
+    }
+
+    #[test]
+    fn test_reduce_without_initial() {
+        assert_eq!(run("[1, 2, 3, 4, 5].reduce { |acc, n| acc * n }"), Value::Int(120));
     }
 
     #[test]

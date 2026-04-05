@@ -440,25 +440,32 @@ impl Parser {
             return Ok(None);
         }
         self.advance(); // consume '{'
-        let param = if self.check(&TokenKind::Pipe) {
+        let params = if self.check(&TokenKind::Pipe) {
             self.advance(); // consume '|'
-            let p = match self.peek().kind.clone() {
-                TokenKind::Identifier(n) => { self.advance(); Some(n) }
-                _ => return Err(SapphireError::ParseError {
-                    message: "expected parameter name after '|'".into(),
-                    line: self.peek().line,
-                }),
-            };
+            let mut params = Vec::new();
+            if !self.check(&TokenKind::Pipe) {
+                loop {
+                    match self.peek().kind.clone() {
+                        TokenKind::Identifier(n) => { self.advance(); params.push(n); }
+                        _ => return Err(SapphireError::ParseError {
+                            message: "expected parameter name in block".into(),
+                            line: self.peek().line,
+                        }),
+                    }
+                    if !self.check(&TokenKind::Comma) { break; }
+                    self.advance(); // consume ','
+                }
+            }
             if !self.check(&TokenKind::Pipe) {
                 return Err(SapphireError::ParseError {
-                    message: "expected '|' after block parameter".into(),
+                    message: "expected '|' after block parameters".into(),
                     line: self.peek().line,
                 });
             }
             self.advance(); // consume '|'
-            p
+            params
         } else {
-            None
+            Vec::new()
         };
         let mut body = Vec::new();
         loop {
@@ -473,7 +480,7 @@ impl Parser {
             });
         }
         self.advance(); // consume '}'
-        Ok(Some(Block { param, body }))
+        Ok(Some(Block { params, body }))
     }
 
     fn parse_arg(&mut self) -> Result<CallArg, SapphireError> {

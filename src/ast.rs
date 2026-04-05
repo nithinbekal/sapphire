@@ -3,7 +3,7 @@ use crate::value::Value;
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    pub param: Option<String>,
+    pub params: Vec<String>,
     pub body: Vec<Stmt>,
 }
 
