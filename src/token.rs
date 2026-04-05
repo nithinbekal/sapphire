@@ -46,6 +46,7 @@ pub enum TokenKind {
     SelfKw,
     Print,
 
+    Newline,
     Eof,
 }
 

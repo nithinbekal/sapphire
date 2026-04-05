@@ -33,13 +33,18 @@ impl Parser {
         &self.tokens[self.current - 1]
     }
 
+    fn skip_terminators(&mut self) {
+        while self.check(&TokenKind::Newline) || self.check(&TokenKind::Semicolon) {
+            self.advance();
+        }
+    }
+
     pub fn parse(&mut self) -> Result<Vec<Stmt>, SapphireError> {
         let mut stmts = Vec::new();
-        while !self.is_at_end() {
+        loop {
+            self.skip_terminators();
+            if self.is_at_end() { break; }
             stmts.push(self.statement()?);
-            if self.check(&TokenKind::Semicolon) {
-                self.advance();
-            }
         }
         Ok(stmts)
     }
@@ -98,11 +103,9 @@ impl Parser {
         self.advance(); // consume '{'
         let mut fields = Vec::new();
         let mut methods = Vec::new();
-        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-            if self.check(&TokenKind::Semicolon) {
-                self.advance();
-                continue;
-            }
+        loop {
+            self.skip_terminators();
+            if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
             if self.check(&TokenKind::Attr) {
                 self.advance(); // consume 'attr'
                 let field_name = match self.peek().kind.clone() {
@@ -130,7 +133,6 @@ impl Parser {
                 } else {
                     None
                 };
-                if self.check(&TokenKind::Semicolon) { self.advance(); }
                 fields.push(FieldDef { name: field_name, type_name, default });
             } else if self.check(&TokenKind::Def) {
                 methods.push(self.method_def()?);
@@ -262,11 +264,10 @@ impl Parser {
         }
         self.advance(); // consume '{'
         let mut stmts = Vec::new();
-        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+        loop {
+            self.skip_terminators();
+            if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
             stmts.push(self.statement()?);
-            if self.check(&TokenKind::Semicolon) {
-                self.advance();
-            }
         }
         if !self.check(&TokenKind::RightBrace) {
             return Err(SapphireError::ParseError {
@@ -460,9 +461,10 @@ impl Parser {
             None
         };
         let mut body = Vec::new();
-        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+        loop {
+            self.skip_terminators();
+            if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
             body.push(self.statement()?);
-            if self.check(&TokenKind::Semicolon) { self.advance(); }
         }
         if !self.check(&TokenKind::RightBrace) {
             return Err(SapphireError::ParseError {

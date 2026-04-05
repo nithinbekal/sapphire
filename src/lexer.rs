@@ -17,14 +17,34 @@ impl Lexer {
         }
     }
 
+    fn ends_statement(kind: &TokenKind) -> bool {
+        matches!(kind,
+            TokenKind::Identifier(_) | TokenKind::Number(_) |
+            TokenKind::StringLit(_) | TokenKind::StringInterp(_) |
+            TokenKind::True | TokenKind::False | TokenKind::Nil |
+            TokenKind::SelfKw |
+            TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace
+        )
+    }
+
     pub fn scan_tokens(mut self) -> Vec<Token> {
         let mut tokens = Vec::new();
+        let mut last_kind: Option<TokenKind> = None;
 
         while !self.is_at_end() {
             self.start = self.current;
             let c = self.advance();
 
             let kind = match c {
+                '\n' => {
+                    self.line += 1;
+                    if last_kind.as_ref().map_or(false, Self::ends_statement) {
+                        TokenKind::Newline
+                    } else {
+                        continue
+                    }
+                }
+                '\r' => continue,
                 '(' => TokenKind::LeftParen,
                 ')' => TokenKind::RightParen,
                 '+' => TokenKind::Plus,
@@ -64,6 +84,7 @@ impl Lexer {
                 _ => continue,
             };
 
+            last_kind = Some(kind.clone());
             tokens.push(Token { kind, line: self.line });
         }
 
@@ -217,7 +238,7 @@ mod tests {
         assert_eq!(scan("# hello"), vec![TokenKind::Eof]);
         assert_eq!(
             scan("1 # comment\n2"),
-            vec![TokenKind::Number(1), TokenKind::Number(2), TokenKind::Eof]
+            vec![TokenKind::Number(1), TokenKind::Newline, TokenKind::Number(2), TokenKind::Eof]
         );
     }
 
