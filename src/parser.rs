@@ -1,6 +1,7 @@
 use crate::ast::{Expr, Stmt};
 use crate::error::SapphireError;
 use crate::token::{Token, TokenKind};
+use crate::value::Value;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -45,9 +46,33 @@ impl Parser {
     fn statement(&mut self) -> Result<Stmt, SapphireError> {
         if self.check(&TokenKind::Print) {
             self.advance();
-            return Ok(Stmt::Print(self.term()?));
+            return Ok(Stmt::Print(self.equality()?));
         }
-        Ok(Stmt::Expression(self.term()?))
+        Ok(Stmt::Expression(self.equality()?))
+    }
+
+    // equality: comparison (('==' | '!=') comparison)*
+    fn equality(&mut self) -> Result<Expr, SapphireError> {
+        let mut left = self.comparison()?;
+        while self.check(&TokenKind::EqEq) || self.check(&TokenKind::BangEq) {
+            let op = self.advance().clone();
+            let right = self.comparison()?;
+            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // comparison: term (('<' | '<=' | '>' | '>=') term)*
+    fn comparison(&mut self) -> Result<Expr, SapphireError> {
+        let mut left = self.term()?;
+        while self.check(&TokenKind::Less) || self.check(&TokenKind::LessEq)
+            || self.check(&TokenKind::Greater) || self.check(&TokenKind::GreaterEq)
+        {
+            let op = self.advance().clone();
+            let right = self.term()?;
+            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
     }
 
     // term: factor (('+' | '-') factor)*
@@ -67,13 +92,13 @@ impl Parser {
         Ok(left)
     }
 
-    // factor: primary (('*' | '/') primary)*
+    // factor: unary (('*' | '/') unary)*
     fn factor(&mut self) -> Result<Expr, SapphireError> {
-        let mut left = self.primary()?;
+        let mut left = self.unary()?;
 
         while self.check(&TokenKind::Star) || self.check(&TokenKind::Slash) {
             let op = self.advance().clone();
-            let right = self.primary()?;
+            let right = self.unary()?;
             left = Expr::Binary {
                 left: Box::new(left),
                 op,
@@ -84,18 +109,38 @@ impl Parser {
         Ok(left)
     }
 
-    // primary: NUMBER | IDENTIFIER ('=' term)? | '(' term ')'
+    // unary: ('!' | '-') unary | primary
+    fn unary(&mut self) -> Result<Expr, SapphireError> {
+        if self.check(&TokenKind::Bang) || self.check(&TokenKind::Minus) {
+            let op = self.advance().clone();
+            let right = self.unary()?;
+            return Ok(Expr::Unary { op, right: Box::new(right) });
+        }
+        self.primary()
+    }
+
+    // primary: NUMBER | BOOL | IDENTIFIER ('=' equality)? | '(' equality ')'
     fn primary(&mut self) -> Result<Expr, SapphireError> {
         if let TokenKind::Number(n) = self.peek().kind {
             self.advance();
-            return Ok(Expr::Literal(n));
+            return Ok(Expr::Literal(Value::Int(n)));
+        }
+
+        if self.check(&TokenKind::True) {
+            self.advance();
+            return Ok(Expr::Literal(Value::Bool(true)));
+        }
+
+        if self.check(&TokenKind::False) {
+            self.advance();
+            return Ok(Expr::Literal(Value::Bool(false)));
         }
 
         if let TokenKind::Identifier(name) = self.peek().kind.clone() {
             self.advance();
             if self.check(&TokenKind::Eq) {
                 self.advance(); // consume '='
-                let value = self.term()?;
+                let value = self.equality()?;
                 return Ok(Expr::Assign { name, value: Box::new(value) });
             }
             return Ok(Expr::Variable(name));
@@ -103,7 +148,7 @@ impl Parser {
 
         if self.check(&TokenKind::LeftParen) {
             self.advance();
-            let expr = self.term()?;
+            let expr = self.equality()?;
             self.advance(); // consume ')'
             return Ok(Expr::Grouping(Box::new(expr)));
         }
@@ -132,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_literal() {
-        assert!(matches!(parse_expr("42"), Expr::Literal(42)));
+        assert!(matches!(parse_expr("42"), Expr::Literal(Value::Int(42))));
     }
 
     #[test]
@@ -172,7 +217,7 @@ mod tests {
     fn test_print_statement() {
         let tokens = Lexer::new("print 42").scan_tokens();
         let mut stmts = Parser::new(tokens).parse().unwrap();
-        assert!(matches!(stmts.remove(0), Stmt::Print(Expr::Literal(42))));
+        assert!(matches!(stmts.remove(0), Stmt::Print(Expr::Literal(Value::Bool(_) | Value::Int(_)))));
     }
 
     #[test]

@@ -31,7 +31,10 @@ impl Lexer {
                 '-' => TokenKind::Minus,
                 '*' => TokenKind::Star,
                 '/' => TokenKind::Slash,
-                '=' => TokenKind::Eq,
+                '!' => if self.match_next('=') { TokenKind::BangEq } else { TokenKind::Bang },
+                '=' => if self.match_next('=') { TokenKind::EqEq } else { TokenKind::Eq },
+                '<' => if self.match_next('=') { TokenKind::LessEq } else { TokenKind::Less },
+                '>' => if self.match_next('=') { TokenKind::GreaterEq } else { TokenKind::Greater },
                 ';' => TokenKind::Semicolon,
                 c if c.is_ascii_digit() => self.number(c),
                 c if c.is_ascii_alphabetic() || c == '_' => self.identifier(c),
@@ -44,6 +47,14 @@ impl Lexer {
         tokens.push(Token { kind: TokenKind::Eof, line: self.line });
 
         tokens
+    }
+
+    fn match_next(&mut self, expected: char) -> bool {
+        if self.is_at_end() || self.source[self.current] != expected {
+            return false;
+        }
+        self.current += 1;
+        true
     }
 
     fn advance(&mut self) -> char {
@@ -71,6 +82,8 @@ impl Lexer {
             }
         }
         match s.as_str() {
+            "true"  => TokenKind::True,
+            "false" => TokenKind::False,
             "print" => TokenKind::Print,
             _ => TokenKind::Identifier(s),
         }

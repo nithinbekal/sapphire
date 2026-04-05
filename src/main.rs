@@ -5,6 +5,7 @@ mod interpreter;
 mod lexer;
 mod parser;
 mod token;
+mod value;
 
 use std::io::{self, Write};
 

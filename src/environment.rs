@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use crate::value::Value;
 
 pub struct Environment {
-    values: HashMap<String, i64>,
+    values: HashMap<String, Value>,
 }
 
 impl Environment {
@@ -9,11 +10,11 @@ impl Environment {
         Self { values: HashMap::new() }
     }
 
-    pub fn set(&mut self, name: String, value: i64) {
+    pub fn set(&mut self, name: String, value: Value) {
         self.values.insert(name, value);
     }
 
-    pub fn get(&self, name: &str) -> Option<i64> {
-        self.values.get(name).copied()
+    pub fn get(&self, name: &str) -> Option<Value> {
+        self.values.get(name).cloned()
     }
 }
