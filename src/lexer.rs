@@ -38,6 +38,7 @@ impl Lexer {
                 '{' => TokenKind::LeftBrace,
                 '}' => TokenKind::RightBrace,
                 ';' => TokenKind::Semicolon,
+                ',' => TokenKind::Comma,
                 '"' => match self.string() {
                     Some(s) => s,
                     None => continue,
@@ -99,12 +100,16 @@ impl Lexer {
                 break;
             }
         }
+        if !self.is_at_end() && self.source[self.current] == '?' {
+            s.push(self.advance());
+        }
         match s.as_str() {
             "true"  => TokenKind::True,
             "false" => TokenKind::False,
             "if"    => TokenKind::If,
             "else"  => TokenKind::Else,
             "while" => TokenKind::While,
+            "def"   => TokenKind::Def,
             "print" => TokenKind::Print,
             _ => TokenKind::Identifier(s),
         }
@@ -188,6 +193,10 @@ mod tests {
         assert_eq!(
             scan("my_var"),
             vec![TokenKind::Identifier("my_var".into()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan("empty?"),
+            vec![TokenKind::Identifier("empty?".into()), TokenKind::Eof]
         );
     }
 }

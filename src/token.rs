@@ -16,6 +16,7 @@ pub enum TokenKind {
     Greater,
     GreaterEq,
     Semicolon,
+    Comma,
 
     LeftBrace,
     RightBrace,
@@ -28,6 +29,7 @@ pub enum TokenKind {
     If,
     Else,
     While,
+    Def,
     Print,
 
     Eof,

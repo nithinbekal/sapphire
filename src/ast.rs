@@ -1,7 +1,7 @@
 use crate::token::Token;
 use crate::value::Value;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Expression(Expr),
     Print(Expr),
@@ -14,9 +14,14 @@ pub enum Stmt {
         condition: Expr,
         body: Vec<Stmt>,
     },
+    Function {
+        name: String,
+        params: Vec<String>,
+        body: Vec<Stmt>,
+    },
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     Literal(Value),
     Grouping(Box<Expr>),
@@ -33,5 +38,9 @@ pub enum Expr {
     Assign {
         name: String,
         value: Box<Expr>,
+    },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
     },
 }

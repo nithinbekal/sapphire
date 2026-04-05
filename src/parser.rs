@@ -44,6 +44,9 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Result<Stmt, SapphireError> {
+        if self.check(&TokenKind::Def) {
+            return self.function_def();
+        }
         if self.check(&TokenKind::If) {
             return self.if_statement();
         }
@@ -68,6 +71,47 @@ impl Parser {
             None
         };
         Ok(Stmt::If { condition, then_branch, else_branch })
+    }
+
+    fn function_def(&mut self) -> Result<Stmt, SapphireError> {
+        self.advance(); // consume 'def'
+        let name = match self.peek().kind.clone() {
+            TokenKind::Identifier(n) => { self.advance(); n }
+            _ => return Err(SapphireError::ParseError {
+                message: "expected function name".into(),
+                line: self.peek().line,
+            }),
+        };
+        if !self.check(&TokenKind::LeftParen) {
+            return Err(SapphireError::ParseError {
+                message: "expected '(' after function name".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume '('
+        let mut params = Vec::new();
+        if !self.check(&TokenKind::RightParen) {
+            loop {
+                match self.peek().kind.clone() {
+                    TokenKind::Identifier(p) => { self.advance(); params.push(p); }
+                    _ => return Err(SapphireError::ParseError {
+                        message: "expected parameter name".into(),
+                        line: self.peek().line,
+                    }),
+                }
+                if !self.check(&TokenKind::Comma) { break; }
+                self.advance();
+            }
+        }
+        if !self.check(&TokenKind::RightParen) {
+            return Err(SapphireError::ParseError {
+                message: "expected ')' after parameters".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume ')'
+        let body = self.block()?;
+        Ok(Stmt::Function { name, params, body })
     }
 
     fn while_statement(&mut self) -> Result<Stmt, SapphireError> {
@@ -194,6 +238,25 @@ impl Parser {
 
         if let TokenKind::Identifier(name) = self.peek().kind.clone() {
             self.advance();
+            if self.check(&TokenKind::LeftParen) {
+                self.advance(); // consume '('
+                let mut args = Vec::new();
+                if !self.check(&TokenKind::RightParen) {
+                    args.push(self.equality()?);
+                    while self.check(&TokenKind::Comma) {
+                        self.advance();
+                        args.push(self.equality()?);
+                    }
+                }
+                if !self.check(&TokenKind::RightParen) {
+                    return Err(SapphireError::ParseError {
+                        message: "expected ')' after arguments".into(),
+                        line: self.peek().line,
+                    });
+                }
+                self.advance(); // consume ')'
+                return Ok(Expr::Call { callee: Box::new(Expr::Variable(name)), args });
+            }
             if self.check(&TokenKind::Eq) {
                 self.advance(); // consume '='
                 let value = self.equality()?;

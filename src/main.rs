@@ -12,7 +12,7 @@ use std::io::{self, Write};
 fn main() {
     println!("Sapphire 0.1.0 — :q to quit");
 
-    let mut env = environment::Environment::new();
+    let env = environment::Environment::new();
 
     loop {
         print!("> ");
@@ -33,9 +33,9 @@ fn main() {
             Err(e) => eprintln!("{}", e),
             Ok(stmts) => {
                 for stmt in stmts {
-                    match interpreter::execute(stmt, &mut env) {
-                        Ok(Some(result)) => println!("{}", result),
-                        Ok(None) => {}
+                    match interpreter::execute(stmt, env.clone()) {
+                        Ok(Some(result)) if result != value::Value::Nil => println!("{}", result),
+                        Ok(_) => {}
                         Err(e) => { eprintln!("{}", e); break; }
                     }
                 }
