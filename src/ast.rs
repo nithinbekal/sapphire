@@ -42,6 +42,7 @@ pub enum Stmt {
     Return(Expr),
     Class {
         name: String,
+        superclass: Option<String>,
         fields: Vec<FieldDef>,
         methods: Vec<MethodDef>,
     },

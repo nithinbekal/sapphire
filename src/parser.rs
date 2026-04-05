@@ -76,6 +76,18 @@ impl Parser {
                 line: self.peek().line,
             }),
         };
+        let superclass = if self.check(&TokenKind::Less) {
+            self.advance(); // consume '<'
+            match self.peek().kind.clone() {
+                TokenKind::Identifier(n) => { self.advance(); Some(n) }
+                _ => return Err(SapphireError::ParseError {
+                    message: "expected superclass name after '<'".into(),
+                    line: self.peek().line,
+                }),
+            }
+        } else {
+            None
+        };
         if !self.check(&TokenKind::LeftBrace) {
             return Err(SapphireError::ParseError {
                 message: "expected '{' after class name".into(),
@@ -135,7 +147,7 @@ impl Parser {
             });
         }
         self.advance(); // consume '}'
-        Ok(Stmt::Class { name, fields, methods })
+        Ok(Stmt::Class { name, superclass, fields, methods })
     }
 
     fn if_statement(&mut self) -> Result<Stmt, SapphireError> {

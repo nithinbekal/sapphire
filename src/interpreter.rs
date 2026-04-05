@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::ast::{Expr, Stmt};
+use crate::ast::{Expr, MethodDef, Stmt};
 use crate::environment::Environment;
 use crate::value::EnvRef;
 use crate::error::SapphireError;
@@ -16,8 +16,27 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             Ok(None)
         }
         Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
-        Stmt::Class { name, fields, methods } => {
-            let class = Value::Class { name: name.clone(), fields, methods, closure: env.clone() };
+        Stmt::Class { name, superclass, fields, methods } => {
+            let (mut merged_fields, mut merged_methods) = match superclass {
+                Some(ref super_name) => {
+                    let super_val = env.borrow().get(super_name).ok_or_else(|| SapphireError::RuntimeError {
+                        message: format!("superclass '{}' not found", super_name),
+                    })?;
+                    match super_val {
+                        Value::Class { fields: sf, methods: sm, .. } => (sf, sm),
+                        _ => return Err(SapphireError::RuntimeError {
+                            message: format!("'{}' is not a class", super_name),
+                        }),
+                    }
+                }
+                None => (Vec::new(), Vec::new()),
+            };
+            merged_fields.extend(fields);
+            for method in methods {
+                merged_methods.retain(|m: &MethodDef| m.name != method.name);
+                merged_methods.push(method);
+            }
+            let class = Value::Class { name: name.clone(), fields: merged_fields, methods: merged_methods, closure: env.clone() };
             env.borrow_mut().set(name, class);
             Ok(None)
         }
@@ -476,6 +495,34 @@ mod tests {
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
+    }
+
+    #[test]
+    fn test_inheritance_fields() {
+        let env = Environment::new();
+        exec_env("class Animal { attr name }", env.clone());
+        exec_env("class Dog < Animal { attr breed }", env.clone());
+        exec_env("d = Dog.new(name: \"Rex\", breed: \"Lab\")", env.clone());
+        assert_eq!(run_env("d.name", env.clone()), Value::Str("Rex".into()));
+        assert_eq!(run_env("d.breed", env.clone()), Value::Str("Lab".into()));
+    }
+
+    #[test]
+    fn test_inheritance_method() {
+        let env = Environment::new();
+        exec_env("class Animal { attr name; def speak() { \"...\" } }", env.clone());
+        exec_env("class Dog < Animal {}", env.clone());
+        exec_env("d = Dog.new(name: \"Rex\")", env.clone());
+        assert_eq!(run_env("d.speak()", env.clone()), Value::Str("...".into()));
+    }
+
+    #[test]
+    fn test_inheritance_override() {
+        let env = Environment::new();
+        exec_env("class Animal { attr name; def speak() { \"...\" } }", env.clone());
+        exec_env("class Dog < Animal { def speak() { \"woof\" } }", env.clone());
+        exec_env("d = Dog.new(name: \"Rex\")", env.clone());
+        assert_eq!(run_env("d.speak()", env.clone()), Value::Str("woof".into()));
     }
 
     #[test]
