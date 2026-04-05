@@ -33,15 +33,16 @@ empty? = false
 
 ## Types
 
-Sapphire has five built-in value types:
+Sapphire has six built-in value types:
 
-| Type   | Examples                    |
-|--------|-----------------------------|
-| Int    | `0`, `42`, `-7`             |
-| Bool   | `true`, `false`             |
-| Str    | `"hello"`                   |
-| List   | `[1, 2, 3]`                 |
-| Nil    | `nil`                       |
+| Type   | Examples                          |
+|--------|-----------------------------------|
+| Int    | `0`, `42`, `-7`                   |
+| Bool   | `true`, `false`                   |
+| Str    | `"hello"`                         |
+| List   | `[1, 2, 3]`                       |
+| Map    | `{ name: "Alice", age: 30 }`      |
+| Nil    | `nil`                             |
 
 ---
 
@@ -52,6 +53,7 @@ Sapphire has five built-in value types:
 10 - 3      # 7
 4 * 5       # 20
 10 / 3      # 3  (integer division)
+10 % 3      # 1  (modulo)
 -x          # negation
 ```
 
@@ -101,6 +103,15 @@ String literals use double quotes.
 
 ```
 greeting = "hello"
+```
+
+### Escape sequences
+
+```
+"hello\nworld"   # newline
+"tab\there"      # tab
+"quote: \""      # literal quote
+"backslash: \\"  # literal backslash
 ```
 
 ### Concatenation
@@ -342,12 +353,67 @@ product = nums.reduce { |acc, n| acc * n }
 print product   # 120
 ```
 
+### any? / all? / none?
+
+```
+nums = [1, 2, 3, 4, 5]
+
+nums.any? { |n| n > 4 }    # true
+nums.all? { |n| n > 0 }    # true
+nums.none? { |n| n > 9 }   # true
+```
+
 ### Blocks can mutate outer variables
 
 ```
 sum = 0
 nums.each { |n| sum = sum + n }
 print sum   # 15
+```
+
+---
+
+## Integer iteration
+
+`.times` runs a block `n` times, passing the current index (starting at 0).
+
+```
+3.times { |i| print i }
+# 0
+# 1
+# 2
+```
+
+---
+
+## Maps
+
+Map literals use `{ key: value }` syntax. Keys are always strings.
+
+```
+person = { name: "Alice", age: 30 }
+```
+
+### Access and mutation
+
+```
+person["name"]          # "Alice"
+person["city"] = "Dublin"
+```
+
+### Built-in methods
+
+```
+person.length           # 3
+person.keys             # ["age", "city", "name"]
+person.values           # [30, "Dublin", "Alice"]
+person.has_key?("name") # true
+```
+
+### Iterating
+
+```
+person.each { |k, v| print "#{k}: #{v}" }
 ```
 
 ---
@@ -381,6 +447,18 @@ print user&.name   # nil
 
 user = User.new(name: "Bob")
 print user&.name   # Bob
+```
+
+---
+
+## Trailing conditionals
+
+A statement can be conditionally executed by appending `if condition` at the end.
+
+```
+print "negative" if x < 0
+return nil if name.nil?
+x = x * 2 if x > 0
 ```
 
 ---
