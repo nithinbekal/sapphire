@@ -35,4 +35,34 @@ class List {
     result = self.each { |x| break true if yield(x) }
     result != true
   }
+
+  # Yields each element together with its zero-based index.
+  #   ["a", "b"].each_with_index { |item, i| print "#{i}: #{item}" }
+  def each_with_index() {
+    i = 0
+    self.each { |x|
+      yield(x, i)
+      i = i + 1
+    }
+  }
+
+  # Returns true if the list contains a value equal to item.
+  #   [1, 2, 3].include?(2)   # true
+  def include?(item) {
+    result = self.each { |x| break true if x == item }
+    result == true
+  }
+
+  # Returns a new list of two-element lists pairing elements from self and other.
+  #   [1, 2, 3].zip([4, 5, 6])   # [[1, 4], [2, 5], [3, 6]]
+  def zip(other) {
+    result = []
+    len = self.length
+    i = 0
+    while i < len {
+      result.push([self[i], other[i]])
+      i = i + 1
+    }
+    result
+  }
 }

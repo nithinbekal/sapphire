@@ -153,6 +153,16 @@ print "List: #{nums}"   # List: [1, 2, 3]
 "hello".ends_with?("llo")     # true
 
 "a,b,c".split(",")      # ["a", "b", "c"]
+"hello".chars           # ["h", "e", "l", "l", "o"]
+```
+
+### Repetition
+
+Use `*` to repeat a string:
+
+```
+"ha" * 3   # "hahaha"
+"-" * 10   # "----------"
 ```
 
 ### Type conversions
@@ -188,7 +198,7 @@ print x + 1
 
 ## Control flow
 
-### if / else
+### if / elsif / else
 
 ```
 if x > 0 {
@@ -210,6 +220,20 @@ A single-statement body can be written on one line:
 
 ```
 if x < 0 { print "negative" }
+```
+
+Use `elsif` for multi-branch conditionals:
+
+```
+if x > 100 {
+  print "large"
+} elsif x > 10 {
+  print "medium"
+} elsif x > 0 {
+  print "small"
+} else {
+  print "non-positive"
+}
 ```
 
 ### while
@@ -265,6 +289,46 @@ result = [1, 2, 3, 4].map { |x|
   x * 10
 }
 print result   # [10, 0, 30, 40]
+```
+
+### Ranges
+
+A range literal `from..to` represents an inclusive sequence of integers.
+
+```
+r = 1..10
+```
+
+Use `.each` to iterate, or `.include?` to test membership:
+
+```
+(1..5).each { |i| print i }
+# 1
+# 2
+# 3
+# 4
+# 5
+
+(1..10).include?(7)    # true
+(1..10).include?(11)   # false
+```
+
+---
+
+## Multiple assignment
+
+Assign to several variables at once by listing them on the left:
+
+```
+a, b = 1, 2
+print a   # 1
+print b   # 2
+```
+
+This is the idiomatic way to swap two values:
+
+```
+a, b = b, a
 ```
 
 ---
@@ -429,6 +493,22 @@ print sum   # 15
 # 2
 ```
 
+`.upto` and `.downto` iterate between two integers, inclusive.
+
+```
+1.upto(5) { |i| print i }
+# 1
+# 2
+# 3
+# 4
+# 5
+
+3.downto(1) { |i| print i }
+# 3
+# 2
+# 1
+```
+
 ---
 
 ## Maps
@@ -528,6 +608,71 @@ print n * 2
 
 ---
 
+## Error handling
+
+Use `raise` to signal an error. Pass a string message or any object.
+
+```
+raise "something went wrong"
+```
+
+### begin / rescue / end
+
+Wrap code in a `begin` block and catch errors with `rescue`. The rescue clause optionally binds the error to a variable.
+
+```
+begin
+  x = 10 / 0
+rescue e
+  print "caught: #{e}"
+end
+```
+
+The `else` clause runs only when no error occurred:
+
+```
+begin
+  result = 10 / 2
+rescue e
+  print "error"
+else
+  print "result: #{result}"   # result: 5
+end
+```
+
+### Inline rescue in functions and methods
+
+A `rescue` clause can be placed directly inside a `def` body, avoiding the need for a `begin...end` wrapper:
+
+```
+def safe_div(a, b) {
+  a / b
+rescue e
+  0
+}
+
+print safe_div(10, 2)    # 5
+print safe_div(10, 0)    # 0
+```
+
+### Raising objects
+
+You can raise any object, not just strings:
+
+```
+class AppError {
+  attr message
+}
+
+begin
+  raise AppError.new(message: "not found")
+rescue e
+  print e.message   # not found
+end
+```
+
+---
+
 ## Classes
 
 Define a class with `class`. Use `attr` to declare fields. Instantiate with `ClassName.new(field: value, ...)`.
@@ -604,6 +749,31 @@ c.increment()
 print c.count   # 3
 c.reset()
 print c.count   # 0
+```
+
+### Private methods
+
+Use `defp` to declare a private method. Private methods can be called from within the class (including subclasses) but not from outside.
+
+```
+class BankAccount {
+  attr balance
+
+  def deposit(amount) {
+    self.balance = balance + validate(amount)
+  }
+
+  defp validate(amount) {
+    raise "amount must be positive" if amount <= 0
+    amount
+  }
+}
+
+acc = BankAccount.new(balance: 0)
+acc.deposit(100)
+print acc.balance   # 100
+
+acc.validate(50)    # error: private method
 ```
 
 ---
@@ -691,6 +861,35 @@ print d.describe()   # Rex (Lab)
 ```
 
 `super` always operates on the same `self` instance, so field changes in the subclass are visible to the superclass method and vice versa.
+
+### Object — the root class
+
+Every class implicitly inherits from `Object`. This gives all instances two built-in methods:
+
+`is_a?("ClassName")` — returns `true` if the object is an instance of that class or any of its superclasses:
+
+```
+class Animal { attr name }
+class Dog < Animal {}
+
+d = Dog.new(name: "Rex")
+d.is_a?("Dog")      # true
+d.is_a?("Animal")   # true
+d.is_a?("Object")   # true (always)
+d.is_a?("Cat")      # false
+```
+
+`respond_to?("method_name")` — returns `true` if the method exists on the object (including inherited methods):
+
+```
+class Greeter {
+  def hello() { "hi" }
+}
+
+g = Greeter.new()
+g.respond_to?("hello")       # true
+g.respond_to?("nonexistent") # false
+```
 
 ---
 

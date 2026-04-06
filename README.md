@@ -48,13 +48,17 @@ x > 0
 ```ruby
 if x > 0 {
   print x
+} elsif x == 0 {
+  print "zero"
 } else {
-  print 0
+  print "negative"
 }
 
 while x < 10 {
   x = x + 1
 }
+
+(1..5).each { |i| print i }
 ```
 
 ### Functions
@@ -76,12 +80,57 @@ add(1, 2)
 
 ```ruby
 class Point {
-  attr x: Int
-  attr y: Int
-  attr label: Str = "origin"
+  attr x
+  attr y
+  attr label = "origin"
 }
 
 p = Point.new(x: 1, y: 2)
 p.x      # => 1
 p.label  # => "origin"
+```
+
+Use `defp` for private methods:
+
+```ruby
+class BankAccount {
+  attr balance
+
+  def deposit(amount) { self.balance = balance + validate(amount) }
+
+  defp validate(amount) {
+    raise "must be positive" if amount <= 0
+    amount
+  }
+}
+```
+
+All objects inherit from `Object` and respond to `is_a?` and `respond_to?`:
+
+```ruby
+p.is_a?("Point")    # true
+p.is_a?("Object")   # true
+p.respond_to?("to_s")  # true
+```
+
+### Error handling
+
+```ruby
+begin
+  result = risky_op()
+rescue e
+  print "caught: #{e}"
+else
+  print "ok: #{result}"
+end
+```
+
+Inline rescue inside a `def`:
+
+```ruby
+def safe_div(a, b) {
+  a / b
+rescue e
+  0
+}
 ```
