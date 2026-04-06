@@ -297,7 +297,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     "to_i" => Err(SapphireError::RuntimeError {
                         message: format!("cannot convert {} to integer", obj),
                     }),
-                    "is_a?" | "respond_to?" => Ok(Value::NativeMethod {
+                    "is_a?" => Ok(Value::NativeMethod {
                         receiver: Box::new(obj.clone()),
                         name,
                     }),
@@ -957,19 +957,6 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 }
                             }
                         }
-                        (Value::Instance { class_name, .. }, "respond_to?") => {
-                            let method_name = match args.into_iter().next() {
-                                Some(Value::Str(s)) => s,
-                                _ => return Err(SapphireError::RuntimeError {
-                                    message: "respond_to? requires a string argument".into(),
-                                }),
-                            };
-                            let found = match env.borrow().get(&class_name) {
-                                Some(Value::Class { methods, .. }) => methods.iter().any(|m| m.name == method_name),
-                                _ => false,
-                            };
-                            Ok(Value::Bool(found))
-                        }
                         _ => Err(SapphireError::RuntimeError {
                             message: "unknown native method".into(),
                         }),
@@ -1037,12 +1024,6 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     }),
                 },
                 op_kind => {
-                    // String repetition: "abc" * 3
-                    if op_kind == TokenKind::Star {
-                        if let (Value::Str(s), Value::Int(n)) = (l.clone(), r.clone()) {
-                            return Ok(Value::Str(s.repeat(n.max(0) as usize)));
-                        }
-                    }
                     // Promote to float if either operand is a float; otherwise require both ints.
                     let use_float = matches!((&l, &r), (Value::Float(_), _) | (_, Value::Float(_)));
                     if use_float {
@@ -1899,12 +1880,6 @@ mod tests {
     }
 
     #[test]
-    fn test_string_repeat() {
-        assert_eq!(run(r#""ha" * 3"#), Value::Str("hahaha".into()));
-        assert_eq!(run(r#""x" * 0"#), Value::Str("".into()));
-    }
-
-    #[test]
     fn test_string_chars() {
         let env = global_env();
         exec_env(r#"result = "hi".chars"#, env.clone());
@@ -2094,27 +2069,6 @@ mod tests {
         assert_eq!(run_env("c.is_a?(\"B\")", env.clone()), Value::Bool(true));
         assert_eq!(run_env("c.is_a?(\"A\")", env.clone()), Value::Bool(true));
         assert_eq!(run_env("c.is_a?(\"Object\")", env.clone()), Value::Bool(true));
-    }
-
-    #[test]
-    fn test_respond_to_existing_method() {
-        let env = global_env();
-        exec_env("class Greeter { def hello() { \"hi\" } }; g = Greeter.new()", env.clone());
-        assert_eq!(run_env("g.respond_to?(\"hello\")", env.clone()), Value::Bool(true));
-    }
-
-    #[test]
-    fn test_respond_to_inherited_method() {
-        let env = global_env();
-        exec_env("class Animal { def speak() { \"...\" } }; class Dog < Animal {}; d = Dog.new()", env.clone());
-        assert_eq!(run_env("d.respond_to?(\"speak\")", env.clone()), Value::Bool(true));
-    }
-
-    #[test]
-    fn test_respond_to_missing_method() {
-        let env = global_env();
-        exec_env("class Foo {}; f = Foo.new()", env.clone());
-        assert_eq!(run_env("f.respond_to?(\"nonexistent\")", env.clone()), Value::Bool(false));
     }
 
     #[test]

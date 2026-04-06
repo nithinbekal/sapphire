@@ -105,12 +105,11 @@ class BankAccount {
 }
 ```
 
-All objects inherit from `Object` and respond to `is_a?` and `respond_to?`:
+All objects inherit from `Object` and respond to `is_a?`:
 
 ```ruby
 p.is_a?("Point")    # true
 p.is_a?("Object")   # true
-p.respond_to?("to_s")  # true
 ```
 
 ### Error handling

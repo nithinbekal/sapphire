@@ -156,15 +156,6 @@ print "List: #{nums}"   # List: [1, 2, 3]
 "hello".chars           # ["h", "e", "l", "l", "o"]
 ```
 
-### Repetition
-
-Use `*` to repeat a string:
-
-```
-"ha" * 3   # "hahaha"
-"-" * 10   # "----------"
-```
-
 ### Type conversions
 
 ```
@@ -867,18 +858,6 @@ d.is_a?("Dog")      # true
 d.is_a?("Animal")   # true
 d.is_a?("Object")   # true (always)
 d.is_a?("Cat")      # false
-```
-
-`respond_to?("method_name")` — returns `true` if the method exists on the object (including inherited methods):
-
-```
-class Greeter {
-  def hello() { "hi" }
-}
-
-g = Greeter.new()
-g.respond_to?("hello")       # true
-g.respond_to?("nonexistent") # false
 ```
 
 ---
