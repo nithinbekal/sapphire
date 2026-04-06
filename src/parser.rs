@@ -7,11 +7,12 @@ use crate::value::Value;
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    allow_trailing_block: bool,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, current: 0 }
+        Self { tokens, current: 0, allow_trailing_block: true }
     }
 
     fn peek(&self) -> &Token {
@@ -54,7 +55,9 @@ impl Parser {
         // Trailing conditional: `expr if condition`
         if self.check(&TokenKind::If) {
             self.advance();
+            self.allow_trailing_block = false;
             let condition = self.logical()?;
+            self.allow_trailing_block = true;
             return Ok(Stmt::If { condition, then_branch: vec![stmt], else_branch: None });
         }
         Ok(stmt)
@@ -193,7 +196,9 @@ impl Parser {
 
     fn if_statement(&mut self) -> Result<Stmt, SapphireError> {
         self.advance(); // consume 'if'
+        self.allow_trailing_block = false;
         let condition = self.logical()?;
+        self.allow_trailing_block = true;
         let then_branch = self.block()?;
         let else_branch = if self.check(&TokenKind::Else) {
             self.advance();
@@ -288,7 +293,9 @@ impl Parser {
 
     fn while_statement(&mut self) -> Result<Stmt, SapphireError> {
         self.advance(); // consume 'while'
+        self.allow_trailing_block = false;
         let condition = self.logical()?;
+        self.allow_trailing_block = true;
         let body = self.block()?;
         Ok(Stmt::While { condition, body })
     }
@@ -452,7 +459,7 @@ impl Parser {
                     expr = Expr::Set { object: Box::new(expr), name, value: Box::new(value) };
                     break;
                 }
-                if self.check(&TokenKind::LeftBrace) {
+                if self.allow_trailing_block && self.check(&TokenKind::LeftBrace) {
                     let block = self.parse_block()?;
                     let get = Expr::Get { object: Box::new(expr), name };
                     expr = Expr::Call { callee: Box::new(get), args: Vec::new(), block };

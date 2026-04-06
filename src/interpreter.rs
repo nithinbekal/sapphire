@@ -1741,6 +1741,15 @@ mod tests {
     }
 
     #[test]
+    fn test_while_condition_method_call_no_block_greed() {
+        // Previously `while i < list.length { }` caused the parser to attach
+        // `{` as a block to `length`, breaking the loop. This must now parse correctly.
+        let env = global_env();
+        exec_env("list = [1, 2, 3]; i = 0; sum = 0; while i < list.length { sum = sum + list[i]; i = i + 1 }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(6)));
+    }
+
+    #[test]
     fn test_raise_unhandled() {
         let tokens = crate::lexer::Lexer::new(r#"raise "oops""#).scan_tokens();
         let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
