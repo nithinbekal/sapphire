@@ -2000,6 +2000,30 @@ mod tests {
     }
 
     #[test]
+    fn test_inline_rescue_in_function() {
+        let env = Environment::new();
+        exec_env("def risky(x) { raise \"bad\" if x < 0\n x * 2\nrescue e\n 0 }", env.clone());
+        assert_eq!(run_env("risky(5)", env.clone()), Value::Int(10));
+        assert_eq!(run_env("risky(-1)", env.clone()), Value::Int(0));
+    }
+
+    #[test]
+    fn test_inline_rescue_binds_error() {
+        let env = Environment::new();
+        exec_env("def boom() { raise \"oops\"\n 1\nrescue e\n e }", env.clone());
+        assert_eq!(run_env("boom()", env.clone()), Value::Str("oops".into()));
+    }
+
+    #[test]
+    fn test_inline_rescue_in_method() {
+        let env = Environment::new();
+        exec_env("class Safe { def try_div(x) { 10 / x\nrescue e\n -1 } }", env.clone());
+        exec_env("s = Safe.new()", env.clone());
+        assert_eq!(run_env("s.try_div(2)", env.clone()), Value::Int(5));
+        assert_eq!(run_env("s.try_div(0)", env.clone()), Value::Int(-1));
+    }
+
+    #[test]
     fn test_raise_instance() {
         let env = Environment::new();
         exec_env("class Err { attr msg }; begin; raise Err.new(msg: \"bad\"); rescue e; end", env.clone());

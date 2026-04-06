@@ -273,7 +273,7 @@ impl Parser {
             });
         }
         self.advance(); // consume ')'
-        let body = self.block()?;
+        let body = self.block_with_rescue()?;
         Ok(Stmt::Function { name, params, body })
     }
 
@@ -314,7 +314,7 @@ impl Parser {
             });
         }
         self.advance(); // consume ')'
-        let body = self.block()?;
+        let body = self.block_with_rescue()?;
         Ok(MethodDef { name, params, body, private })
     }
 
@@ -408,6 +408,56 @@ impl Parser {
         }
         self.advance(); // consume 'end'
         Ok(Stmt::Begin { body, rescue_var, rescue_body, else_body })
+    }
+
+    // Like block(), but wraps the body in Stmt::Begin if a rescue clause is present.
+    // Used by function and method definitions.
+    fn block_with_rescue(&mut self) -> Result<Vec<Stmt>, SapphireError> {
+        if !self.check(&TokenKind::LeftBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '{'".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume '{'
+        let mut body = Vec::new();
+        loop {
+            self.skip_terminators();
+            if self.check(&TokenKind::Rescue) || self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
+            body.push(self.statement()?);
+        }
+        if self.check(&TokenKind::Rescue) {
+            self.advance(); // consume 'rescue'
+            let rescue_var = if let TokenKind::Identifier(n) = self.peek().kind.clone() {
+                self.advance();
+                Some(n)
+            } else {
+                None
+            };
+            let mut rescue_body = Vec::new();
+            loop {
+                self.skip_terminators();
+                if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
+                rescue_body.push(self.statement()?);
+            }
+            if !self.check(&TokenKind::RightBrace) {
+                return Err(SapphireError::ParseError {
+                    message: "expected '}'".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume '}'
+            Ok(vec![Stmt::Begin { body, rescue_var, rescue_body, else_body: Vec::new() }])
+        } else {
+            if !self.check(&TokenKind::RightBrace) {
+                return Err(SapphireError::ParseError {
+                    message: "expected '}'".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume '}'
+            Ok(body)
+        }
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>, SapphireError> {
