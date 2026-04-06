@@ -373,7 +373,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             // Integers
             if let Value::Int(n) = obj {
                 return match name.as_str() {
-                    "times" => Ok(Value::NativeMethod {
+                    "times" | "upto" | "downto" => Ok(Value::NativeMethod {
                         receiver: Box::new(Value::Int(n)),
                         name,
                     }),
@@ -862,6 +862,48 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                     Err(SapphireError::Break(v)) => return Ok(v),
                                     Err(e) => return Err(e),
                                 }
+                            }
+                            Ok(Value::Nil)
+                        }
+                        (Value::Int(from), "upto") => {
+                            let to = match args.into_iter().next() {
+                                Some(Value::Int(n)) => n,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "upto requires an integer argument".into(),
+                                }),
+                            };
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "upto requires a block".into(),
+                            })?;
+                            let mut i = from;
+                            while i <= to {
+                                match run_block(&blk, vec![Value::Int(i)], env.clone()) {
+                                    Ok(_) => {}
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
+                                }
+                                i += 1;
+                            }
+                            Ok(Value::Nil)
+                        }
+                        (Value::Int(from), "downto") => {
+                            let to = match args.into_iter().next() {
+                                Some(Value::Int(n)) => n,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "downto requires an integer argument".into(),
+                                }),
+                            };
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "downto requires a block".into(),
+                            })?;
+                            let mut i = from;
+                            while i >= to {
+                                match run_block(&blk, vec![Value::Int(i)], env.clone()) {
+                                    Ok(_) => {}
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
+                                }
+                                i -= 1;
                             }
                             Ok(Value::Nil)
                         }
@@ -1773,6 +1815,28 @@ mod tests {
         assert_eq!(run_env("b.doubled()", env.clone()), Value::Int(99));
         // self.x should be unchanged
         assert_eq!(run_env("b.x", env.clone()), Value::Int(10));
+    }
+
+    #[test]
+    fn test_upto() {
+        let env = global_env();
+        exec_env("sum = 0; 1.upto(5) { |i| sum = sum + i }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(15)));
+    }
+
+    #[test]
+    fn test_downto() {
+        let env = global_env();
+        exec_env("result = []; 3.downto(1) { |i| result.push(i) }", env.clone());
+        assert_eq!(run_env("result[0]", env.clone()), Value::Int(3));
+        assert_eq!(run_env("result[2]", env.clone()), Value::Int(1));
+    }
+
+    #[test]
+    fn test_upto_empty_range() {
+        let env = global_env();
+        exec_env("n = 0; 5.upto(3) { |i| n = n + 1 }", env.clone());
+        assert_eq!(env.borrow().get("n"), Some(Value::Int(0)));
     }
 
     #[test]
