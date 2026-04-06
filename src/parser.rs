@@ -100,6 +100,13 @@ impl Parser {
         if self.check(&TokenKind::While) {
             return self.while_statement();
         }
+        // Multi-assignment: ident, ident, ... = expr, expr, ...
+        if matches!(self.peek().kind, TokenKind::Identifier(_))
+            && self.current + 1 < self.tokens.len()
+            && self.tokens[self.current + 1].kind == TokenKind::Comma
+        {
+            return self.multi_assign();
+        }
         if self.check(&TokenKind::Raise) {
             self.advance();
             return Ok(Stmt::Raise(self.logical()?));
@@ -298,6 +305,41 @@ impl Parser {
         self.allow_trailing_block = true;
         let body = self.block()?;
         Ok(Stmt::While { condition, body })
+    }
+
+    fn multi_assign(&mut self) -> Result<Stmt, SapphireError> {
+        let mut names = Vec::new();
+        loop {
+            match self.peek().kind.clone() {
+                TokenKind::Identifier(n) => { self.advance(); names.push(n); }
+                _ => return Err(SapphireError::ParseError {
+                    message: "expected identifier in multiple assignment".into(),
+                    line: self.peek().line,
+                }),
+            }
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if !self.check(&TokenKind::Eq) {
+            return Err(SapphireError::ParseError {
+                message: "expected '=' in multiple assignment".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume '='
+        let mut values = Vec::new();
+        loop {
+            values.push(self.logical()?);
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(Stmt::MultiAssign { names, values })
     }
 
     fn begin_statement(&mut self) -> Result<Stmt, SapphireError> {

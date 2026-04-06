@@ -88,6 +88,23 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             let value = evaluate(expr, env)?;
             Err(SapphireError::Next(value))
         }
+        Stmt::MultiAssign { names, values } => {
+            if names.len() != values.len() {
+                return Err(SapphireError::RuntimeError {
+                    message: format!("expected {} value(s), got {}", names.len(), values.len()),
+                });
+            }
+            // Evaluate all RHS first so that `a, b = b, a` swaps correctly
+            let vals: Vec<Value> = values.into_iter()
+                .map(|e| evaluate(e, env.clone()))
+                .collect::<Result<_, _>>()?;
+            for (name, val) in names.into_iter().zip(vals) {
+                if !env.borrow_mut().assign(&name, val.clone()) {
+                    env.borrow_mut().set(name, val);
+                }
+            }
+            Ok(None)
+        }
         Stmt::Raise(expr) => {
             let value = evaluate(expr, env)?;
             Err(SapphireError::Raised(value))
@@ -1738,6 +1755,32 @@ mod tests {
         assert_eq!(run_env("b.doubled()", env.clone()), Value::Int(99));
         // self.x should be unchanged
         assert_eq!(run_env("b.x", env.clone()), Value::Int(10));
+    }
+
+    #[test]
+    fn test_multi_assign_basic() {
+        let env = Environment::new();
+        exec_env("a, b = 1, 2", env.clone());
+        assert_eq!(env.borrow().get("a"), Some(Value::Int(1)));
+        assert_eq!(env.borrow().get("b"), Some(Value::Int(2)));
+    }
+
+    #[test]
+    fn test_multi_assign_swap() {
+        let env = Environment::new();
+        exec_env("a = 1; b = 2", env.clone());
+        exec_env("a, b = b, a", env.clone());
+        assert_eq!(env.borrow().get("a"), Some(Value::Int(2)));
+        assert_eq!(env.borrow().get("b"), Some(Value::Int(1)));
+    }
+
+    #[test]
+    fn test_multi_assign_three() {
+        let env = Environment::new();
+        exec_env("x, y, z = 10, 20, 30", env.clone());
+        assert_eq!(env.borrow().get("x"), Some(Value::Int(10)));
+        assert_eq!(env.borrow().get("y"), Some(Value::Int(20)));
+        assert_eq!(env.borrow().get("z"), Some(Value::Int(30)));
     }
 
     #[test]

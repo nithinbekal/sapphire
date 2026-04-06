@@ -61,6 +61,10 @@ pub enum Stmt {
         methods: Vec<MethodDef>,
     },
     Raise(Expr),
+    MultiAssign {
+        names: Vec<String>,
+        values: Vec<Expr>,
+    },
     Begin {
         body: Vec<Stmt>,
         rescue_var: Option<String>,
