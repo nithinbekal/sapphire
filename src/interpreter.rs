@@ -1179,8 +1179,14 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
 
 fn run_block(block: &Block, args: Vec<Value>, env: EnvRef) -> Result<Value, SapphireError> {
     let block_env = Environment::new_child(env);
-    for (param, val) in block.params.iter().zip(args) {
-        block_env.borrow_mut().set(param.clone(), val);
+    if block.params.is_empty() {
+        if let Some(first) = args.first() {
+            block_env.borrow_mut().set("it".to_string(), first.clone());
+        }
+    } else {
+        for (param, val) in block.params.iter().zip(args) {
+            block_env.borrow_mut().set(param.clone(), val);
+        }
     }
     let mut result = Value::Nil;
     for stmt in &block.body {
@@ -1482,6 +1488,29 @@ mod tests {
         let env = Environment::new();
         exec_env("sum = 0; [1, 2, 3].each { |x| sum = sum + x }", env.clone());
         assert_eq!(env.borrow().get("sum"), Some(Value::Int(6)));
+    }
+
+    #[test]
+    fn test_it_each() {
+        let env = Environment::new();
+        exec_env("sum = 0; [1, 2, 3].each { sum = sum + it }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(6)));
+    }
+
+    #[test]
+    fn test_it_map() {
+        let env = global_env();
+        exec_env("result = [1, 2, 3].map { it * 2 }", env.clone());
+        assert_eq!(run_env("result[0]", env.clone()), Value::Int(2));
+        assert_eq!(run_env("result[1]", env.clone()), Value::Int(4));
+        assert_eq!(run_env("result[2]", env.clone()), Value::Int(6));
+    }
+
+    #[test]
+    fn test_it_not_set_when_params_explicit() {
+        let env = Environment::new();
+        exec_env("x = 0; [1, 2, 3].each { |n| x = n }", env.clone());
+        assert_eq!(env.borrow().get("it"), None);
     }
 
     #[test]

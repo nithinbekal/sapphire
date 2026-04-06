@@ -423,6 +423,15 @@ nums = [1, 2, 3, 4, 5]
 nums.each { |n| print n }
 ```
 
+When a block takes a single argument and you don't need to name it, use `it`:
+
+```
+nums.each { print it }
+nums.map { it * 2 }   # [2, 4, 6, 8, 10]
+```
+
+`it` is only available when the block has no explicit `|params|`.
+
 ### map
 
 Returns a new list with each element transformed.
