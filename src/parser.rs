@@ -163,13 +163,25 @@ impl Parser {
                         line: self.peek().line,
                     }),
                 };
+                let type_name = if self.check(&TokenKind::Colon) {
+                    self.advance();
+                    match self.peek().kind.clone() {
+                        TokenKind::Identifier(t) => { self.advance(); Some(t) }
+                        _ => return Err(SapphireError::ParseError {
+                            message: "expected type name after ':'".into(),
+                            line: self.peek().line,
+                        }),
+                    }
+                } else {
+                    None
+                };
                 let default = if self.check(&TokenKind::Eq) {
                     self.advance();
                     Some(self.logical()?)
                 } else {
                     None
                 };
-                fields.push(FieldDef { name: field_name, default });
+                fields.push(FieldDef { name: field_name, type_name, default });
             } else if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
                 let private = self.check(&TokenKind::Defp);
                 methods.push(self.method_def(private)?);

@@ -14,8 +14,10 @@ pub enum StringPart {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FieldDef {
     pub name: String,
+    pub type_name: Option<String>,
     pub default: Option<Expr>,
 }
 
