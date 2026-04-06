@@ -856,17 +856,17 @@ print d.describe()   # Rex (Lab)
 
 Every class implicitly inherits from `Object`. This gives all instances two built-in methods:
 
-`is_a?("ClassName")` — returns `true` if the object is an instance of that class or any of its superclasses:
+`is_a?(ClassName)` — returns `true` if the object is an instance of that class or any of its superclasses:
 
 ```
 class Animal { attr name }
 class Dog < Animal {}
 
 d = Dog.new(name: "Rex")
-d.is_a?("Dog")      # true
-d.is_a?("Animal")   # true
-d.is_a?("Object")   # true (always)
-d.is_a?("Cat")      # false
+d.is_a?(Dog)      # true
+d.is_a?(Animal)   # true
+d.is_a?(Object)   # true (always)
+d.is_a?(Cat)      # false
 ```
 
 ---

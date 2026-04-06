@@ -21,7 +21,7 @@ It follows Ruby's object model — everything is an object, interfaces act as mi
 
 ```
 sapphire run file.spr   # run a file
-sapphire               # start the REPL
+sapphire                # start the REPL
 ```
 
 ## Syntax
@@ -108,8 +108,8 @@ class BankAccount {
 All objects inherit from `Object` and respond to `is_a?`:
 
 ```ruby
-p.is_a?("Point")    # true
-p.is_a?("Object")   # true
+p.is_a?(Point)    # true
+p.is_a?(Object)   # true
 ```
 
 ### Error handling
