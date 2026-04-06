@@ -392,6 +392,10 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     "strip"           => Ok(Value::Str(s.trim().to_string())),
                     "chomp"           => Ok(Value::Str(s.trim_end_matches('\n').trim_end_matches('\r').to_string())),
                     "empty?"          => Ok(Value::Bool(s.is_empty())),
+                    "chars" => {
+                        let chars: Vec<Value> = s.chars().map(|c| Value::Str(c.to_string())).collect();
+                        Ok(Value::List(Rc::new(RefCell::new(chars))))
+                    }
                     "split" | "include?" | "starts_with?" | "ends_with?" => Ok(Value::NativeMethod {
                         receiver: Box::new(obj.clone()),
                         name,
@@ -967,6 +971,12 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     }),
                 },
                 op_kind => {
+                    // String repetition: "abc" * 3
+                    if op_kind == TokenKind::Star {
+                        if let (Value::Str(s), Value::Int(n)) = (l.clone(), r.clone()) {
+                            return Ok(Value::Str(s.repeat(n.max(0) as usize)));
+                        }
+                    }
                     // Promote to float if either operand is a float; otherwise require both ints.
                     let use_float = matches!((&l, &r), (Value::Float(_), _) | (_, Value::Float(_)));
                     if use_float {
@@ -1763,6 +1773,21 @@ mod tests {
         assert_eq!(run_env("b.doubled()", env.clone()), Value::Int(99));
         // self.x should be unchanged
         assert_eq!(run_env("b.x", env.clone()), Value::Int(10));
+    }
+
+    #[test]
+    fn test_string_repeat() {
+        assert_eq!(run(r#""ha" * 3"#), Value::Str("hahaha".into()));
+        assert_eq!(run(r#""x" * 0"#), Value::Str("".into()));
+    }
+
+    #[test]
+    fn test_string_chars() {
+        let env = global_env();
+        exec_env(r#"result = "hi".chars"#, env.clone());
+        assert_eq!(run_env("result.length", env.clone()), Value::Int(2));
+        assert_eq!(run_env("result[0]", env.clone()), Value::Str("h".into()));
+        assert_eq!(run_env("result[1]", env.clone()), Value::Str("i".into()));
     }
 
     #[test]
