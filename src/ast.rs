@@ -25,6 +25,7 @@ pub struct MethodDef {
     pub name: String,
     pub params: Vec<String>,
     pub body: Vec<Stmt>,
+    pub private: bool,
 }
 
 #[derive(Debug, Clone)]

@@ -182,11 +182,12 @@ impl Parser {
                     None
                 };
                 fields.push(FieldDef { name: field_name, type_name, default });
-            } else if self.check(&TokenKind::Def) {
-                methods.push(self.method_def()?);
+            } else if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
+                let private = self.check(&TokenKind::Defp);
+                methods.push(self.method_def(private)?);
             } else {
                 return Err(SapphireError::ParseError {
-                    message: "expected 'attr' or 'def' in class body".into(),
+                    message: "expected 'attr', 'def', or 'defp' in class body".into(),
                     line: self.peek().line,
                 });
             }
@@ -257,8 +258,8 @@ impl Parser {
         Ok(Stmt::Function { name, params, body })
     }
 
-    fn method_def(&mut self) -> Result<MethodDef, SapphireError> {
-        self.advance(); // consume 'def'
+    fn method_def(&mut self, private: bool) -> Result<MethodDef, SapphireError> {
+        self.advance(); // consume 'def' or 'defp'
         let name = match self.peek().kind.clone() {
             TokenKind::Identifier(n) => { self.advance(); n }
             _ => return Err(SapphireError::ParseError {
@@ -295,7 +296,7 @@ impl Parser {
         }
         self.advance(); // consume ')'
         let body = self.block()?;
-        Ok(MethodDef { name, params, body })
+        Ok(MethodDef { name, params, body, private })
     }
 
     fn while_statement(&mut self) -> Result<Stmt, SapphireError> {

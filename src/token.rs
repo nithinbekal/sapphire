@@ -43,6 +43,7 @@ pub enum TokenKind {
     Else,
     While,
     Def,
+    Defp,
     Return,
     Break,
     Next,

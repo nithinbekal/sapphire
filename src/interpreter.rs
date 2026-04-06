@@ -262,6 +262,11 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 if let Value::Class { name: ref cname, methods, closure, .. } = class_val {
                     let cname = cname.clone();
                     if let Some(method) = methods.iter().find(|m| m.name == name) {
+                        if method.private && env.borrow().get("__class__").is_none() {
+                            return Err(SapphireError::RuntimeError {
+                                message: format!("private method '{}' called from outside class", name),
+                            });
+                        }
                         return Ok(Value::BoundMethod {
                             receiver: Box::new(obj),
                             params: method.params.clone(),
@@ -1815,6 +1820,33 @@ mod tests {
         assert_eq!(run_env("b.doubled()", env.clone()), Value::Int(99));
         // self.x should be unchanged
         assert_eq!(run_env("b.x", env.clone()), Value::Int(10));
+    }
+
+    #[test]
+    fn test_defp_callable_from_within_class() {
+        let env = Environment::new();
+        exec_env("class Foo { attr x; defp secret() { x + 1 }; def pub() { secret() } }", env.clone());
+        exec_env("f = Foo.new(x: 10)", env.clone());
+        assert_eq!(run_env("f.pub()", env.clone()), Value::Int(11));
+    }
+
+    #[test]
+    fn test_defp_blocked_from_outside() {
+        let env = Environment::new();
+        exec_env("class Foo { defp secret() { 42 } }", env.clone());
+        exec_env("f = Foo.new()", env.clone());
+        let tokens = crate::lexer::Lexer::new("f.secret()").scan_tokens();
+        let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
+        assert!(execute(stmts.remove(0), env).is_err());
+    }
+
+    #[test]
+    fn test_defp_inherited_callable_from_subclass() {
+        let env = Environment::new();
+        exec_env("class A { defp helper() { 99 }; def run() { helper() } }", env.clone());
+        exec_env("class B < A { }", env.clone());
+        exec_env("b = B.new()", env.clone());
+        assert_eq!(run_env("b.run()", env.clone()), Value::Int(99));
     }
 
     #[test]
