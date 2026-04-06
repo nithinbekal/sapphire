@@ -8,6 +8,7 @@ pub enum SapphireError {
     Return(Value),
     Break(Value),
     Next(Value),
+    Raised(Value),
 }
 
 impl fmt::Display for SapphireError {
@@ -22,6 +23,7 @@ impl fmt::Display for SapphireError {
             SapphireError::Return(_) => write!(f, "return outside of function"),
             SapphireError::Break(_)  => write!(f, "break outside of loop"),
             SapphireError::Next(_)   => write!(f, "next outside of loop"),
+            SapphireError::Raised(v) => write!(f, "unhandled raise: {}", v),
         }
     }
 }

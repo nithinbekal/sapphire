@@ -88,6 +88,39 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             let value = evaluate(expr, env)?;
             Err(SapphireError::Next(value))
         }
+        Stmt::Raise(expr) => {
+            let value = evaluate(expr, env)?;
+            Err(SapphireError::Raised(value))
+        }
+        Stmt::Begin { body, rescue_var, rescue_body } => {
+            let mut result = Value::Nil;
+            let mut caught: Option<Value> = None;
+            for stmt in body {
+                match execute(stmt, env.clone()) {
+                    Ok(Some(v)) => result = v,
+                    Ok(None) => {}
+                    Err(SapphireError::Raised(v)) => { caught = Some(v); break; }
+                    Err(SapphireError::RuntimeError { message }) => {
+                        caught = Some(Value::Str(message));
+                        break;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            if let Some(err_val) = caught {
+                if let Some(var) = rescue_var {
+                    env.borrow_mut().set(var, err_val);
+                }
+                for stmt in rescue_body {
+                    match execute(stmt, env.clone()) {
+                        Ok(Some(v)) => result = v,
+                        Ok(None) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+            Ok(Some(result))
+        }
         Stmt::While { condition, body } => {
             'while_loop: loop {
                 let cond = evaluate(condition.clone(), env.clone())?;
@@ -1705,6 +1738,53 @@ mod tests {
         assert_eq!(run_env("b.doubled()", env.clone()), Value::Int(99));
         // self.x should be unchanged
         assert_eq!(run_env("b.x", env.clone()), Value::Int(10));
+    }
+
+    #[test]
+    fn test_raise_unhandled() {
+        let tokens = crate::lexer::Lexer::new(r#"raise "oops""#).scan_tokens();
+        let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
+        let result = execute(stmts.remove(0), Environment::new());
+        assert!(matches!(result, Err(SapphireError::Raised(Value::Str(_)))));
+    }
+
+    #[test]
+    fn test_begin_rescue_catches_raise() {
+        let env = Environment::new();
+        exec_env(r#"x = 0; begin; raise "err"; rescue e; x = 1; end"#, env.clone());
+        assert_eq!(env.borrow().get("x"), Some(Value::Int(1)));
+    }
+
+    #[test]
+    fn test_begin_rescue_binds_message() {
+        let env = Environment::new();
+        exec_env(r#"begin; raise "boom"; rescue e; end"#, env.clone());
+        assert_eq!(env.borrow().get("e"), Some(Value::Str("boom".into())));
+    }
+
+    #[test]
+    fn test_begin_rescue_catches_runtime_error() {
+        let env = Environment::new();
+        exec_env("x = 0; begin; x = 1 / 0; rescue e; x = 99; end", env.clone());
+        assert_eq!(env.borrow().get("x"), Some(Value::Int(99)));
+    }
+
+    #[test]
+    fn test_begin_no_error_skips_rescue() {
+        let env = Environment::new();
+        exec_env("x = 0; begin; x = 42; rescue e; x = 1; end", env.clone());
+        assert_eq!(env.borrow().get("x"), Some(Value::Int(42)));
+    }
+
+    #[test]
+    fn test_raise_instance() {
+        let env = Environment::new();
+        exec_env("class Err { attr msg }; begin; raise Err.new(msg: \"bad\"); rescue e; end", env.clone());
+        if let Some(Value::Instance { class_name, .. }) = env.borrow().get("e") {
+            assert_eq!(class_name, "Err");
+        } else {
+            panic!("expected instance");
+        }
     }
 
     #[test]

@@ -52,6 +52,10 @@ pub enum TokenKind {
     SuperKw,
     Yield,
     Print,
+    Raise,
+    Begin,
+    Rescue,
+    End,
 
     Newline,
     Eof,

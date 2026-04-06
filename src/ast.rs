@@ -60,6 +60,12 @@ pub enum Stmt {
         fields: Vec<FieldDef>,
         methods: Vec<MethodDef>,
     },
+    Raise(Expr),
+    Begin {
+        body: Vec<Stmt>,
+        rescue_var: Option<String>,
+        rescue_body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone)]

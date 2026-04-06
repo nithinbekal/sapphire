@@ -20,6 +20,7 @@ impl Lexer {
     fn ends_statement(kind: &TokenKind) -> bool {
         matches!(kind,
             TokenKind::Identifier(_) | TokenKind::Number(_) | TokenKind::Float(_) |
+            TokenKind::End |
             TokenKind::StringLit(_) | TokenKind::StringInterp(_) |
             TokenKind::True | TokenKind::False | TokenKind::Nil |
             TokenKind::SelfKw | TokenKind::SuperKw | TokenKind::Yield |
@@ -215,7 +216,11 @@ impl Lexer {
             "self"   => TokenKind::SelfKw,
             "super"  => TokenKind::SuperKw,
             "yield"  => TokenKind::Yield,
-            "print" => TokenKind::Print,
+            "print"  => TokenKind::Print,
+            "raise"  => TokenKind::Raise,
+            "begin"  => TokenKind::Begin,
+            "rescue" => TokenKind::Rescue,
+            "end"    => TokenKind::End,
             _ => TokenKind::Identifier(s),
         }
     }

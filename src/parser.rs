@@ -97,6 +97,13 @@ impl Parser {
         if self.check(&TokenKind::While) {
             return self.while_statement();
         }
+        if self.check(&TokenKind::Raise) {
+            self.advance();
+            return Ok(Stmt::Raise(self.logical()?));
+        }
+        if self.check(&TokenKind::Begin) {
+            return self.begin_statement();
+        }
         if self.check(&TokenKind::Print) {
             self.advance();
             return Ok(Stmt::Print(self.logical()?));
@@ -284,6 +291,42 @@ impl Parser {
         let condition = self.logical()?;
         let body = self.block()?;
         Ok(Stmt::While { condition, body })
+    }
+
+    fn begin_statement(&mut self) -> Result<Stmt, SapphireError> {
+        self.advance(); // consume 'begin'
+        let mut body = Vec::new();
+        loop {
+            self.skip_terminators();
+            if self.check(&TokenKind::Rescue) || self.check(&TokenKind::End) || self.is_at_end() { break; }
+            body.push(self.statement()?);
+        }
+        let (rescue_var, rescue_body) = if self.check(&TokenKind::Rescue) {
+            self.advance(); // consume 'rescue'
+            let var = if let TokenKind::Identifier(n) = self.peek().kind.clone() {
+                self.advance();
+                Some(n)
+            } else {
+                None
+            };
+            let mut rescue_body = Vec::new();
+            loop {
+                self.skip_terminators();
+                if self.check(&TokenKind::End) || self.is_at_end() { break; }
+                rescue_body.push(self.statement()?);
+            }
+            (var, rescue_body)
+        } else {
+            (None, Vec::new())
+        };
+        if !self.check(&TokenKind::End) {
+            return Err(SapphireError::ParseError {
+                message: "expected 'end' to close 'begin'".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume 'end'
+        Ok(Stmt::Begin { body, rescue_var, rescue_body })
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>, SapphireError> {
