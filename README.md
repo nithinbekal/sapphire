@@ -28,7 +28,7 @@ sapphire               # start the REPL
 
 ### Variables
 
-```sapphire
+```ruby
 x = 10
 name = "alice"
 flag = true
@@ -36,7 +36,7 @@ flag = true
 
 ### Arithmetic and comparisons
 
-```sapphire
+```ruby
 1 + 2 * 3
 x == 10
 x > 0
@@ -45,7 +45,7 @@ x > 0
 
 ### Control flow
 
-```sapphire
+```ruby
 if x > 0 {
   print x
 } else {
@@ -59,7 +59,7 @@ while x < 10 {
 
 ### Functions
 
-```sapphire
+```ruby
 def add(a, b) {
   a + b
 }
@@ -74,7 +74,7 @@ add(1, 2)
 
 ### Classes
 
-```sapphire
+```ruby
 class Point {
   attr x: Int
   attr y: Int
@@ -85,11 +85,3 @@ p = Point.new(x: 1, y: 2)
 p.x      # => 1
 p.label  # => "origin"
 ```
-
-## Planned
-
-- Instance methods
-- Inheritance (`class Point3D < Point`)
-- Interfaces as mixins
-- Static types enforced at compile time
-- Bytecode VM
