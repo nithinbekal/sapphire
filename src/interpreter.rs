@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static FRAME_COUNTER: AtomicU64 = AtomicU64::new(1);
+fn next_frame_id() -> u64 { FRAME_COUNTER.fetch_add(1, Ordering::Relaxed) }
 use crate::ast::{Block, Expr, MethodDef, Stmt, StringPart};
 use crate::environment::Environment;
 use crate::value::EnvRef;
@@ -91,8 +95,14 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             Ok(None)
         }
         Stmt::Return(expr) => {
-            let value = evaluate(expr, env)?;
-            Err(SapphireError::Return(value))
+            let value = evaluate(expr, env.clone())?;
+            let frame_id = match env.borrow().get("__frame_id__") {
+                Some(Value::Int(id)) => id as u64,
+                _ => return Err(SapphireError::RuntimeError {
+                    message: "return called outside of a method".into(),
+                }),
+            };
+            Err(SapphireError::NonLocalReturn(value, frame_id))
         }
         Stmt::Break(expr) => {
             let value = evaluate(expr, env)?;
@@ -593,6 +603,8 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         });
                     }
                     let call_env = Environment::new_child(closure);
+                    let frame_id = next_frame_id();
+                    call_env.borrow_mut().set("__frame_id__".to_string(), Value::Int(frame_id as i64));
                     for (param, val) in params.iter().zip(arg_vals) {
                         call_env.borrow_mut().set(param.clone(), val);
                     }
@@ -604,7 +616,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         match execute(stmt, call_env.clone()) {
                             Ok(Some(v)) => result = v,
                             Ok(None) => {}
-                            Err(SapphireError::Return(v)) => return Ok(v),
+                            Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => return Ok(v),
                             Err(e) => return Err(e),
                         }
                     }
@@ -618,6 +630,8 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         });
                     }
                     let call_env = Environment::new_child(closure);
+                    let frame_id = next_frame_id();
+                    call_env.borrow_mut().set("__frame_id__".to_string(), Value::Int(frame_id as i64));
                     call_env.borrow_mut().set("self".to_string(), *receiver);
                     call_env.borrow_mut().set("__class__".to_string(), Value::Str(defined_in));
                     for (param, val) in params.iter().zip(arg_vals) {
@@ -631,7 +645,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         match execute(stmt, call_env.clone()) {
                             Ok(Some(v)) => result = v,
                             Ok(None) => {}
-                            Err(SapphireError::Return(v)) => return Ok(v),
+                            Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => return Ok(v),
                             Err(e) => return Err(e),
                         }
                     }
@@ -937,9 +951,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         }
                         (Value::Instance { class_name, .. }, "is_a?") => {
                             let target = match args.into_iter().next() {
-                                Some(Value::Str(s)) => s,
+                                Some(Value::Class { name, .. }) => name,
                                 _ => return Err(SapphireError::RuntimeError {
-                                    message: "is_a? requires a string argument".into(),
+                                    message: "is_a? requires a class argument".into(),
                                 }),
                             };
                             let mut current: Option<String> = Some(class_name);
@@ -1157,6 +1171,8 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 });
             }
             let call_env = Environment::new_child(super_closure);
+            let frame_id = next_frame_id();
+            call_env.borrow_mut().set("__frame_id__".to_string(), Value::Int(frame_id as i64));
             call_env.borrow_mut().set("self".to_string(), self_val);
             call_env.borrow_mut().set("__class__".to_string(), Value::Str(super_name));
             for (param, val) in meth.params.iter().zip(arg_vals) {
@@ -1168,7 +1184,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 match execute(stmt, call_env.clone()) {
                     Ok(Some(v)) => result = v,
                     Ok(None) => {}
-                    Err(SapphireError::Return(v)) => return Ok(v),
+                    Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => return Ok(v),
                     Err(e) => return Err(e),
                 }
             }
@@ -1193,7 +1209,6 @@ fn run_block(block: &Block, args: Vec<Value>, env: EnvRef) -> Result<Value, Sapp
         match execute(stmt.clone(), block_env.clone()) {
             Ok(Some(v)) => result = v,
             Ok(None) => {}
-            Err(SapphireError::Return(v)) => return Ok(v),
             Err(SapphireError::Next(v)) => return Ok(v),
             Err(e) => return Err(e),
         }
@@ -2066,38 +2081,38 @@ mod tests {
     fn test_is_a_direct_class() {
         let env = global_env();
         exec_env("class Dog { attr name }; d = Dog.new(name: \"Rex\")", env.clone());
-        assert_eq!(run_env("d.is_a?(\"Dog\")", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("d.is_a?(Dog)", env.clone()), Value::Bool(true));
     }
 
     #[test]
     fn test_is_a_superclass() {
         let env = global_env();
         exec_env("class Animal { attr name }; class Dog < Animal { attr breed }; d = Dog.new(name: \"Rex\", breed: \"Lab\")", env.clone());
-        assert_eq!(run_env("d.is_a?(\"Animal\")", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("d.is_a?(Animal)", env.clone()), Value::Bool(true));
     }
 
     #[test]
     fn test_is_a_object() {
         let env = global_env();
         exec_env("class Foo {}; f = Foo.new()", env.clone());
-        assert_eq!(run_env("f.is_a?(\"Object\")", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("f.is_a?(Object)", env.clone()), Value::Bool(true));
     }
 
     #[test]
     fn test_is_a_unrelated_class() {
         let env = global_env();
         exec_env("class Cat {}; class Dog {}; d = Dog.new()", env.clone());
-        assert_eq!(run_env("d.is_a?(\"Cat\")", env.clone()), Value::Bool(false));
+        assert_eq!(run_env("d.is_a?(Cat)", env.clone()), Value::Bool(false));
     }
 
     #[test]
     fn test_is_a_deep_chain() {
         let env = global_env();
         exec_env("class A {}; class B < A {}; class C < B {}; c = C.new()", env.clone());
-        assert_eq!(run_env("c.is_a?(\"C\")", env.clone()), Value::Bool(true));
-        assert_eq!(run_env("c.is_a?(\"B\")", env.clone()), Value::Bool(true));
-        assert_eq!(run_env("c.is_a?(\"A\")", env.clone()), Value::Bool(true));
-        assert_eq!(run_env("c.is_a?(\"Object\")", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("c.is_a?(C)", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("c.is_a?(B)", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("c.is_a?(A)", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("c.is_a?(Object)", env.clone()), Value::Bool(true));
     }
 
     #[test]

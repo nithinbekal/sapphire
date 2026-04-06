@@ -19,6 +19,24 @@ impl Parser {
         &self.tokens[self.current]
     }
 
+    // Returns true if the current '{' starts a block rather than a map literal.
+    // { |   → block with params
+    // { }   → empty map
+    // { id: → map entry
+    // other → block without params
+    fn is_block_start(&self) -> bool {
+        if !self.check(&TokenKind::LeftBrace) { return false; }
+        match self.tokens.get(self.current + 1).map(|t| &t.kind) {
+            Some(TokenKind::Pipe) => true,
+            Some(TokenKind::RightBrace) => false,
+            Some(TokenKind::Identifier(_)) => !matches!(
+                self.tokens.get(self.current + 2).map(|t| &t.kind),
+                Some(TokenKind::Colon)
+            ),
+            _ => true,
+        }
+    }
+
     fn is_at_end(&self) -> bool {
         self.peek().kind == TokenKind::Eof
     }
@@ -583,7 +601,7 @@ impl Parser {
                     expr = Expr::Set { object: Box::new(expr), name, value: Box::new(value) };
                     break;
                 }
-                if self.allow_trailing_block && self.check(&TokenKind::LeftBrace) {
+                if self.allow_trailing_block && self.is_block_start() {
                     let block = self.parse_block()?;
                     let get = Expr::Get { object: Box::new(expr), name };
                     expr = Expr::Call { callee: Box::new(get), args: Vec::new(), block };
@@ -625,6 +643,15 @@ impl Parser {
                 expr = Expr::Index { object: Box::new(expr), index: Box::new(index) };
             } else {
                 break;
+            }
+        }
+        // bare identifier followed by a block: `each { |x| ... }` → implicit-self call
+        if self.allow_trailing_block {
+            if let Expr::Variable(_) = &expr {
+                if self.is_block_start() {
+                    let block = self.parse_block()?;
+                    expr = Expr::Call { callee: Box::new(expr), args: Vec::new(), block };
+                }
             }
         }
         Ok(expr)

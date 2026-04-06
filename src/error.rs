@@ -5,7 +5,7 @@ use crate::value::Value;
 pub enum SapphireError {
     ParseError { message: String, line: usize },
     RuntimeError { message: String },
-    Return(Value),
+    NonLocalReturn(Value, u64),
     Break(Value),
     Next(Value),
     Raised(Value),
@@ -20,7 +20,7 @@ impl fmt::Display for SapphireError {
             SapphireError::RuntimeError { message } => {
                 write!(f, "runtime error: {}", message)
             }
-            SapphireError::Return(_) => write!(f, "return outside of function"),
+            SapphireError::NonLocalReturn(..) => write!(f, "return from block after method has returned"),
             SapphireError::Break(_)  => write!(f, "break outside of loop"),
             SapphireError::Next(_)   => write!(f, "next outside of loop"),
             SapphireError::Raised(v) => write!(f, "unhandled raise: {}", v),
