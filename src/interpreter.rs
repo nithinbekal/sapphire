@@ -1823,6 +1823,34 @@ mod tests {
     }
 
     #[test]
+    fn test_elsif_second_branch() {
+        let env = Environment::new();
+        exec_env("x = 5; result = 0\nif x > 10 { result = 1 } elsif x > 3 { result = 2 } else { result = 3 }", env.clone());
+        assert_eq!(env.borrow().get("result"), Some(Value::Int(2)));
+    }
+
+    #[test]
+    fn test_elsif_else_branch() {
+        let env = Environment::new();
+        exec_env("x = 1; result = 0\nif x > 10 { result = 1 } elsif x > 3 { result = 2 } else { result = 3 }", env.clone());
+        assert_eq!(env.borrow().get("result"), Some(Value::Int(3)));
+    }
+
+    #[test]
+    fn test_elsif_first_branch() {
+        let env = Environment::new();
+        exec_env("x = 20; result = 0\nif x > 10 { result = 1 } elsif x > 3 { result = 2 } else { result = 3 }", env.clone());
+        assert_eq!(env.borrow().get("result"), Some(Value::Int(1)));
+    }
+
+    #[test]
+    fn test_elsif_chain() {
+        let env = Environment::new();
+        exec_env("x = 5; result = 0\nif x == 1 { result = 1 } elsif x == 2 { result = 2 } elsif x == 5 { result = 5 } else { result = 99 }", env.clone());
+        assert_eq!(env.borrow().get("result"), Some(Value::Int(5)));
+    }
+
+    #[test]
     fn test_defp_callable_from_within_class() {
         let env = Environment::new();
         exec_env("class Foo { attr x; defp secret() { x + 1 }; def pub() { secret() } }", env.clone());

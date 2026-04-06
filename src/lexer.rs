@@ -205,6 +205,7 @@ impl Lexer {
             "false" => TokenKind::False,
             "nil"   => TokenKind::Nil,
             "if"    => TokenKind::If,
+            "elsif" => TokenKind::Elsif,
             "else"  => TokenKind::Else,
             "while" => TokenKind::While,
             "def"    => TokenKind::Def,

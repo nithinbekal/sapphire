@@ -208,7 +208,26 @@ impl Parser {
         let condition = self.logical()?;
         self.allow_trailing_block = true;
         let then_branch = self.block()?;
-        let else_branch = if self.check(&TokenKind::Else) {
+        let else_branch = if self.check(&TokenKind::Elsif) {
+            Some(vec![self.elsif_chain()?])
+        } else if self.check(&TokenKind::Else) {
+            self.advance();
+            Some(self.block()?)
+        } else {
+            None
+        };
+        Ok(Stmt::If { condition, then_branch, else_branch })
+    }
+
+    fn elsif_chain(&mut self) -> Result<Stmt, SapphireError> {
+        self.advance(); // consume 'elsif'
+        self.allow_trailing_block = false;
+        let condition = self.logical()?;
+        self.allow_trailing_block = true;
+        let then_branch = self.block()?;
+        let else_branch = if self.check(&TokenKind::Elsif) {
+            Some(vec![self.elsif_chain()?])
+        } else if self.check(&TokenKind::Else) {
             self.advance();
             Some(self.block()?)
         } else {

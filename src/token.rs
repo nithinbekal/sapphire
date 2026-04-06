@@ -40,6 +40,7 @@ pub enum TokenKind {
     False,
     Nil,
     If,
+    Elsif,
     Else,
     While,
     Def,
