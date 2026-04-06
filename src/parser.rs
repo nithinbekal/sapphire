@@ -361,12 +361,24 @@ impl Parser {
             let mut rescue_body = Vec::new();
             loop {
                 self.skip_terminators();
-                if self.check(&TokenKind::End) || self.is_at_end() { break; }
+                if self.check(&TokenKind::Else) || self.check(&TokenKind::End) || self.is_at_end() { break; }
                 rescue_body.push(self.statement()?);
             }
             (var, rescue_body)
         } else {
             (None, Vec::new())
+        };
+        let else_body = if self.check(&TokenKind::Else) {
+            self.advance(); // consume 'else'
+            let mut else_body = Vec::new();
+            loop {
+                self.skip_terminators();
+                if self.check(&TokenKind::End) || self.is_at_end() { break; }
+                else_body.push(self.statement()?);
+            }
+            else_body
+        } else {
+            Vec::new()
         };
         if !self.check(&TokenKind::End) {
             return Err(SapphireError::ParseError {
@@ -375,7 +387,7 @@ impl Parser {
             });
         }
         self.advance(); // consume 'end'
-        Ok(Stmt::Begin { body, rescue_var, rescue_body })
+        Ok(Stmt::Begin { body, rescue_var, rescue_body, else_body })
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>, SapphireError> {

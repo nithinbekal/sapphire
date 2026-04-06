@@ -69,6 +69,7 @@ pub enum Stmt {
         body: Vec<Stmt>,
         rescue_var: Option<String>,
         rescue_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
     },
 }
 

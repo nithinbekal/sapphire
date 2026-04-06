@@ -109,7 +109,7 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             let value = evaluate(expr, env)?;
             Err(SapphireError::Raised(value))
         }
-        Stmt::Begin { body, rescue_var, rescue_body } => {
+        Stmt::Begin { body, rescue_var, rescue_body, else_body } => {
             let mut result = Value::Nil;
             let mut caught: Option<Value> = None;
             for stmt in body {
@@ -129,6 +129,14 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
                     env.borrow_mut().set(var, err_val);
                 }
                 for stmt in rescue_body {
+                    match execute(stmt, env.clone()) {
+                        Ok(Some(v)) => result = v,
+                        Ok(None) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+            } else {
+                for stmt in else_body {
                     match execute(stmt, env.clone()) {
                         Ok(Some(v)) => result = v,
                         Ok(None) => {}
@@ -1818,6 +1826,20 @@ mod tests {
     fn test_begin_rescue_catches_runtime_error() {
         let env = Environment::new();
         exec_env("x = 0; begin; x = 1 / 0; rescue e; x = 99; end", env.clone());
+        assert_eq!(env.borrow().get("x"), Some(Value::Int(99)));
+    }
+
+    #[test]
+    fn test_begin_else_runs_when_no_error() {
+        let env = Environment::new();
+        exec_env("x = 0\nbegin\n  x = 1\nrescue e\n  x = 99\nelse\n  x = 2\nend", env.clone());
+        assert_eq!(env.borrow().get("x"), Some(Value::Int(2)));
+    }
+
+    #[test]
+    fn test_begin_else_skipped_on_error() {
+        let env = Environment::new();
+        exec_env("x = 0\nbegin\n  raise \"err\"\nrescue e\n  x = 99\nelse\n  x = 2\nend", env.clone());
         assert_eq!(env.borrow().get("x"), Some(Value::Int(99)));
     }
 
