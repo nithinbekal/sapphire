@@ -15,6 +15,15 @@ const MAP_STDLIB: &str = include_str!("../stdlib/map.spr");
 pub fn global_env() -> EnvRef {
     let env = Environment::new();
     env.borrow_mut().set("read_line".to_string(), Value::NativeFunction("read_line".to_string()));
+    let object_class = Value::Class {
+        name: "Object".to_string(),
+        superclass: None,
+        fields: Vec::new(),
+        methods: Vec::new(),
+        closure: env.clone(),
+    };
+    env.borrow_mut().set("Object".to_string(), object_class);
+    env.borrow_mut().freeze("Object");
     for (src, label) in [(LIST_STDLIB, "stdlib/list.spr"), (MAP_STDLIB, "stdlib/map.spr")] {
         let tokens = crate::lexer::Lexer::new(src).scan_tokens();
         let stmts = crate::parser::Parser::new(tokens).parse()
@@ -43,6 +52,11 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
                     message: format!("'{}' is reserved and cannot be redefined", name),
                 });
             }
+            let superclass: Option<String> = if superclass.is_none() && name != "Object" {
+                Some("Object".to_string())
+            } else {
+                superclass
+            };
             let (mut merged_fields, mut merged_methods) = match superclass {
                 Some(ref super_name) => {
                     let super_val = env.borrow().get(super_name).ok_or_else(|| SapphireError::RuntimeError {
@@ -282,6 +296,10 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     "to_s" => Ok(Value::Str(format!("{}", obj))),
                     "to_i" => Err(SapphireError::RuntimeError {
                         message: format!("cannot convert {} to integer", obj),
+                    }),
+                    "is_a?" | "respond_to?" => Ok(Value::NativeMethod {
+                        receiver: Box::new(obj.clone()),
+                        name,
                     }),
                     _ => Err(SapphireError::RuntimeError {
                         message: format!("undefined field or method '{}'", name),
@@ -951,6 +969,41 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             };
                             Ok(Value::Bool(s.ends_with(suffix.as_str())))
                         }
+                        (Value::Instance { class_name, .. }, "is_a?") => {
+                            let target = match args.into_iter().next() {
+                                Some(Value::Str(s)) => s,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "is_a? requires a string argument".into(),
+                                }),
+                            };
+                            let mut current: Option<String> = Some(class_name);
+                            loop {
+                                match current {
+                                    None => return Ok(Value::Bool(false)),
+                                    Some(ref cname) => {
+                                        if *cname == target { return Ok(Value::Bool(true)); }
+                                        let cname_owned = cname.clone();
+                                        match env.borrow().get(&cname_owned) {
+                                            Some(Value::Class { superclass, .. }) => current = superclass,
+                                            _ => return Ok(Value::Bool(false)),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        (Value::Instance { class_name, .. }, "respond_to?") => {
+                            let method_name = match args.into_iter().next() {
+                                Some(Value::Str(s)) => s,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "respond_to? requires a string argument".into(),
+                                }),
+                            };
+                            let found = match env.borrow().get(&class_name) {
+                                Some(Value::Class { methods, .. }) => methods.iter().any(|m| m.name == method_name),
+                                _ => false,
+                            };
+                            Ok(Value::Bool(found))
+                        }
                         _ => Err(SapphireError::RuntimeError {
                             message: "unknown native method".into(),
                         }),
@@ -1380,7 +1433,7 @@ mod tests {
 
     #[test]
     fn test_class_instantiation() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Point { attr x: Int; attr y: Int }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.x", env.clone()), Value::Int(3));
@@ -1389,7 +1442,7 @@ mod tests {
 
     #[test]
     fn test_instance_method() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Point { attr x: Int; attr y: Int; def sum() { self.x + self.y } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.sum()", env.clone()), Value::Int(5));
@@ -1397,7 +1450,7 @@ mod tests {
 
     #[test]
     fn test_method_with_arg() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
@@ -1470,7 +1523,7 @@ mod tests {
 
     #[test]
     fn test_safe_navigation_non_nil() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Point { attr x }; p = Point.new(x: 3)", env.clone());
         assert_eq!(run_env("p&.x", env.clone()), Value::Int(3));
     }
@@ -1593,7 +1646,7 @@ mod tests {
 
     #[test]
     fn test_inheritance_fields() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Animal { attr name }", env.clone());
         exec_env("class Dog < Animal { attr breed }", env.clone());
         exec_env("d = Dog.new(name: \"Rex\", breed: \"Lab\")", env.clone());
@@ -1603,7 +1656,7 @@ mod tests {
 
     #[test]
     fn test_inheritance_method() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Animal { attr name; def speak() { \"...\" } }", env.clone());
         exec_env("class Dog < Animal {}", env.clone());
         exec_env("d = Dog.new(name: \"Rex\")", env.clone());
@@ -1612,7 +1665,7 @@ mod tests {
 
     #[test]
     fn test_inheritance_override() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Animal { attr name; def speak() { \"...\" } }", env.clone());
         exec_env("class Dog < Animal { def speak() { \"woof\" } }", env.clone());
         exec_env("d = Dog.new(name: \"Rex\")", env.clone());
@@ -1621,7 +1674,7 @@ mod tests {
 
     #[test]
     fn test_field_mutation() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Counter { attr n; def inc() { self.n = self.n + 1 } }", env.clone());
         exec_env("c = Counter.new(n: 0)", env.clone());
         exec_env("c.inc()", env.clone());
@@ -1630,7 +1683,7 @@ mod tests {
 
     #[test]
     fn test_class_default_field() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env(r#"class Point { attr x: Int; attr y: Int; attr label: Str = "origin" }"#, env.clone());
         exec_env("p = Point.new(x: 1, y: 2)", env.clone());
         assert_eq!(run_env("p.label", env.clone()), Value::Str("origin".into()));
@@ -1666,7 +1719,7 @@ mod tests {
 
     #[test]
     fn test_super() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Animal { attr name; def speak() { \"...\" } }", env.clone());
         exec_env("class Dog < Animal { def speak() { super.speak() } }", env.clone());
         exec_env("d = Dog.new(name: \"Rex\")", env.clone());
@@ -1675,7 +1728,7 @@ mod tests {
 
     #[test]
     fn test_super_with_override() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Animal { attr name; def describe() { self.name } }", env.clone());
         exec_env("class Dog < Animal { attr breed; def describe() { super.describe() + \" (\" + self.breed + \")\" } }", env.clone());
         exec_env("d = Dog.new(name: \"Rex\", breed: \"Lab\")", env.clone());
@@ -1718,7 +1771,7 @@ mod tests {
 
     #[test]
     fn test_yield_in_method() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Wrapper { attr items; def each() { len = self.items.length; i = 0; while i < len { yield(self.items[i]); i = i + 1 } } }", env.clone());
         exec_env("w = Wrapper.new(items: [10, 20, 30])", env.clone());
         exec_env("sum = 0; w.each() { |x| sum = sum + x }", env.clone());
@@ -1795,7 +1848,7 @@ mod tests {
 
     #[test]
     fn test_implicit_self_field_read() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Point { attr x; attr y; def sum() { x + y } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 4)", env.clone());
         assert_eq!(run_env("p.sum()", env.clone()), Value::Int(7));
@@ -1803,7 +1856,7 @@ mod tests {
 
     #[test]
     fn test_implicit_self_method_call() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Counter { attr count; def increment() { self.count = count + 1 }; def value() { count } }", env.clone());
         exec_env("c = Counter.new(count: 0)", env.clone());
         exec_env("c.increment()", env.clone());
@@ -1813,7 +1866,7 @@ mod tests {
 
     #[test]
     fn test_implicit_self_local_shadows_field() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Box { attr x; def doubled() { x = 99; x } }", env.clone());
         exec_env("b = Box.new(x: 10)", env.clone());
         // local x = 99 should shadow self.x inside the method
@@ -1852,7 +1905,7 @@ mod tests {
 
     #[test]
     fn test_defp_callable_from_within_class() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Foo { attr x; defp secret() { x + 1 }; def pub() { secret() } }", env.clone());
         exec_env("f = Foo.new(x: 10)", env.clone());
         assert_eq!(run_env("f.pub()", env.clone()), Value::Int(11));
@@ -1860,7 +1913,7 @@ mod tests {
 
     #[test]
     fn test_defp_blocked_from_outside() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Foo { defp secret() { 42 } }", env.clone());
         exec_env("f = Foo.new()", env.clone());
         let tokens = crate::lexer::Lexer::new("f.secret()").scan_tokens();
@@ -1870,7 +1923,7 @@ mod tests {
 
     #[test]
     fn test_defp_inherited_callable_from_subclass() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class A { defp helper() { 99 }; def run() { helper() } }", env.clone());
         exec_env("class B < A { }", env.clone());
         exec_env("b = B.new()", env.clone());
@@ -2016,7 +2069,7 @@ mod tests {
 
     #[test]
     fn test_inline_rescue_in_method() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Safe { def try_div(x) { 10 / x\nrescue e\n -1 } }", env.clone());
         exec_env("s = Safe.new()", env.clone());
         assert_eq!(run_env("s.try_div(2)", env.clone()), Value::Int(5));
@@ -2025,13 +2078,106 @@ mod tests {
 
     #[test]
     fn test_raise_instance() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("class Err { attr msg }; begin; raise Err.new(msg: \"bad\"); rescue e; end", env.clone());
         if let Some(Value::Instance { class_name, .. }) = env.borrow().get("e") {
             assert_eq!(class_name, "Err");
         } else {
             panic!("expected instance");
         }
+    }
+
+    #[test]
+    fn test_object_class_registered() {
+        let env = global_env();
+        assert!(matches!(env.borrow().get("Object"), Some(Value::Class { .. })));
+    }
+
+    #[test]
+    fn test_object_cannot_be_redefined() {
+        let env = global_env();
+        let tokens = crate::lexer::Lexer::new("class Object {}").scan_tokens();
+        let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
+        assert!(execute(stmts.remove(0), env).is_err());
+    }
+
+    #[test]
+    fn test_implicit_object_superclass() {
+        let env = global_env();
+        exec_env("class Animal { attr name }", env.clone());
+        if let Some(Value::Class { superclass, .. }) = env.borrow().get("Animal") {
+            assert_eq!(superclass, Some("Object".to_string()));
+        } else {
+            panic!("Animal not found");
+        }
+    }
+
+    #[test]
+    fn test_is_a_direct_class() {
+        let env = global_env();
+        exec_env("class Dog { attr name }; d = Dog.new(name: \"Rex\")", env.clone());
+        assert_eq!(run_env("d.is_a?(\"Dog\")", env.clone()), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_is_a_superclass() {
+        let env = global_env();
+        exec_env("class Animal { attr name }; class Dog < Animal { attr breed }; d = Dog.new(name: \"Rex\", breed: \"Lab\")", env.clone());
+        assert_eq!(run_env("d.is_a?(\"Animal\")", env.clone()), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_is_a_object() {
+        let env = global_env();
+        exec_env("class Foo {}; f = Foo.new()", env.clone());
+        assert_eq!(run_env("f.is_a?(\"Object\")", env.clone()), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_is_a_unrelated_class() {
+        let env = global_env();
+        exec_env("class Cat {}; class Dog {}; d = Dog.new()", env.clone());
+        assert_eq!(run_env("d.is_a?(\"Cat\")", env.clone()), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_is_a_deep_chain() {
+        let env = global_env();
+        exec_env("class A {}; class B < A {}; class C < B {}; c = C.new()", env.clone());
+        assert_eq!(run_env("c.is_a?(\"C\")", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("c.is_a?(\"B\")", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("c.is_a?(\"A\")", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("c.is_a?(\"Object\")", env.clone()), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_respond_to_existing_method() {
+        let env = global_env();
+        exec_env("class Greeter { def hello() { \"hi\" } }; g = Greeter.new()", env.clone());
+        assert_eq!(run_env("g.respond_to?(\"hello\")", env.clone()), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_respond_to_inherited_method() {
+        let env = global_env();
+        exec_env("class Animal { def speak() { \"...\" } }; class Dog < Animal {}; d = Dog.new()", env.clone());
+        assert_eq!(run_env("d.respond_to?(\"speak\")", env.clone()), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_respond_to_missing_method() {
+        let env = global_env();
+        exec_env("class Foo {}; f = Foo.new()", env.clone());
+        assert_eq!(run_env("f.respond_to?(\"nonexistent\")", env.clone()), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_super_still_works_with_implicit_object() {
+        let env = global_env();
+        exec_env("class Animal { attr name; def speak() { \"...\" } }", env.clone());
+        exec_env("class Dog < Animal { def speak() { super.speak() } }", env.clone());
+        exec_env("d = Dog.new(name: \"Rex\")", env.clone());
+        assert_eq!(run_env("d.speak()", env.clone()), Value::Str("...".into()));
     }
 
     #[test]
