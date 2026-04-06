@@ -163,25 +163,13 @@ impl Parser {
                         line: self.peek().line,
                     }),
                 };
-                let type_name = if self.check(&TokenKind::Colon) {
-                    self.advance();
-                    match self.peek().kind.clone() {
-                        TokenKind::Identifier(t) => { self.advance(); Some(t) }
-                        _ => return Err(SapphireError::ParseError {
-                            message: "expected type name after ':'".into(),
-                            line: self.peek().line,
-                        }),
-                    }
-                } else {
-                    None
-                };
                 let default = if self.check(&TokenKind::Eq) {
                     self.advance();
                     Some(self.logical()?)
                 } else {
                     None
                 };
-                fields.push(FieldDef { name: field_name, type_name, default });
+                fields.push(FieldDef { name: field_name, default });
             } else if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
                 let private = self.check(&TokenKind::Defp);
                 methods.push(self.method_def(private)?);
@@ -983,7 +971,7 @@ mod tests {
 
     #[test]
     fn test_class_def() {
-        let tokens = Lexer::new("class Point { attr x: Int; attr y: Int }").scan_tokens();
+        let tokens = Lexer::new("class Point { attr x; attr y }").scan_tokens();
         let mut stmts = Parser::new(tokens).parse().unwrap();
         assert!(matches!(stmts.remove(0), Stmt::Class { name, .. } if name == "Point"));
     }

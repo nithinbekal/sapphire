@@ -430,9 +430,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             }
 
             // Class: only .new
-            if let Value::Class { name: class_name, superclass, fields, methods, closure } = obj {
+            if let Value::Class { name: class_name, fields, .. } = obj {
                 return if name == "new" {
-                    Ok(Value::Constructor { class_name, superclass, fields, methods, closure })
+                    Ok(Value::Constructor { class_name, fields })
                 } else {
                     Err(SapphireError::RuntimeError {
                         message: format!("unknown class method '{}'", name),
@@ -704,7 +704,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             let (mut acc, rest) = if args.len() == 1 {
                                 (args.into_iter().next().unwrap(), elems.as_slice())
                             } else if args.is_empty() {
-                                let mut it = elems.as_slice().split_first().ok_or_else(|| SapphireError::RuntimeError {
+                                let it = elems.as_slice().split_first().ok_or_else(|| SapphireError::RuntimeError {
                                     message: "reduce requires an initial value or a non-empty list".into(),
                                 })?;
                                 (it.0.clone(), it.1)
@@ -1375,7 +1375,7 @@ mod tests {
     #[test]
     fn test_class_instantiation() {
         let env = global_env();
-        exec_env("class Point { attr x: Int; attr y: Int }", env.clone());
+        exec_env("class Point { attr x; attr y }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.x", env.clone()), Value::Int(3));
         assert_eq!(run_env("p.y", env.clone()), Value::Int(2));
@@ -1384,7 +1384,7 @@ mod tests {
     #[test]
     fn test_instance_method() {
         let env = global_env();
-        exec_env("class Point { attr x: Int; attr y: Int; def sum() { self.x + self.y } }", env.clone());
+        exec_env("class Point { attr x; attr y; def sum() { self.x + self.y } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.sum()", env.clone()), Value::Int(5));
     }
@@ -1392,7 +1392,7 @@ mod tests {
     #[test]
     fn test_method_with_arg() {
         let env = global_env();
-        exec_env("class Point { attr x: Int; attr y: Int; def translate(dx) { self.x + dx } }", env.clone());
+        exec_env("class Point { attr x; attr y; def translate(dx) { self.x + dx } }", env.clone());
         exec_env("p = Point.new(x: 3, y: 2)", env.clone());
         assert_eq!(run_env("p.translate(10)", env.clone()), Value::Int(13));
     }
@@ -1625,7 +1625,7 @@ mod tests {
     #[test]
     fn test_class_default_field() {
         let env = global_env();
-        exec_env(r#"class Point { attr x: Int; attr y: Int; attr label: Str = "origin" }"#, env.clone());
+        exec_env(r#"class Point { attr x; attr y; attr label = "origin" }"#, env.clone());
         exec_env("p = Point.new(x: 1, y: 2)", env.clone());
         assert_eq!(run_env("p.label", env.clone()), Value::Str("origin".into()));
     }
