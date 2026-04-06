@@ -484,29 +484,19 @@ print sum   # 15
 
 ## Integer iteration
 
-`.times` runs a block `n` times, passing the current index (starting at 0).
+`.downto` iterates from an integer down to another, inclusive.
 
 ```
-3.times { |i| print i }
-# 0
-# 1
-# 2
-```
-
-`.upto` and `.downto` iterate between two integers, inclusive.
-
-```
-1.upto(5) { |i| print i }
-# 1
-# 2
-# 3
-# 4
-# 5
-
 3.downto(1) { |i| print i }
 # 3
 # 2
 # 1
+```
+
+For counting up, use a range:
+
+```
+(1..5).each { |i| print i }
 ```
 
 ---
