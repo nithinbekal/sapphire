@@ -310,13 +310,24 @@ impl Parser {
         Ok(stmts)
     }
 
-    // logical: equality (('&&' | '||') equality)*
+    // logical: range (('&&' | '||') range)*
     fn logical(&mut self) -> Result<Expr, SapphireError> {
-        let mut left = self.equality()?;
+        let mut left = self.range()?;
         while self.check(&TokenKind::AmpAmp) || self.check(&TokenKind::PipePipe) {
             let op = self.advance().clone();
-            let right = self.equality()?;
+            let right = self.range()?;
             left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // range: equality ('..' equality)?
+    fn range(&mut self) -> Result<Expr, SapphireError> {
+        let left = self.equality()?;
+        if self.check(&TokenKind::DotDot) {
+            self.advance();
+            let right = self.equality()?;
+            return Ok(Expr::Range { from: Box::new(left), to: Box::new(right) });
         }
         Ok(left)
     }
@@ -533,6 +544,11 @@ impl Parser {
         if let TokenKind::Number(n) = self.peek().kind {
             self.advance();
             return Ok(Expr::Literal(Value::Int(n)));
+        }
+
+        if let TokenKind::Float(f) = self.peek().kind {
+            self.advance();
+            return Ok(Expr::Literal(Value::Float(f)));
         }
 
         if let TokenKind::StringLit(s) = self.peek().kind.clone() {

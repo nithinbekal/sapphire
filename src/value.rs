@@ -10,6 +10,7 @@ pub type EnvRef = Rc<RefCell<Environment>>;
 #[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
+    Float(f64),
     Bool(bool),
     Str(String),
     Nil,
@@ -51,15 +52,20 @@ pub enum Value {
     },
     NativeFunction(String),
     Block(Block, EnvRef),
+    Range { from: i64, to: i64 },
 }
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::Int(a), Value::Float(b)) => (*a as f64) == *b,
+            (Value::Float(a), Value::Int(b)) => *a == (*b as f64),
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Nil, Value::Nil) => true,
+            (Value::Range { from: f1, to: t1 }, Value::Range { from: f2, to: t2 }) => f1 == f2 && t1 == t2,
             _ => false,
         }
     }
@@ -69,6 +75,14 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Int(n) => write!(f, "{}", n),
+            Value::Float(n) => {
+                let s = format!("{}", n);
+                if s.contains('.') || s.contains('e') || s.contains('E') || s == "NaN" || s.ends_with("inf") {
+                    write!(f, "{}", s)
+                } else {
+                    write!(f, "{}.0", s)
+                }
+            }
             Value::Bool(b) => write!(f, "{}", b),
             Value::Str(s) => write!(f, "{}", s),
             Value::Nil => write!(f, "nil"),
@@ -90,6 +104,7 @@ impl fmt::Display for Value {
                 write!(f, "{{{}}}", parts.join(", "))
             }
             Value::Block(..) => write!(f, "<block>"),
+            Value::Range { from, to } => write!(f, "{}..{}", from, to),
             Value::Instance { class_name, fields } => {
                 let mut pairs: Vec<String> = fields
                     .borrow()

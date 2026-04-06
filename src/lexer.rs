@@ -19,7 +19,7 @@ impl Lexer {
 
     fn ends_statement(kind: &TokenKind) -> bool {
         matches!(kind,
-            TokenKind::Identifier(_) | TokenKind::Number(_) |
+            TokenKind::Identifier(_) | TokenKind::Number(_) | TokenKind::Float(_) |
             TokenKind::StringLit(_) | TokenKind::StringInterp(_) |
             TokenKind::True | TokenKind::False | TokenKind::Nil |
             TokenKind::SelfKw | TokenKind::SuperKw | TokenKind::Yield |
@@ -66,7 +66,7 @@ impl Lexer {
                 '}' => TokenKind::RightBrace,
                 '[' => TokenKind::LeftBracket,
                 ']' => TokenKind::RightBracket,
-                '.' => TokenKind::Dot,
+                '.' => if self.match_next('.') { TokenKind::DotDot } else { TokenKind::Dot },
                 ':' => TokenKind::Colon,
                 ';' => TokenKind::Semicolon,
                 ',' => TokenKind::Comma,
@@ -169,7 +169,21 @@ impl Lexer {
         while !self.is_at_end() && self.source[self.current].is_ascii_digit() {
             s.push(self.advance());
         }
-        TokenKind::Number(s.parse().unwrap())
+        // Consume `.digits` as the fractional part of a float.
+        // Guard: next char is `.` AND the char after that is a digit (not `..`).
+        if !self.is_at_end()
+            && self.source[self.current] == '.'
+            && self.current + 1 < self.source.len()
+            && self.source[self.current + 1].is_ascii_digit()
+        {
+            s.push(self.advance()); // '.'
+            while !self.is_at_end() && self.source[self.current].is_ascii_digit() {
+                s.push(self.advance());
+            }
+            TokenKind::Float(s.parse().unwrap())
+        } else {
+            TokenKind::Number(s.parse().unwrap())
+        }
     }
 
     fn identifier(&mut self, first: char) -> TokenKind {
@@ -298,5 +312,36 @@ mod tests {
             scan("empty?"),
             vec![TokenKind::Identifier("empty?".into()), TokenKind::Eof]
         );
+    }
+
+    #[test]
+    fn test_float_literal() {
+        assert_eq!(scan("3.14"), vec![TokenKind::Float(3.14), TokenKind::Eof]);
+        assert_eq!(scan("1.0"), vec![TokenKind::Float(1.0), TokenKind::Eof]);
+    }
+
+    #[test]
+    fn test_integer_dot_dot_not_float() {
+        // `1..10` must lex as Number(1) DotDot Number(10), not as a float
+        assert_eq!(
+            scan("1..10"),
+            vec![TokenKind::Number(1), TokenKind::DotDot, TokenKind::Number(10), TokenKind::Eof]
+        );
+    }
+
+    #[test]
+    fn test_string_escape_sequences() {
+        assert_eq!(scan(r#""\n""#), vec![TokenKind::StringLit("\n".into()), TokenKind::Eof]);
+        assert_eq!(scan(r#""\t""#), vec![TokenKind::StringLit("\t".into()), TokenKind::Eof]);
+        assert_eq!(scan(r#""\r""#), vec![TokenKind::StringLit("\r".into()), TokenKind::Eof]);
+        assert_eq!(scan(r#""\\""#), vec![TokenKind::StringLit("\\".into()), TokenKind::Eof]);
+        assert_eq!(scan(r#""\"""#), vec![TokenKind::StringLit("\"".into()), TokenKind::Eof]);
+        assert_eq!(scan(r#""\#""#), vec![TokenKind::StringLit("#".into()), TokenKind::Eof]);
+    }
+
+    #[test]
+    fn test_string_escape_unknown_passthrough() {
+        // Unknown escape sequences pass through both characters
+        assert_eq!(scan(r#""\z""#), vec![TokenKind::StringLit("\\z".into()), TokenKind::Eof]);
     }
 }

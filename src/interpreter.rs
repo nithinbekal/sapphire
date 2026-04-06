@@ -171,11 +171,22 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     "to_s" => return Ok(Value::Str(format!("{}", obj))),
                     "to_i" => return match obj {
                         Value::Int(n) => Ok(Value::Int(n)),
+                        Value::Float(f) => Ok(Value::Int(f as i64)),
                         Value::Str(s) => s.trim().parse::<i64>().map(Value::Int).map_err(|_| SapphireError::RuntimeError {
                             message: format!("cannot convert {:?} to integer", s),
                         }),
                         _ => Err(SapphireError::RuntimeError {
                             message: format!("cannot convert {} to integer", obj),
+                        }),
+                    },
+                    "to_f" => return match obj {
+                        Value::Float(f) => Ok(Value::Float(f)),
+                        Value::Int(n) => Ok(Value::Float(n as f64)),
+                        Value::Str(s) => s.trim().parse::<f64>().map(Value::Float).map_err(|_| SapphireError::RuntimeError {
+                            message: format!("cannot convert {:?} to float", s),
+                        }),
+                        _ => Err(SapphireError::RuntimeError {
+                            message: format!("cannot convert {} to float", obj),
                         }),
                     },
                     _ => {}
@@ -225,7 +236,8 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     "last" => return elements.borrow().last().cloned().ok_or_else(|| SapphireError::RuntimeError {
                         message: "last called on empty list".into(),
                     }),
-                    "push" | "pop" | "each" | "reduce" => return Ok(Value::NativeMethod {
+                    "push" | "pop" | "each" | "reduce"
+                    | "sort" | "sort_by" | "count" | "flatten" | "uniq" => return Ok(Value::NativeMethod {
                         receiver: Box::new(obj.clone()),
                         name,
                     }),
@@ -246,6 +258,19 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 return Err(SapphireError::RuntimeError {
                     message: format!("unknown list method '{}'", name),
                 });
+            }
+
+            // Ranges
+            if let Value::Range { .. } = obj {
+                match name.as_str() {
+                    "each" | "include?" => return Ok(Value::NativeMethod {
+                        receiver: Box::new(obj),
+                        name,
+                    }),
+                    _ => return Err(SapphireError::RuntimeError {
+                        message: format!("unknown range method '{}'", name),
+                    }),
+                }
             }
 
             // Maps
@@ -429,6 +454,46 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             }
         }
         Expr::Call { callee, args, block } => {
+            // Intercept list.first(n) / list.last(n) before the callee is evaluated,
+            // because Get("first") / Get("last") returns the element directly (not a callable).
+            if let Expr::Get { object, name } = &*callee {
+                if name == "first" || name == "last" {
+                    let obj = evaluate(*object.clone(), env.clone())?;
+                    if let Value::List(ref elements) = obj {
+                        let arg_vals: Vec<Value> = args.iter()
+                            .map(|a| evaluate(a.value.clone(), env.clone()))
+                            .collect::<Result<_, _>>()?;
+                        return match arg_vals.as_slice() {
+                            [] => {
+                                let elems = elements.borrow();
+                                if name == "first" {
+                                    elems.first().cloned().ok_or_else(|| SapphireError::RuntimeError {
+                                        message: "first called on empty list".into(),
+                                    })
+                                } else {
+                                    elems.last().cloned().ok_or_else(|| SapphireError::RuntimeError {
+                                        message: "last called on empty list".into(),
+                                    })
+                                }
+                            }
+                            [Value::Int(n)] => {
+                                let elems = elements.borrow();
+                                let n = (*n).max(0) as usize;
+                                let slice: Vec<Value> = if name == "first" {
+                                    elems.iter().take(n).cloned().collect()
+                                } else {
+                                    let skip = elems.len().saturating_sub(n);
+                                    elems.iter().skip(skip).cloned().collect()
+                                };
+                                Ok(Value::List(Rc::new(RefCell::new(slice))))
+                            }
+                            _ => Err(SapphireError::RuntimeError {
+                                message: format!("{} takes 0 or 1 integer argument", name),
+                            }),
+                        };
+                    }
+                }
+            }
             let callee_val = evaluate(*callee, env.clone())?;
             let mut eval_args: Vec<(Option<String>, Value)> = Vec::new();
             for arg in args {
@@ -586,6 +651,97 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                 message: "pop called on empty list".into(),
                             })
                         }
+                        (Value::List(elements), "count") => {
+                            if let Some(blk) = block {
+                                let mut n = 0i64;
+                                for val in elements.borrow().clone().iter() {
+                                    match run_block(&blk, vec![val.clone()], env.clone()) {
+                                        Ok(Value::Bool(true)) => n += 1,
+                                        Ok(_) => {}
+                                        Err(SapphireError::Break(v)) => return Ok(v),
+                                        Err(e) => return Err(e),
+                                    }
+                                }
+                                Ok(Value::Int(n))
+                            } else {
+                                Ok(Value::Int(elements.borrow().len() as i64))
+                            }
+                        }
+                        (Value::List(elements), "sort") => {
+                            let mut sorted = elements.borrow().clone();
+                            sorted.sort_by(|a, b| match (a, b) {
+                                (Value::Int(x),   Value::Int(y))   => x.cmp(y),
+                                (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+                                (Value::Int(x),   Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+                                (Value::Float(x), Value::Int(y))   => x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal),
+                                (Value::Str(x),   Value::Str(y))   => x.cmp(y),
+                                _ => std::cmp::Ordering::Equal,
+                            });
+                            Ok(Value::List(Rc::new(RefCell::new(sorted))))
+                        }
+                        (Value::List(elements), "sort_by") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "sort_by requires a block".into(),
+                            })?;
+                            let elems = elements.borrow().clone();
+                            let mut keyed: Vec<(Value, Value)> = Vec::new();
+                            for val in elems {
+                                let key = run_block(&blk, vec![val.clone()], env.clone())?;
+                                keyed.push((val, key));
+                            }
+                            keyed.sort_by(|(_, a), (_, b)| match (a, b) {
+                                (Value::Int(x),   Value::Int(y))   => x.cmp(y),
+                                (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+                                (Value::Int(x),   Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+                                (Value::Float(x), Value::Int(y))   => x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal),
+                                (Value::Str(x),   Value::Str(y))   => x.cmp(y),
+                                _ => std::cmp::Ordering::Equal,
+                            });
+                            Ok(Value::List(Rc::new(RefCell::new(keyed.into_iter().map(|(v, _)| v).collect()))))
+                        }
+                        (Value::List(elements), "flatten") => {
+                            fn do_flatten(val: Value) -> Vec<Value> {
+                                match val {
+                                    Value::List(inner) => inner.borrow().clone().into_iter().flat_map(do_flatten).collect(),
+                                    other => vec![other],
+                                }
+                            }
+                            let result: Vec<Value> = elements.borrow().clone().into_iter().flat_map(do_flatten).collect();
+                            Ok(Value::List(Rc::new(RefCell::new(result))))
+                        }
+                        (Value::List(elements), "uniq") => {
+                            let mut seen: Vec<Value> = Vec::new();
+                            for val in elements.borrow().clone() {
+                                if !seen.contains(&val) {
+                                    seen.push(val);
+                                }
+                            }
+                            Ok(Value::List(Rc::new(RefCell::new(seen))))
+                        }
+                        (Value::Range { from, to }, "each") => {
+                            let blk = block.ok_or_else(|| SapphireError::RuntimeError {
+                                message: "each requires a block".into(),
+                            })?;
+                            let mut i = from;
+                            while i <= to {
+                                match run_block(&blk, vec![Value::Int(i)], env.clone()) {
+                                    Ok(_) => {}
+                                    Err(SapphireError::Break(v)) => return Ok(v),
+                                    Err(e) => return Err(e),
+                                }
+                                i += 1;
+                            }
+                            Ok(Value::Nil)
+                        }
+                        (Value::Range { from, to }, "include?") => {
+                            let n = match args.into_iter().next() {
+                                Some(Value::Int(n)) => n,
+                                _ => return Err(SapphireError::RuntimeError {
+                                    message: "include? requires an integer argument".into(),
+                                }),
+                            };
+                            Ok(Value::Bool(n >= from && n <= to))
+                        }
                         (Value::Map(map), "has_key?") => {
                             let key = match args.into_iter().next() {
                                 Some(Value::Str(k)) => k,
@@ -711,8 +867,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 },
                 TokenKind::Minus => match val {
                     Value::Int(n) => Ok(Value::Int(-n)),
+                    Value::Float(f) => Ok(Value::Float(-f)),
                     _ => Err(SapphireError::RuntimeError {
-                        message: "expected integer after '-'".into(),
+                        message: "expected number after '-'".into(),
                     }),
                 },
                 _ => unreachable!(),
@@ -742,47 +899,78 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 TokenKind::EqEq   => Ok(Value::Bool(l == r)),
                 TokenKind::BangEq => Ok(Value::Bool(l != r)),
                 TokenKind::Plus => match (l, r) {
-                    (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
-                    (Value::Str(a), Value::Str(b)) => Ok(Value::Str(a + &b)),
+                    (Value::Int(a),   Value::Int(b))   => Ok(Value::Int(a + b)),
+                    (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
+                    (Value::Int(a),   Value::Float(b)) => Ok(Value::Float(a as f64 + b)),
+                    (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a + b as f64)),
+                    (Value::Str(a),   Value::Str(b))   => Ok(Value::Str(a + &b)),
                     _ => Err(SapphireError::RuntimeError {
-                        message: "'+' requires two integers or two strings".into(),
+                        message: "'+' requires two numbers or two strings".into(),
                     }),
                 },
-                _ => {
-                    let (l, r) = match (l, r) {
-                        (Value::Int(a), Value::Int(b)) => (a, b),
-                        _ => return Err(SapphireError::RuntimeError {
-                            message: format!("operator {:?} requires integers", op.kind),
-                        }),
-                    };
-                    match op.kind {
-                        TokenKind::Minus     => Ok(Value::Int(l - r)),
-                        TokenKind::Star      => Ok(Value::Int(l * r)),
-                        TokenKind::Slash     => {
-                            if r == 0 {
-                                Err(SapphireError::RuntimeError {
-                                    message: "division by zero".into(),
-                                })
-                            } else {
-                                Ok(Value::Int(l / r))
-                            }
+                op_kind => {
+                    // Promote to float if either operand is a float; otherwise require both ints.
+                    let use_float = matches!((&l, &r), (Value::Float(_), _) | (_, Value::Float(_)));
+                    if use_float {
+                        let a = match l {
+                            Value::Int(n)   => n as f64,
+                            Value::Float(f) => f,
+                            _ => return Err(SapphireError::RuntimeError {
+                                message: format!("operator {:?} requires numbers", op_kind),
+                            }),
+                        };
+                        let b = match r {
+                            Value::Int(n)   => n as f64,
+                            Value::Float(f) => f,
+                            _ => return Err(SapphireError::RuntimeError {
+                                message: format!("operator {:?} requires numbers", op_kind),
+                            }),
+                        };
+                        match op_kind {
+                            TokenKind::Minus     => Ok(Value::Float(a - b)),
+                            TokenKind::Star      => Ok(Value::Float(a * b)),
+                            TokenKind::Slash     => Ok(Value::Float(a / b)),
+                            TokenKind::Percent   => Ok(Value::Float(a % b)),
+                            TokenKind::Less      => Ok(Value::Bool(a < b)),
+                            TokenKind::LessEq    => Ok(Value::Bool(a <= b)),
+                            TokenKind::Greater   => Ok(Value::Bool(a > b)),
+                            TokenKind::GreaterEq => Ok(Value::Bool(a >= b)),
+                            _ => Err(SapphireError::RuntimeError {
+                                message: format!("unknown operator: {:?}", op_kind),
+                            }),
                         }
-                        TokenKind::Percent   => {
-                            if r == 0 {
-                                Err(SapphireError::RuntimeError {
-                                    message: "division by zero".into(),
-                                })
-                            } else {
-                                Ok(Value::Int(l % r))
+                    } else {
+                        let (a, b) = match (l, r) {
+                            (Value::Int(a), Value::Int(b)) => (a, b),
+                            _ => return Err(SapphireError::RuntimeError {
+                                message: format!("operator {:?} requires numbers", op_kind),
+                            }),
+                        };
+                        match op_kind {
+                            TokenKind::Minus     => Ok(Value::Int(a - b)),
+                            TokenKind::Star      => Ok(Value::Int(a * b)),
+                            TokenKind::Slash     => {
+                                if b == 0 {
+                                    Err(SapphireError::RuntimeError { message: "division by zero".into() })
+                                } else {
+                                    Ok(Value::Int(a / b))
+                                }
                             }
+                            TokenKind::Percent   => {
+                                if b == 0 {
+                                    Err(SapphireError::RuntimeError { message: "division by zero".into() })
+                                } else {
+                                    Ok(Value::Int(a % b))
+                                }
+                            }
+                            TokenKind::Less      => Ok(Value::Bool(a < b)),
+                            TokenKind::LessEq    => Ok(Value::Bool(a <= b)),
+                            TokenKind::Greater   => Ok(Value::Bool(a > b)),
+                            TokenKind::GreaterEq => Ok(Value::Bool(a >= b)),
+                            _ => Err(SapphireError::RuntimeError {
+                                message: format!("unknown operator: {:?}", op_kind),
+                            }),
                         }
-                        TokenKind::Less      => Ok(Value::Bool(l < r)),
-                        TokenKind::LessEq    => Ok(Value::Bool(l <= r)),
-                        TokenKind::Greater   => Ok(Value::Bool(l > r)),
-                        TokenKind::GreaterEq => Ok(Value::Bool(l >= r)),
-                        _ => Err(SapphireError::RuntimeError {
-                            message: format!("unknown operator: {:?}", op.kind),
-                        }),
                     }
                 }
             }
@@ -802,6 +990,16 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 arg_vals.push(evaluate(arg.value, env.clone())?);
             }
             run_block(&blk, arg_vals, block_env)
+        }
+        Expr::Range { from, to } => {
+            let from_val = evaluate(*from, env.clone())?;
+            let to_val = evaluate(*to, env)?;
+            match (from_val, to_val) {
+                (Value::Int(f), Value::Int(t)) => Ok(Value::Range { from: f, to: t }),
+                _ => Err(SapphireError::RuntimeError {
+                    message: "range bounds must be integers".into(),
+                }),
+            }
         }
         Expr::Super { method, args, block } => {
             let self_val = env.borrow().get("self").ok_or_else(|| SapphireError::RuntimeError {
@@ -1507,5 +1705,226 @@ mod tests {
         assert_eq!(run_env("b.doubled()", env.clone()), Value::Int(99));
         // self.x should be unchanged
         assert_eq!(run_env("b.x", env.clone()), Value::Int(10));
+    }
+
+    #[test]
+    fn test_range_literal() {
+        assert_eq!(run("1..10"), Value::Range { from: 1, to: 10 });
+    }
+
+    #[test]
+    fn test_range_each() {
+        let env = global_env();
+        exec_env("sum = 0; (1..5).each { |i| sum = sum + i }", env.clone());
+        assert_eq!(env.borrow().get("sum"), Some(Value::Int(15)));
+    }
+
+    #[test]
+    fn test_range_include() {
+        let env = global_env();
+        assert_eq!(run_env("(1..10).include?(5)", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("(1..10).include?(11)", env.clone()), Value::Bool(false));
+        assert_eq!(run_env("(1..10).include?(1)", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("(1..10).include?(10)", env.clone()), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_range_to_s() {
+        assert_eq!(run("(1..5).to_s"), Value::Str("1..5".into()));
+    }
+
+    #[test]
+    fn test_float_literal() {
+        assert_eq!(run("3.14"), Value::Float(3.14));
+        assert_eq!(run("1.0"), Value::Float(1.0));
+    }
+
+    #[test]
+    fn test_float_arithmetic() {
+        assert_eq!(run("1.5 + 2.5"), Value::Float(4.0));
+        assert_eq!(run("3.0 - 1.5"), Value::Float(1.5));
+        assert_eq!(run("2.0 * 3.0"), Value::Float(6.0));
+        assert_eq!(run("7.0 / 2.0"), Value::Float(3.5));
+    }
+
+    #[test]
+    fn test_float_mixed_arithmetic() {
+        assert_eq!(run("1 + 0.5"), Value::Float(1.5));
+        assert_eq!(run("0.5 + 1"), Value::Float(1.5));
+        assert_eq!(run("3 * 1.5"), Value::Float(4.5));
+        assert_eq!(run("7 / 2.0"), Value::Float(3.5));
+    }
+
+    #[test]
+    fn test_int_division_stays_int() {
+        assert_eq!(run("7 / 2"), Value::Int(3));
+    }
+
+    #[test]
+    fn test_float_comparison() {
+        assert_eq!(run("1.5 < 2.0"), Value::Bool(true));
+        assert_eq!(run("2.0 > 1.5"), Value::Bool(true));
+        assert_eq!(run("1.0 == 1.0"), Value::Bool(true));
+        assert_eq!(run("1.0 == 1"), Value::Bool(true));
+        assert_eq!(run("1 == 1.0"), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_float_negation() {
+        assert_eq!(run("-3.14"), Value::Float(-3.14));
+    }
+
+    #[test]
+    fn test_float_to_i() {
+        assert_eq!(run("3.9.to_i"), Value::Int(3));
+        assert_eq!(run("-3.9.to_i"), Value::Int(-3));
+    }
+
+    #[test]
+    fn test_int_to_f() {
+        assert_eq!(run("3.to_f"), Value::Float(3.0));
+    }
+
+    #[test]
+    fn test_float_to_s() {
+        assert_eq!(run("3.14.to_s"), Value::Str("3.14".into()));
+        assert_eq!(run("1.0.to_s"), Value::Str("1.0".into()));
+    }
+
+    #[test]
+    fn test_string_escape_newline() {
+        assert_eq!(run(r#""\n""#), Value::Str("\n".into()));
+    }
+
+    #[test]
+    fn test_string_escape_tab() {
+        assert_eq!(run(r#""\t""#), Value::Str("\t".into()));
+    }
+
+    #[test]
+    fn test_string_escape_backslash() {
+        assert_eq!(run(r#""\\""#), Value::Str("\\".into()));
+    }
+
+    #[test]
+    fn test_string_escape_quote() {
+        assert_eq!(run(r#""\"""#), Value::Str("\"".into()));
+    }
+
+    #[test]
+    fn test_string_escape_in_interpolation() {
+        // \n inside an interpolated string
+        assert_eq!(run(r#""a\nb""#), Value::Str("a\nb".into()));
+    }
+
+    #[test]
+    fn test_list_first_no_arg() {
+        assert_eq!(run("[1, 2, 3].first()"), Value::Int(1));
+    }
+
+    #[test]
+    fn test_list_first_n() {
+        let env = global_env();
+        exec_env("result = [1, 2, 3, 4, 5].first(3)", env.clone());
+        assert_eq!(run_env("result.length", env.clone()), Value::Int(3));
+        assert_eq!(run_env("result[0]", env.clone()), Value::Int(1));
+        assert_eq!(run_env("result[2]", env.clone()), Value::Int(3));
+    }
+
+    #[test]
+    fn test_list_last_no_arg() {
+        assert_eq!(run("[1, 2, 3].last()"), Value::Int(3));
+    }
+
+    #[test]
+    fn test_list_last_n() {
+        let env = global_env();
+        exec_env("result = [1, 2, 3, 4, 5].last(2)", env.clone());
+        assert_eq!(run_env("result.length", env.clone()), Value::Int(2));
+        assert_eq!(run_env("result[0]", env.clone()), Value::Int(4));
+        assert_eq!(run_env("result[1]", env.clone()), Value::Int(5));
+    }
+
+    #[test]
+    fn test_list_count_no_block() {
+        assert_eq!(run("[1, 2, 3].count()"), Value::Int(3));
+    }
+
+    #[test]
+    fn test_list_count_with_block() {
+        let env = global_env();
+        assert_eq!(run_env("[1, 2, 3, 4].count { |x| x > 2 }", env), Value::Int(2));
+    }
+
+    #[test]
+    fn test_list_sort() {
+        let env = global_env();
+        exec_env("result = [3, 1, 4, 1, 5, 9, 2].sort()", env.clone());
+        assert_eq!(run_env("result[0]", env.clone()), Value::Int(1));
+        assert_eq!(run_env("result[1]", env.clone()), Value::Int(1));
+        assert_eq!(run_env("result[6]", env.clone()), Value::Int(9));
+    }
+
+    #[test]
+    fn test_list_sort_strings() {
+        let env = global_env();
+        exec_env(r#"result = ["banana", "apple", "cherry"].sort()"#, env.clone());
+        assert_eq!(run_env("result[0]", env.clone()), Value::Str("apple".into()));
+        assert_eq!(run_env("result[2]", env.clone()), Value::Str("cherry".into()));
+    }
+
+    #[test]
+    fn test_list_sort_by() {
+        let env = global_env();
+        exec_env(r#"words = ["banana", "fig", "apple"]; result = words.sort_by { |w| w.length }"#, env.clone());
+        assert_eq!(run_env("result[0]", env.clone()), Value::Str("fig".into()));
+        assert_eq!(run_env("result[2]", env.clone()), Value::Str("banana".into()));
+    }
+
+    #[test]
+    fn test_list_flatten() {
+        let env = global_env();
+        exec_env("result = [[1, 2], [3, [4, 5]]].flatten()", env.clone());
+        assert_eq!(run_env("result.length", env.clone()), Value::Int(5));
+        assert_eq!(run_env("result[3]", env.clone()), Value::Int(4));
+    }
+
+    #[test]
+    fn test_list_uniq() {
+        let env = global_env();
+        exec_env("result = [1, 2, 2, 3, 1].uniq()", env.clone());
+        assert_eq!(run_env("result.length", env.clone()), Value::Int(3));
+        assert_eq!(run_env("result[0]", env.clone()), Value::Int(1));
+        assert_eq!(run_env("result[2]", env.clone()), Value::Int(3));
+    }
+
+    #[test]
+    fn test_list_each_with_index() {
+        let env = global_env();
+        exec_env("pairs = []; [\"a\", \"b\", \"c\"].each_with_index { |item, i| pairs.push(i) }", env.clone());
+        assert_eq!(run_env("pairs[0]", env.clone()), Value::Int(0));
+        assert_eq!(run_env("pairs[1]", env.clone()), Value::Int(1));
+        assert_eq!(run_env("pairs[2]", env.clone()), Value::Int(2));
+    }
+
+    #[test]
+    fn test_list_include() {
+        let env = global_env();
+        assert_eq!(run_env("[1, 2, 3].include?(2)", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("[1, 2, 3].include?(9)", env.clone()), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_list_zip() {
+        let env = global_env();
+        exec_env("result = [1, 2, 3].zip([4, 5, 6])", env.clone());
+        assert_eq!(run_env("result.length", env.clone()), Value::Int(3));
+        // result[0] should be [1, 4]
+        if let Value::List(pair) = run_env("result[0]", env.clone()) {
+            assert_eq!(pair.borrow()[0], Value::Int(1));
+            assert_eq!(pair.borrow()[1], Value::Int(4));
+        } else {
+            panic!("expected List");
+        }
     }
 }

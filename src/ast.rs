@@ -119,4 +119,8 @@ pub enum Expr {
     Yield {
         args: Vec<CallArg>,
     },
+    Range {
+        from: Box<Expr>,
+        to: Box<Expr>,
+    },
 }

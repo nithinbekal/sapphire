@@ -28,9 +28,11 @@ pub enum TokenKind {
     LeftBracket,
     RightBracket,
     Dot,
+    DotDot,
     Colon,
 
     Number(i64),
+    Float(f64),
     StringLit(String),
     StringInterp(Vec<(String, bool)>), // (content, is_expr)
     Identifier(String),
