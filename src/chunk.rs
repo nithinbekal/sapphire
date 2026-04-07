@@ -23,6 +23,10 @@ pub enum OpCode {
     Negate,
     Not,
 
+    // Local variables  (slot = index into the stack frame)
+    GetLocal(usize),
+    SetLocal(usize),
+
     // Stack manipulation
     Pop,
     Return,
@@ -92,6 +96,8 @@ impl Chunk {
                 OpCode::Constant(idx) => {
                     println!("CONSTANT       {:4}  ({})", idx, self.constants[*idx])
                 }
+                OpCode::GetLocal(slot) => println!("GET_LOCAL      {:4}", slot),
+                OpCode::SetLocal(slot) => println!("SET_LOCAL      {:4}", slot),
                 other => println!("{:?}", other),
             }
         }

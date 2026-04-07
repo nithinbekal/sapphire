@@ -23,6 +23,8 @@ impl fmt::Display for CompileError {
 pub struct Compiler {
     chunk:        Chunk,
     current_line: u32,
+    /// Names of locals in declaration order; index = stack slot.
+    locals:       Vec<String>,
 }
 
 impl Compiler {
@@ -31,7 +33,7 @@ impl Compiler {
     /// If the last statement is a bare expression, its value is returned
     /// (implicit return, Ruby-style). Otherwise an implicit `nil` is returned.
     pub fn compile(stmts: &[Stmt]) -> Result<Chunk, CompileError> {
-        let mut c = Compiler { chunk: Chunk::new(), current_line: 0 };
+        let mut c = Compiler { chunk: Chunk::new(), current_line: 0, locals: Vec::new() };
         let (last, rest) = match stmts.split_last() {
             Some(pair) => pair,
             None => {
@@ -63,8 +65,12 @@ impl Compiler {
     fn stmt(&mut self, stmt: &Stmt) -> Result<(), CompileError> {
         match stmt {
             Stmt::Expression(expr) => {
+                let is_new_local = self.defines_new_local(expr);
                 self.expr(expr)?;
-                self.emit(OpCode::Pop);
+                // A defining assignment reserves a stack slot — don't pop it.
+                if !is_new_local {
+                    self.emit(OpCode::Pop);
+                }
             }
             Stmt::Return(expr) => {
                 self.expr(expr)?;
@@ -127,6 +133,28 @@ impl Compiler {
                 Ok(())
             }
 
+            Expr::Variable(name) => {
+                match self.resolve_local(name) {
+                    Some(slot) => { self.emit(OpCode::GetLocal(slot)); Ok(()) }
+                    None => Err(self.error(format!("undefined variable '{}'", name))),
+                }
+            }
+
+            Expr::Assign { name, value } => {
+                self.expr(value)?;
+                match self.resolve_local(name) {
+                    Some(slot) => {
+                        // Reassignment: overwrite the existing slot.
+                        self.emit(OpCode::SetLocal(slot));
+                    }
+                    None => {
+                        // First assignment: the value already on the stack becomes the slot.
+                        self.locals.push(name.clone());
+                    }
+                }
+                Ok(())
+            }
+
             other => Err(self.error(format!(
                 "expression not yet supported by compiler: {:?}",
                 std::mem::discriminant(other)
@@ -165,6 +193,14 @@ impl Compiler {
 
     fn emit(&mut self, op: OpCode) {
         self.chunk.write(op, self.current_line);
+    }
+
+    fn resolve_local(&self, name: &str) -> Option<usize> {
+        self.locals.iter().rposition(|n| n == name)
+    }
+
+    fn defines_new_local(&self, expr: &Expr) -> bool {
+        matches!(expr, Expr::Assign { name, .. } if self.resolve_local(name).is_none())
     }
 
     fn error(&self, message: String) -> CompileError {
@@ -246,6 +282,21 @@ mod tests {
     #[test]
     fn grouping() {
         assert_eq!(eval("(2 + 3) * 4"), VmValue::Int(20));
+    }
+
+    #[test]
+    fn variable_assign_and_read() {
+        assert_eq!(eval("x = 42\nx"), VmValue::Int(42));
+    }
+
+    #[test]
+    fn variable_reassign() {
+        assert_eq!(eval("x = 1\nx = 2\nx"), VmValue::Int(2));
+    }
+
+    #[test]
+    fn multiple_variables() {
+        assert_eq!(eval("a = 3\nb = 4\na + b"), VmValue::Int(7));
     }
 
     #[test]

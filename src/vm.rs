@@ -84,6 +84,23 @@ impl<'a> Vm<'a> {
                 OpCode::False => self.stack.push(VmValue::Bool(false)),
                 OpCode::Nil   => self.stack.push(VmValue::Nil),
 
+                // `GetLocal` pushes a copy of the value at the given stack slot.
+                OpCode::GetLocal(slot) => {
+                    let val = self.stack.get(*slot)
+                        .ok_or(VmError::StackUnderflow)?
+                        .clone();
+                    self.stack.push(val);
+                }
+
+                // `SetLocal` overwrites the slot but leaves the value on the stack
+                // (assignment is an expression that returns the assigned value).
+                OpCode::SetLocal(slot) => {
+                    let val = self.stack.last()
+                        .ok_or(VmError::StackUnderflow)?
+                        .clone();
+                    self.stack[*slot] = val;
+                }
+
                 OpCode::Pop => { self.pop()?; }
 
                 OpCode::Negate => {
