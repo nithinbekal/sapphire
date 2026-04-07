@@ -1,5 +1,6 @@
 mod ast;
 mod chunk;
+mod compiler;
 mod environment;
 mod error;
 mod interpreter;
