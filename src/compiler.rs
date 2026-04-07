@@ -313,6 +313,48 @@ impl Compiler {
                 Ok(())
             }
 
+            Expr::ListLit(elems) => {
+                let n = elems.len();
+                for e in elems {
+                    self.expr(e)?;
+                }
+                self.emit(OpCode::BuildList(n));
+                Ok(())
+            }
+
+            Expr::MapLit(pairs) => {
+                let n = pairs.len();
+                for (key, val_expr) in pairs {
+                    let idx = self.state_mut().chunk.add_constant(Constant::Str(key.clone()));
+                    self.emit(OpCode::Constant(idx));
+                    self.expr(val_expr)?;
+                }
+                self.emit(OpCode::BuildMap(n));
+                Ok(())
+            }
+
+            Expr::Range { from, to } => {
+                self.expr(from)?;
+                self.expr(to)?;
+                self.emit(OpCode::BuildRange);
+                Ok(())
+            }
+
+            Expr::Index { object, index } => {
+                self.expr(object)?;
+                self.expr(index)?;
+                self.emit(OpCode::Index);
+                Ok(())
+            }
+
+            Expr::IndexSet { object, index, value } => {
+                self.expr(object)?;
+                self.expr(index)?;
+                self.expr(value)?;
+                self.emit(OpCode::IndexSet);
+                Ok(())
+            }
+
             Expr::StringInterp(parts) => {
                 let n = parts.len();
                 for part in parts {
@@ -469,6 +511,7 @@ pub fn compile(stmts: &[Stmt]) -> Result<Rc<Function>, CompileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
     use crate::vm::{Vm, VmValue};
 
     /// Lex → parse → compile → run, return the top-of-stack value.
@@ -672,6 +715,48 @@ add5(1) + add10(1)";
     }
 
     // ── and / or / print ──────────────────────────────────────────────────────
+
+    // ── Lists / maps / ranges ─────────────────────────────────────────────────
+
+    #[test]
+    fn list_literal() {
+        // Can't use == on List (Rc pointer equality); check via indexing instead.
+        assert_eq!(eval("[1, 2, 3]\n0"), VmValue::Int(0)); // compiles without error
+        assert_eq!(eval("a = [1, 2, 3]\na[0]"), VmValue::Int(1));
+        assert_eq!(eval("a = [1, 2, 3]\na[2]"), VmValue::Int(3));
+    }
+
+    #[test]
+    fn list_index_read() {
+        assert_eq!(eval("a = [10, 20, 30]\na[1]"), VmValue::Int(20));
+    }
+
+    #[test]
+    fn list_index_negative() {
+        assert_eq!(eval("a = [10, 20, 30]\na[-1]"), VmValue::Int(30));
+    }
+
+    #[test]
+    fn list_index_write() {
+        assert_eq!(eval("a = [1, 2, 3]\na[0] = 99\na[0]"), VmValue::Int(99));
+    }
+
+    #[test]
+    fn map_literal_and_lookup() {
+        assert_eq!(eval(r#"m = {x: 1, y: 2}
+m["x"]"#), VmValue::Int(1));
+    }
+
+    #[test]
+    fn map_missing_key_is_nil() {
+        assert_eq!(eval(r#"m = {a: 1}
+m["z"]"#), VmValue::Nil);
+    }
+
+    #[test]
+    fn range_builds() {
+        assert_eq!(eval("1..5"), VmValue::Range { from: 1, to: 5 });
+    }
 
     // ── String interpolation ──────────────────────────────────────────────────
 

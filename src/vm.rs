@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -47,6 +48,9 @@ pub enum VmValue {
         function: Rc<Function>,
         upvalues: Vec<Upvalue>,
     },
+    List(Rc<RefCell<Vec<VmValue>>>),
+    Map(Rc<RefCell<HashMap<String, VmValue>>>),
+    Range { from: i64, to: i64 },
 }
 
 impl PartialEq for VmValue {
@@ -60,6 +64,10 @@ impl PartialEq for VmValue {
             (VmValue::Function(a), VmValue::Function(b)) => Rc::ptr_eq(a, b),
             (VmValue::Closure { function: f1, .. },
              VmValue::Closure { function: f2, .. }) => Rc::ptr_eq(f1, f2),
+            (VmValue::List(a),  VmValue::List(b))  => Rc::ptr_eq(a, b),
+            (VmValue::Map(a),   VmValue::Map(b))   => Rc::ptr_eq(a, b),
+            (VmValue::Range { from: f1, to: t1 },
+             VmValue::Range { from: f2, to: t2 })  => f1 == f2 && t1 == t2,
             _ => false,
         }
     }
@@ -75,6 +83,18 @@ impl fmt::Display for VmValue {
             VmValue::Nil         => write!(f, "nil"),
             VmValue::Function(func)          => write!(f, "<fn {}>", func.name),
             VmValue::Closure { function, .. } => write!(f, "<fn {}>", function.name),
+            VmValue::List(elems) => {
+                let parts: Vec<String> = elems.borrow().iter().map(|v| format!("{}", v)).collect();
+                write!(f, "[{}]", parts.join(", "))
+            }
+            VmValue::Map(pairs) => {
+                let mut parts: Vec<String> = pairs.borrow().iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                parts.sort();
+                write!(f, "{{{}}}", parts.join(", "))
+            }
+            VmValue::Range { from, to } => write!(f, "{}..{}", from, to),
         }
     }
 }
@@ -260,6 +280,110 @@ impl Vm {
                         .map(|v| format!("{}", v))
                         .collect();
                     self.stack.push(VmValue::Str(parts.concat()));
+                }
+
+                OpCode::BuildList(n) => {
+                    let start = self.stack.len().checked_sub(n).ok_or(VmError::StackUnderflow)?;
+                    let elems: Vec<VmValue> = self.stack.drain(start..).collect();
+                    self.stack.push(VmValue::List(Rc::new(RefCell::new(elems))));
+                }
+
+                OpCode::BuildMap(n) => {
+                    // Stack layout: key0, val0, key1, val1, ... (2*n values)
+                    let start = self.stack.len().checked_sub(n * 2).ok_or(VmError::StackUnderflow)?;
+                    let flat: Vec<VmValue> = self.stack.drain(start..).collect();
+                    let mut map = HashMap::new();
+                    for chunk in flat.chunks(2) {
+                        let key = match &chunk[0] {
+                            VmValue::Str(s) => s.clone(),
+                            other => return Err(VmError::TypeError {
+                                message: format!("map key must be a string, got {}", other),
+                                line,
+                            }),
+                        };
+                        map.insert(key, chunk[1].clone());
+                    }
+                    self.stack.push(VmValue::Map(Rc::new(RefCell::new(map))));
+                }
+
+                OpCode::BuildRange => {
+                    let (a, b) = self.pop2()?;
+                    match (&a, &b) {
+                        (VmValue::Int(from), VmValue::Int(to)) => {
+                            self.stack.push(VmValue::Range { from: *from, to: *to });
+                        }
+                        _ => return Err(VmError::TypeError {
+                            message: format!("range bounds must be integers, got {} and {}", a, b),
+                            line,
+                        }),
+                    }
+                }
+
+                OpCode::Index => {
+                    let idx = self.pop()?;
+                    let obj = self.pop()?;
+                    match (obj, &idx) {
+                        (VmValue::List(elems), VmValue::Int(i)) => {
+                            let elems = elems.borrow();
+                            let len = elems.len() as i64;
+                            let i = if *i < 0 { len + i } else { *i };
+                            if i < 0 || i >= len {
+                                return Err(VmError::TypeError {
+                                    message: format!("list index {} out of bounds (len {})", idx, len),
+                                    line,
+                                });
+                            }
+                            self.stack.push(elems[i as usize].clone());
+                        }
+                        (VmValue::Map(map), VmValue::Str(key)) => {
+                            let val = map.borrow().get(key).cloned().unwrap_or(VmValue::Nil);
+                            self.stack.push(val);
+                        }
+                        (VmValue::Str(s), VmValue::Int(i)) => {
+                            let chars: Vec<char> = s.chars().collect();
+                            let len = chars.len() as i64;
+                            let i = if *i < 0 { len + i } else { *i };
+                            if i < 0 || i >= len {
+                                return Err(VmError::TypeError {
+                                    message: format!("string index {} out of bounds", idx),
+                                    line,
+                                });
+                            }
+                            self.stack.push(VmValue::Str(chars[i as usize].to_string()));
+                        }
+                        (obj, _) => return Err(VmError::TypeError {
+                            message: format!("cannot index {} with {}", obj, idx),
+                            line,
+                        }),
+                    }
+                }
+
+                OpCode::IndexSet => {
+                    let val = self.pop()?;
+                    let idx = self.pop()?;
+                    let obj = self.pop()?;
+                    match (obj, idx) {
+                        (VmValue::List(elems), VmValue::Int(i)) => {
+                            let mut elems = elems.borrow_mut();
+                            let len = elems.len() as i64;
+                            let i = if i < 0 { len + i } else { i };
+                            if i < 0 || i >= len {
+                                return Err(VmError::TypeError {
+                                    message: format!("list index {} out of bounds", i),
+                                    line,
+                                });
+                            }
+                            elems[i as usize] = val.clone();
+                        }
+                        (VmValue::Map(map), VmValue::Str(key)) => {
+                            map.borrow_mut().insert(key, val.clone());
+                        }
+                        (obj, idx) => return Err(VmError::TypeError {
+                            message: format!("cannot index-assign {} with {}", obj, idx),
+                            line,
+                        }),
+                    }
+                    self.stack.push(val);
                 }
 
                 OpCode::Print => {

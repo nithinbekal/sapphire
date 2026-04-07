@@ -89,6 +89,20 @@ pub enum OpCode {
     /// concatenate them in order, and push the resulting Str.
     BuildString(usize),
 
+    // Collections
+    /// Pop `n` values and push a List containing them in order.
+    BuildList(usize),
+    /// Pop `n` (key, value) pairs — keys are Str on the stack — and push a Map.
+    BuildMap(usize),
+    /// Pop two Int values (from, to) and push a Range.
+    BuildRange,
+
+    // Indexing
+    /// Pop index then object; push the element at that index.
+    Index,
+    /// Pop value, index, then object; set the element; push value.
+    IndexSet,
+
     // Output
     /// Pop TOS, print it with a newline, push Nil.
     Print,
@@ -185,6 +199,8 @@ impl Chunk {
                 OpCode::Loop(off)         => println!("LOOP           {:4}", off),
                 OpCode::Call(argc)              => println!("CALL                {:4}", argc),
                 OpCode::BuildString(n)          => println!("BUILD_STRING        {:4}", n),
+                OpCode::BuildList(n)            => println!("BUILD_LIST          {:4}", n),
+                OpCode::BuildMap(n)             => println!("BUILD_MAP           {:4}", n),
                 OpCode::JumpIfFalseKeep(off)    => println!("JUMP_IF_FALSE_KEEP  {:4}", off),
                 OpCode::JumpIfTrueKeep(off)     => println!("JUMP_IF_TRUE_KEEP   {:4}", off),
                 other                           => println!("{:?}", other),
