@@ -1,11 +1,23 @@
 use std::rc::Rc;
 
-/// A compiled function: its own bytecode chunk, name, and arity.
+/// Describes how a closure captures a variable from an enclosing scope.
+#[derive(Debug, Clone)]
+pub struct UpvalueDef {
+    /// If true, the captured variable is a local in the immediately enclosing
+    /// function's stack frame.  If false, it is itself an upvalue of the
+    /// enclosing function (i.e. captured transitively).
+    pub is_local: bool,
+    pub index:    usize,
+}
+
+/// A compiled function: its own bytecode chunk, name, arity, and the upvalue
+/// descriptors needed to build a closure at runtime.
 #[derive(Debug)]
 pub struct Function {
-    pub name:  String,
-    pub arity: usize,
-    pub chunk: Chunk,
+    pub name:         String,
+    pub arity:        usize,
+    pub chunk:        Chunk,
+    pub upvalue_defs: Vec<UpvalueDef>,
 }
 
 /// Two `Function` values are equal only if they are the exact same allocation.
@@ -44,6 +56,12 @@ pub enum OpCode {
     GetLocal(usize),
     SetLocal(usize),
 
+    // Captured variables (upvalues)
+    GetUpvalue(usize),
+    SetUpvalue(usize),
+    /// Close the open upvalue at the top of the stack, then pop the slot.
+    CloseUpvalue,
+
     // Jumps (offset = number of instructions to skip forward from the next ip)
     Jump(usize),
     /// Pop the top of stack; if falsy, jump forward by `offset`.
@@ -51,8 +69,11 @@ pub enum OpCode {
     /// Jump backward: subtract `offset` from ip (used for loops).
     Loop(usize),
 
-    // Functions
-    /// Call the function sitting `arg_count` slots below the top of the stack.
+    // Functions & closures
+    /// Like `Constant`, but wraps the function in a closure capturing upvalues
+    /// according to the function's `upvalue_defs`.
+    Closure(usize),
+    /// Call the callable sitting `arg_count` slots below the top of the stack.
     Call(usize),
 
     // Stack manipulation
@@ -78,9 +99,9 @@ pub enum Constant {
 impl std::fmt::Display for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Constant::Int(n)      => write!(f, "{}", n),
-            Constant::Float(n)    => write!(f, "{}", n),
-            Constant::Str(s)      => write!(f, "{:?}", s),
+            Constant::Int(n)         => write!(f, "{}", n),
+            Constant::Float(n)       => write!(f, "{}", n),
+            Constant::Str(s)         => write!(f, "{:?}", s),
             Constant::Function(func) => write!(f, "<fn {}>", func.name),
         }
     }
@@ -134,16 +155,17 @@ impl Chunk {
             };
             print!("{:04}  {}  ", offset, line_str);
             match op {
-                OpCode::Constant(idx) => {
-                    println!("CONSTANT       {:4}  ({})", idx, self.constants[*idx])
-                }
+                OpCode::Constant(idx)     => println!("CONSTANT       {:4}  ({})", idx, self.constants[*idx]),
+                OpCode::Closure(idx)      => println!("CLOSURE        {:4}  ({})", idx, self.constants[*idx]),
                 OpCode::GetLocal(slot)    => println!("GET_LOCAL      {:4}", slot),
                 OpCode::SetLocal(slot)    => println!("SET_LOCAL      {:4}", slot),
+                OpCode::GetUpvalue(idx)   => println!("GET_UPVALUE    {:4}", idx),
+                OpCode::SetUpvalue(idx)   => println!("SET_UPVALUE    {:4}", idx),
                 OpCode::Jump(off)         => println!("JUMP           {:4}", off),
                 OpCode::JumpIfFalse(off)  => println!("JUMP_IF_FALSE  {:4}", off),
                 OpCode::Loop(off)         => println!("LOOP           {:4}", off),
                 OpCode::Call(argc)        => println!("CALL           {:4}", argc),
-                other => println!("{:?}", other),
+                other                     => println!("{:?}", other),
             }
         }
     }

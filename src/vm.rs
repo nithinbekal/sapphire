@@ -1,18 +1,68 @@
 use std::fmt;
 use std::rc::Rc;
+use std::cell::RefCell;
 use crate::chunk::{Constant, Function, OpCode};
 
-// ── Runtime value ────────────────────────────────────────────────────────────
+// ── Upvalue ───────────────────────────────────────────────────────────────────
+
+/// The heap-allocated cell shared between a closure and the variable it captures.
+/// While the captured variable is still live on the stack the upvalue is "open"
+/// (holds a stack index).  When the enclosing frame returns the upvalue is
+/// "closed": the value is copied out of the stack into the cell itself.
+#[derive(Debug, Clone)]
+pub enum UpvalueState {
+    Open(usize),       // index into Vm::stack
+    Closed(VmValue),
+}
+
+#[derive(Debug, Clone)]
+pub struct Upvalue(pub Rc<RefCell<UpvalueState>>);
+
+impl Upvalue {
+    fn new_open(stack_idx: usize) -> Self {
+        Upvalue(Rc::new(RefCell::new(UpvalueState::Open(stack_idx))))
+    }
+}
+
+impl PartialEq for Upvalue {
+    fn eq(&self, other: &Self) -> bool { Rc::ptr_eq(&self.0, &other.0) }
+}
+
+// ── Runtime value ─────────────────────────────────────────────────────────────
 
 /// Values that live on the VM stack.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum VmValue {
     Int(i64),
     Float(f64),
     Str(String),
     Bool(bool),
     Nil,
+    /// A bare function value (no upvalues).  Used only when a Function constant
+    /// is loaded directly via `OpCode::Constant`; the compiler always uses
+    /// `OpCode::Closure` instead.
     Function(Rc<Function>),
+    /// A closure: a function paired with its captured upvalues.
+    Closure {
+        function: Rc<Function>,
+        upvalues: Vec<Upvalue>,
+    },
+}
+
+impl PartialEq for VmValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (VmValue::Int(a),   VmValue::Int(b))   => a == b,
+            (VmValue::Float(a), VmValue::Float(b)) => a == b,
+            (VmValue::Str(a),   VmValue::Str(b))   => a == b,
+            (VmValue::Bool(a),  VmValue::Bool(b))  => a == b,
+            (VmValue::Nil,      VmValue::Nil)      => true,
+            (VmValue::Function(a), VmValue::Function(b)) => Rc::ptr_eq(a, b),
+            (VmValue::Closure { function: f1, .. },
+             VmValue::Closure { function: f2, .. }) => Rc::ptr_eq(f1, f2),
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for VmValue {
@@ -23,7 +73,8 @@ impl fmt::Display for VmValue {
             VmValue::Str(s)      => write!(f, "{}", s),
             VmValue::Bool(b)     => write!(f, "{}", b),
             VmValue::Nil         => write!(f, "nil"),
-            VmValue::Function(func) => write!(f, "<fn {}>", func.name),
+            VmValue::Function(func)          => write!(f, "<fn {}>", func.name),
+            VmValue::Closure { function, .. } => write!(f, "<fn {}>", function.name),
         }
     }
 }
@@ -39,7 +90,7 @@ impl From<&Constant> for VmValue {
     }
 }
 
-// ── Error ────────────────────────────────────────────────────────────────────
+// ── Error ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, PartialEq)]
 pub enum VmError {
@@ -58,28 +109,33 @@ impl fmt::Display for VmError {
     }
 }
 
-// ── Call frame ───────────────────────────────────────────────────────────────
+// ── Call frame ────────────────────────────────────────────────────────────────
 
 struct CallFrame {
     function: Rc<Function>,
+    /// The upvalues belonging to the closure that created this frame.
+    upvalues: Vec<Upvalue>,
     /// Instruction pointer within this frame's chunk.
-    ip:   usize,
+    ip:       usize,
     /// Index into the VM stack where slot 0 of this frame begins.
-    /// The function value itself lives at `base - 1`.
-    base: usize,
+    /// The function value itself lives at `base`.
+    base:     usize,
 }
 
-// ── VM ───────────────────────────────────────────────────────────────────────
+// ── VM ────────────────────────────────────────────────────────────────────────
 
 pub struct Vm {
-    frames: Vec<CallFrame>,
-    stack:  Vec<VmValue>,
+    frames:        Vec<CallFrame>,
+    stack:         Vec<VmValue>,
+    /// All upvalues that still point into the live stack (open upvalues),
+    /// kept so we can close them when a frame exits.
+    open_upvalues: Vec<Upvalue>,
 }
 
 impl Vm {
     pub fn new(function: Rc<Function>) -> Self {
-        let frame = CallFrame { function, ip: 0, base: 0 };
-        Vm { frames: vec![frame], stack: Vec::new() }
+        let frame = CallFrame { function, upvalues: vec![], ip: 0, base: 0 };
+        Vm { frames: vec![frame], stack: Vec::new(), open_upvalues: Vec::new() }
     }
 
     pub fn run(&mut self) -> Result<Option<VmValue>, VmError> {
@@ -101,6 +157,31 @@ impl Vm {
                     self.stack.push(val);
                 }
 
+                OpCode::Closure(idx) => {
+                    // Load the function from the current frame's constant pool.
+                    let func = match &self.frames.last().unwrap().function.chunk.constants[idx] {
+                        Constant::Function(f) => f.clone(),
+                        _ => panic!("Closure opcode on non-function constant"),
+                    };
+                    // Collect upvalue descriptors into a plain vec so we can call
+                    // &mut self methods without holding a borrow on the frame.
+                    let defs: Vec<(bool, usize)> = func.upvalue_defs
+                        .iter()
+                        .map(|d| (d.is_local, d.index))
+                        .collect();
+                    let mut upvalues = Vec::with_capacity(defs.len());
+                    for (is_local, index) in defs {
+                        let uv = if is_local {
+                            let base = self.frames.last().unwrap().base;
+                            self.capture_upvalue(base + index)
+                        } else {
+                            self.frames.last().unwrap().upvalues[index].clone()
+                        };
+                        upvalues.push(uv);
+                    }
+                    self.stack.push(VmValue::Closure { function: func, upvalues });
+                }
+
                 OpCode::True  => self.stack.push(VmValue::Bool(true)),
                 OpCode::False => self.stack.push(VmValue::Bool(false)),
                 OpCode::Nil   => self.stack.push(VmValue::Nil),
@@ -119,6 +200,28 @@ impl Vm {
                     self.stack[base + slot] = val;
                 }
 
+                OpCode::GetUpvalue(idx) => {
+                    let uv = self.frames.last().unwrap().upvalues[idx].clone();
+                    let val = match &*uv.0.borrow() {
+                        UpvalueState::Open(stack_idx) => self.stack[*stack_idx].clone(),
+                        UpvalueState::Closed(val)     => val.clone(),
+                    };
+                    self.stack.push(val);
+                }
+                OpCode::SetUpvalue(idx) => {
+                    let uv  = self.frames.last().unwrap().upvalues[idx].clone();
+                    let val = self.stack.last().ok_or(VmError::StackUnderflow)?.clone();
+                    match &mut *uv.0.borrow_mut() {
+                        UpvalueState::Open(stack_idx) => { self.stack[*stack_idx] = val; }
+                        UpvalueState::Closed(v)       => { *v = val; }
+                    }
+                }
+                OpCode::CloseUpvalue => {
+                    let top = self.stack.len() - 1;
+                    self.close_upvalues_above(top);
+                    self.stack.pop();
+                }
+
                 OpCode::Jump(offset) => {
                     self.frames.last_mut().unwrap().ip += offset;
                 }
@@ -133,13 +236,16 @@ impl Vm {
                 }
 
                 OpCode::Call(arg_count) => {
-                    // Stack: [..., fn, arg0, arg1, ..., argN-1]
+                    // Stack: [..., fn_or_closure, arg0, …, argN-1]
                     let fn_slot = self.stack.len()
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
 
-                    let function = match &self.stack[fn_slot] {
-                        VmValue::Function(f) => f.clone(),
+                    let (function, upvalues) = match &self.stack[fn_slot] {
+                        VmValue::Function(f) => (f.clone(), vec![]),
+                        VmValue::Closure { function, upvalues } => {
+                            (function.clone(), upvalues.clone())
+                        }
                         other => return Err(VmError::TypeError {
                             message: format!("'{}' is not callable", other),
                             line,
@@ -157,12 +263,15 @@ impl Vm {
                     // Slot 0 of the new frame is the function itself (enables recursion).
                     // Slot 1..arity are the arguments.
                     let base = fn_slot;
-                    self.frames.push(CallFrame { function, ip: 0, base });
+                    self.frames.push(CallFrame { function, upvalues, ip: 0, base });
                 }
 
                 OpCode::Return => {
                     let return_val = self.stack.pop();
-                    let frame = self.frames.pop().unwrap();
+                    let frame      = self.frames.pop().unwrap();
+
+                    // Close every upvalue that points into the returning frame.
+                    self.close_upvalues_above(frame.base);
 
                     if self.frames.is_empty() {
                         return Ok(return_val);
@@ -243,8 +352,8 @@ impl Vm {
                     });
                 }
 
-                OpCode::Equal        => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a == b)); }
-                OpCode::NotEqual     => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a != b)); }
+                OpCode::Equal    => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a == b)); }
+                OpCode::NotEqual => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a != b)); }
 
                 OpCode::Less => {
                     let (a, b) = self.pop2()?;
@@ -265,6 +374,39 @@ impl Vm {
             }
         }
     }
+
+    // ── Upvalue helpers ───────────────────────────────────────────────────────
+
+    /// Return an open upvalue for `stack_idx`, reusing an existing one if
+    /// present (so all closures that capture the same slot share one cell).
+    fn capture_upvalue(&mut self, stack_idx: usize) -> Upvalue {
+        if let Some(uv) = self.open_upvalues.iter().find(|uv| {
+            matches!(*uv.0.borrow(), UpvalueState::Open(i) if i == stack_idx)
+        }) {
+            return uv.clone();
+        }
+        let uv = Upvalue::new_open(stack_idx);
+        self.open_upvalues.push(uv.clone());
+        uv
+    }
+
+    /// Close all open upvalues whose stack index is >= `first_slot` by copying
+    /// the current stack value into the upvalue cell.
+    fn close_upvalues_above(&mut self, first_slot: usize) {
+        for uv in &self.open_upvalues {
+            let mut state = uv.0.borrow_mut();
+            if let UpvalueState::Open(idx) = *state {
+                if idx >= first_slot {
+                    let val = self.stack[idx].clone();
+                    *state = UpvalueState::Closed(val);
+                }
+            }
+        }
+        self.open_upvalues
+            .retain(|uv| matches!(*uv.0.borrow(), UpvalueState::Open(_)));
+    }
+
+    // ── Stack helpers ─────────────────────────────────────────────────────────
 
     fn pop(&mut self) -> Result<VmValue, VmError> {
         self.stack.pop().ok_or(VmError::StackUnderflow)
@@ -306,7 +448,7 @@ fn to_float(v: &VmValue) -> Option<f64> {
     }
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -314,7 +456,7 @@ mod tests {
     use crate::chunk::{Chunk, Constant, Function, OpCode};
 
     fn run(chunk: Chunk) -> Result<Option<VmValue>, VmError> {
-        let f = Rc::new(Function { name: String::new(), arity: 0, chunk });
+        let f = Rc::new(Function { name: String::new(), arity: 0, chunk, upvalue_defs: vec![] });
         Vm::new(f).run()
     }
 

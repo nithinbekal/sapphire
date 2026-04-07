@@ -1,16 +1,16 @@
 use std::fmt;
 use std::rc::Rc;
-use crate::ast::{Expr, ParamDef, Stmt};
-use crate::chunk::{Chunk, Constant, Function, OpCode};
+use crate::ast::{Expr, Stmt};
+use crate::chunk::{Chunk, Constant, Function, OpCode, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
 
-// ── Error ────────────────────────────────────────────────────────────────────
+// ── Error ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, PartialEq)]
 pub struct CompileError {
     pub message: String,
-    pub line: u32,
+    pub line:    u32,
 }
 
 impl fmt::Display for CompileError {
@@ -19,47 +19,92 @@ impl fmt::Display for CompileError {
     }
 }
 
-// ── Compiler ─────────────────────────────────────────────────────────────────
+// ── Per-function compiler state ───────────────────────────────────────────────
 
-struct Compiler {
+struct LocalInfo {
+    name:     String,
+    /// True once another closure has captured this local as an upvalue.
+    captured: bool,
+}
+
+struct UpvalueInfo {
+    is_local: bool,   // local in the immediately enclosing scope
+    index:    usize,
+}
+
+struct FunctionState {
     chunk:        Chunk,
     current_line: u32,
-    /// Names of locals in declaration order; index = stack slot within this frame.
-    locals:       Vec<String>,
+    locals:       Vec<LocalInfo>,
+    upvalue_defs: Vec<UpvalueInfo>,
+    name:         String,
+    arity:        usize,
+}
+
+impl FunctionState {
+    fn new(name: &str, arity: usize, line: u32) -> Self {
+        FunctionState {
+            chunk:        Chunk::new(),
+            current_line: line,
+            locals:       Vec::new(),
+            upvalue_defs: Vec::new(),
+            name:         name.to_string(),
+            arity,
+        }
+    }
+}
+
+// ── Compiler ──────────────────────────────────────────────────────────────────
+
+/// A stack of `FunctionState`s, one per nesting level.  The top of the stack
+/// is the function currently being compiled.
+struct Compiler {
+    states: Vec<FunctionState>,
 }
 
 impl Compiler {
-    fn new(line: u32) -> Self {
-        Compiler { chunk: Chunk::new(), current_line: line, locals: Vec::new() }
+    fn new() -> Self {
+        Compiler { states: Vec::new() }
     }
 
-    // ── Public entry points ───────────────────────────────────────────────
+    // ── Public entry points ───────────────────────────────────────────────────
 
     /// Compile a top-level program (arity 0, anonymous).
     pub fn compile(stmts: &[Stmt]) -> Result<Rc<Function>, CompileError> {
-        let mut c = Compiler::new(0);
+        let mut c = Compiler::new();
+        c.push_fn("", 0, 0);
         c.compile_body(stmts)?;
-        Ok(Rc::new(Function { name: String::new(), arity: 0, chunk: c.chunk }))
+        Ok(c.pop_fn())
     }
 
-    /// Compile a named function with parameters.
-    fn compile_fn(
-        name: &str,
-        params: &[ParamDef],
-        body: &[Stmt],
-        line: u32,
-    ) -> Result<Rc<Function>, CompileError> {
-        let mut c = Compiler::new(line);
-        // Slot 0 is the function itself — enables direct recursion by name.
-        c.locals.push(name.to_string());
-        for p in params {
-            c.locals.push(p.name.clone());
-        }
-        c.compile_body(body)?;
-        Ok(Rc::new(Function { name: name.to_string(), arity: params.len(), chunk: c.chunk }))
+    // ── Function stack ────────────────────────────────────────────────────────
+
+    fn push_fn(&mut self, name: &str, arity: usize, line: u32) {
+        self.states.push(FunctionState::new(name, arity, line));
     }
 
-    // ── Body compilation (shared between top-level and functions) ─────────
+    fn pop_fn(&mut self) -> Rc<Function> {
+        let state = self.states.pop().unwrap();
+        Rc::new(Function {
+            name:  state.name,
+            arity: state.arity,
+            chunk: state.chunk,
+            upvalue_defs: state.upvalue_defs
+                .into_iter()
+                .map(|uv| UpvalueDef { is_local: uv.is_local, index: uv.index })
+                .collect(),
+        })
+    }
+
+    fn state(&self) -> &FunctionState {
+        self.states.last().unwrap()
+    }
+
+    fn state_mut(&mut self) -> &mut FunctionState {
+        self.states.last_mut().unwrap()
+    }
+
+    // ── Body compilation (shared between top-level and functions) ─────────────
 
     /// Compile a list of statements, treating the last expression as an
     /// implicit return value (Ruby-style).
@@ -87,12 +132,12 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Statements ────────────────────────────────────────────────────────
+    // ── Statements ────────────────────────────────────────────────────────────
 
     fn stmt(&mut self, stmt: &Stmt) -> Result<(), CompileError> {
         match stmt {
             Stmt::Expression(expr) => {
-                let is_new_local = self.defines_new_local(expr);
+                let is_new_local = self.is_new_local_assign(expr);
                 self.expr(expr)?;
                 // A defining assignment reserves a stack slot — don't pop it.
                 if !is_new_local {
@@ -106,11 +151,22 @@ impl Compiler {
             }
 
             Stmt::Function { name, params, body, .. } => {
-                let func = Compiler::compile_fn(name, params, body, self.current_line)?;
-                let idx  = self.chunk.add_constant(Constant::Function(func));
-                self.emit(OpCode::Constant(idx));
-                // The function value on the stack becomes this local's slot.
-                self.locals.push(name.clone());
+                let line  = self.state().current_line;
+                let arity = params.len();
+
+                self.push_fn(name, arity, line);
+                // Slot 0 = the function itself — enables direct recursion by name.
+                self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                for p in params {
+                    self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
+                }
+                self.compile_body(body)?;
+                let func = self.pop_fn();
+
+                let idx = self.state_mut().chunk.add_constant(Constant::Function(func));
+                self.emit(OpCode::Closure(idx));
+                // The closure value on the stack becomes this local's slot.
+                self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
             }
 
             Stmt::If { condition, then_branch, else_branch } => {
@@ -122,18 +178,18 @@ impl Compiler {
                 match else_branch {
                     Some(else_stmts) => {
                         let jump = self.emit_jump(OpCode::Jump(0));
-                        self.chunk.patch_jump(jif);
+                        self.patch_jump(jif);
                         self.stmts(else_stmts)?;
-                        self.chunk.patch_jump(jump);
+                        self.patch_jump(jump);
                     }
                     None => {
-                        self.chunk.patch_jump(jif);
+                        self.patch_jump(jif);
                     }
                 }
             }
 
             Stmt::While { condition, body } => {
-                let loop_start = self.chunk.code.len();
+                let loop_start = self.state().chunk.code.len();
 
                 self.expr(condition)?;
                 let exit_jump = self.emit_jump(OpCode::JumpIfFalse(0));
@@ -141,7 +197,7 @@ impl Compiler {
                 self.stmts(body)?;
                 self.emit_loop(loop_start);
 
-                self.chunk.patch_jump(exit_jump);
+                self.patch_jump(exit_jump);
             }
 
             Stmt::Print(expr) => {
@@ -159,7 +215,7 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Expressions ───────────────────────────────────────────────────────
+    // ── Expressions ───────────────────────────────────────────────────────────
 
     fn expr(&mut self, expr: &Expr) -> Result<(), CompileError> {
         match expr {
@@ -168,7 +224,7 @@ impl Compiler {
             Expr::Grouping(inner) => self.expr(inner),
 
             Expr::Unary { op, right } => {
-                self.current_line = op.line as u32;
+                self.state_mut().current_line = op.line as u32;
                 self.expr(right)?;
                 match &op.kind {
                     TokenKind::Minus => self.emit(OpCode::Negate),
@@ -179,7 +235,7 @@ impl Compiler {
             }
 
             Expr::Binary { left, op, right } => {
-                self.current_line = op.line as u32;
+                self.state_mut().current_line = op.line as u32;
                 self.expr(left)?;
                 self.expr(right)?;
                 match &op.kind {
@@ -199,17 +255,27 @@ impl Compiler {
             }
 
             Expr::Variable(name) => {
-                match self.resolve_local(name) {
-                    Some(slot) => { self.emit(OpCode::GetLocal(slot)); Ok(()) }
-                    None => Err(self.error(format!("undefined variable '{}'", name))),
+                let depth = self.states.len() - 1;
+                if let Some(slot) = self.resolve_local(depth, name) {
+                    self.emit(OpCode::GetLocal(slot));
+                } else if let Some(idx) = self.resolve_upvalue(depth, name) {
+                    self.emit(OpCode::GetUpvalue(idx));
+                } else {
+                    return Err(self.error(format!("undefined variable '{}'", name)));
                 }
+                Ok(())
             }
 
             Expr::Assign { name, value } => {
                 self.expr(value)?;
-                match self.resolve_local(name) {
-                    Some(slot) => { self.emit(OpCode::SetLocal(slot)); }
-                    None       => { self.locals.push(name.clone()); }
+                let depth = self.states.len() - 1;
+                if let Some(slot) = self.resolve_local(depth, name) {
+                    self.emit(OpCode::SetLocal(slot));
+                } else if let Some(idx) = self.resolve_upvalue(depth, name) {
+                    self.emit(OpCode::SetUpvalue(idx));
+                } else {
+                    // First use of this name: allocate a new stack slot.
+                    self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
                 }
                 Ok(())
             }
@@ -240,17 +306,17 @@ impl Compiler {
             Value::Bool(false) => { self.emit(OpCode::False); Ok(()) }
             Value::Nil         => { self.emit(OpCode::Nil);   Ok(()) }
             Value::Int(n) => {
-                let idx = self.chunk.add_constant(Constant::Int(*n));
+                let idx = self.state_mut().chunk.add_constant(Constant::Int(*n));
                 self.emit(OpCode::Constant(idx));
                 Ok(())
             }
             Value::Float(n) => {
-                let idx = self.chunk.add_constant(Constant::Float(*n));
+                let idx = self.state_mut().chunk.add_constant(Constant::Float(*n));
                 self.emit(OpCode::Constant(idx));
                 Ok(())
             }
             Value::Str(s) => {
-                let idx = self.chunk.add_constant(Constant::Str(s.clone()));
+                let idx = self.state_mut().chunk.add_constant(Constant::Str(s.clone()));
                 self.emit(OpCode::Constant(idx));
                 Ok(())
             }
@@ -261,21 +327,89 @@ impl Compiler {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────
+    // ── Variable resolution ───────────────────────────────────────────────────
+
+    /// Look up `name` as a local in the function at `depth` (index into `states`).
+    /// Returns the stack slot index if found.
+    fn resolve_local(&self, depth: usize, name: &str) -> Option<usize> {
+        self.states[depth].locals.iter().rposition(|l| l.name == name)
+    }
+
+    /// Resolve `name` as an upvalue visible from the function at `depth`.
+    /// If found in a parent scope, the necessary `UpvalueDef` entries are added
+    /// and the captured locals are marked.  Returns the upvalue index.
+    fn resolve_upvalue(&mut self, depth: usize, name: &str) -> Option<usize> {
+        if depth == 0 {
+            return None; // top-level scope: no enclosing function
+        }
+        let parent = depth - 1;
+
+        // Is it a local in the immediately enclosing function?
+        if let Some(local_idx) = self.resolve_local(parent, name) {
+            self.states[parent].locals[local_idx].captured = true;
+            return Some(self.add_upvalue(depth, true, local_idx));
+        }
+
+        // Is it an upvalue in the enclosing function (transitive capture)?
+        if let Some(upvalue_idx) = self.resolve_upvalue(parent, name) {
+            return Some(self.add_upvalue(depth, false, upvalue_idx));
+        }
+
+        None
+    }
+
+    /// Add an upvalue descriptor to the function at `depth`, deduplicating.
+    fn add_upvalue(&mut self, depth: usize, is_local: bool, index: usize) -> usize {
+        let existing = self.states[depth].upvalue_defs.iter().position(|uv| {
+            uv.is_local == is_local && uv.index == index
+        });
+        if let Some(i) = existing {
+            return i;
+        }
+        let i = self.states[depth].upvalue_defs.len();
+        self.states[depth].upvalue_defs.push(UpvalueInfo { is_local, index });
+        i
+    }
+
+    /// True when `expr` is an assignment to a name that is neither an existing
+    /// local nor an upvalue — i.e. it will create a new stack slot.
+    fn is_new_local_assign(&self, expr: &Expr) -> bool {
+        if let Expr::Assign { name, .. } = expr {
+            let depth = self.states.len() - 1;
+            self.resolve_local(depth, name).is_none()
+                && !self.would_be_upvalue(depth, name)
+        } else {
+            false
+        }
+    }
+
+    /// Pure (non-mutating) upvalue check used by `is_new_local_assign`.
+    fn would_be_upvalue(&self, depth: usize, name: &str) -> bool {
+        if depth == 0 { return false; }
+        let parent = depth - 1;
+        self.resolve_local(parent, name).is_some() || self.would_be_upvalue(parent, name)
+    }
+
+    // ── Emit helpers ──────────────────────────────────────────────────────────
 
     fn emit(&mut self, op: OpCode) {
-        self.chunk.write(op, self.current_line);
+        let line = self.state().current_line;
+        self.state_mut().chunk.write(op, line);
     }
 
     fn emit_jump(&mut self, op: OpCode) -> usize {
-        let idx = self.chunk.code.len();
+        let idx = self.state().chunk.code.len();
         self.emit(op);
         idx
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
-        let offset = self.chunk.code.len() + 1 - loop_start;
+        let offset = self.state().chunk.code.len() + 1 - loop_start;
         self.emit(OpCode::Loop(offset));
+    }
+
+    fn patch_jump(&mut self, jump_idx: usize) {
+        self.state_mut().chunk.patch_jump(jump_idx);
     }
 
     fn stmts(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
@@ -283,16 +417,8 @@ impl Compiler {
         Ok(())
     }
 
-    fn resolve_local(&self, name: &str) -> Option<usize> {
-        self.locals.iter().rposition(|n| n == name)
-    }
-
-    fn defines_new_local(&self, expr: &Expr) -> bool {
-        matches!(expr, Expr::Assign { name, .. } if self.resolve_local(name).is_none())
-    }
-
     fn error(&self, message: String) -> CompileError {
-        CompileError { message, line: self.current_line }
+        CompileError { message, line: self.state().current_line }
     }
 }
 
@@ -301,7 +427,7 @@ pub fn compile(stmts: &[Stmt]) -> Result<Rc<Function>, CompileError> {
     Compiler::compile(stmts)
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -462,5 +588,65 @@ mod tests {
     fn recursive_function() {
         let src = "def fact(n) { if n <= 1 { return 1 }\nn * fact(n - 1) }\nfact(5)";
         assert_eq!(eval(src), VmValue::Int(120));
+    }
+
+    // ── Closure tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn closure_captures_param() {
+        // adder closes over `n` from make_adder's frame
+        let src = "
+def make_adder(n) {
+  def adder(x) { n + x }
+  adder
+}
+add5 = make_adder(5)
+add5(3)";
+        assert_eq!(eval(src), VmValue::Int(8));
+    }
+
+    #[test]
+    fn closure_captures_local() {
+        let src = "
+def make_counter() {
+  count = 0
+  def inc() { count = count + 1\ncount }
+  inc
+}
+counter = make_counter()
+counter()
+counter()
+counter()";
+        assert_eq!(eval(src), VmValue::Int(3));
+    }
+
+    #[test]
+    fn closure_survives_enclosing_frame() {
+        // make_adder has returned by the time add5 is called
+        let src = "
+def make_adder(n) {
+  def adder(x) { n + x }
+  adder
+}
+add5 = make_adder(5)
+add10 = make_adder(10)
+add5(1) + add10(1)";
+        assert_eq!(eval(src), VmValue::Int(17));
+    }
+
+    #[test]
+    fn transitive_capture() {
+        // inner captures mid's local, which itself captures outer's param
+        let src = "
+def outer(x) {
+  def mid() {
+    def inner() { x }
+    inner
+  }
+  mid
+}
+f = outer(42)()
+f()";
+        assert_eq!(eval(src), VmValue::Int(42));
     }
 }
