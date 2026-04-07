@@ -15,9 +15,9 @@ fn main() {
     match args.as_slice() {
         [_, cmd, path] if cmd == "run"       => run_file(path),
         [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
-        [_] => run_repl(),
+        [_, cmd] if cmd == "console" => run_repl(),
         _ => {
-            eprintln!("Usage: sapphire [run <file.spr> | typecheck <file.spr>]");
+            eprintln!("Usage: sapphire [run <file.spr> | typecheck <file.spr> | console]");
             std::process::exit(1);
         }
     }
