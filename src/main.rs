@@ -1,4 +1,5 @@
 mod ast;
+mod chunk;
 mod environment;
 mod error;
 mod interpreter;
@@ -7,6 +8,7 @@ mod parser;
 mod token;
 mod typechecker;
 mod value;
+mod vm;
 
 use std::io::{self, Write};
 
