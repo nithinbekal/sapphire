@@ -1,0 +1,9 @@
+class Nil {
+  def nil?() {
+    true
+  }
+
+  def to_s() {
+    "nil"
+  }
+}

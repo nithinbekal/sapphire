@@ -1,4 +1,8 @@
 class Object {
+  def nil?() {
+    false
+  }
+
   def to_s() {
     "#<#{self.class.name}>"
   }

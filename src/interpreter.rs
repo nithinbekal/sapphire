@@ -14,6 +14,7 @@ use crate::token::TokenKind;
 use crate::value::Value;
 
 const OBJECT_STDLIB: &str = include_str!("../stdlib/object.spr");
+const NIL_STDLIB: &str = include_str!("../stdlib/nil.spr");
 const LIST_STDLIB: &str = include_str!("../stdlib/list.spr");
 const MAP_STDLIB: &str = include_str!("../stdlib/map.spr");
 
@@ -65,7 +66,7 @@ pub fn global_env() -> EnvRef {
         closure: env.clone(),
     };
     env.borrow_mut().set("Object".to_string(), object_class);
-    for (src, label) in [(OBJECT_STDLIB, "stdlib/object.spr"), (LIST_STDLIB, "stdlib/list.spr"), (MAP_STDLIB, "stdlib/map.spr")] {
+    for (src, label) in [(OBJECT_STDLIB, "stdlib/object.spr"), (NIL_STDLIB, "stdlib/nil.spr"), (LIST_STDLIB, "stdlib/list.spr"), (MAP_STDLIB, "stdlib/map.spr")] {
         let tokens = crate::lexer::Lexer::new(src).scan_tokens();
         let stmts = crate::parser::Parser::new(tokens).parse()
             .unwrap_or_else(|e| panic!("{} failed to parse: {}", label, e));
@@ -75,6 +76,7 @@ pub fn global_env() -> EnvRef {
         }
     }
     env.borrow_mut().freeze("Object");
+    env.borrow_mut().freeze("Nil");
     env.borrow_mut().freeze("List");
     env.borrow_mut().freeze("Map");
     env
@@ -283,11 +285,30 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
         Expr::Get { object, name } => {
             let obj = evaluate(*object, env.clone())?;
 
+            // Nil: dispatch to Nil stdlib class
+            if obj == Value::Nil {
+                if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("Nil") {
+                    if let Some(method) = methods.iter().find(|m| m.name == name) {
+                        return Ok(Value::BoundMethod {
+                            receiver: Box::new(obj),
+                            params: method.params.clone(),
+                            return_type: method.return_type.clone(),
+                            body: method.body.clone(),
+                            closure,
+                            defined_in: class_name,
+                        });
+                    }
+                }
+                return Err(SapphireError::RuntimeError {
+                    message: format!("undefined method '{}' on nil", name),
+                });
+            }
+
             // Universal built-ins — checked first so they work on every type
             // (instances can override these by defining a method of the same name)
             if !matches!(obj, Value::Instance { .. }) {
                 match name.as_str() {
-                    "nil?" => return Ok(Value::Bool(obj == Value::Nil)),
+                    "nil?" => return Ok(Value::Bool(false)),
                     "to_s" => return Ok(Value::Str(format!("{}", obj))),
                     "to_i" => return match obj {
                         Value::Int(n) => Ok(Value::Int(n)),
@@ -341,7 +362,6 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 }
                 // Built-in fallbacks for instances
                 return match name.as_str() {
-                    "nil?" => Ok(Value::Bool(false)),
                     "class" => env.borrow().get(class_name).ok_or_else(|| SapphireError::RuntimeError {
                         message: format!("class '{}' not found", class_name),
                     }),
@@ -1335,7 +1355,7 @@ mod tests {
     fn run(source: &str) -> Value {
         let tokens = Lexer::new(source).scan_tokens();
         let mut stmts = Parser::new(tokens).parse().unwrap();
-        execute(stmts.remove(0), Environment::new()).unwrap().unwrap()
+        execute(stmts.remove(0), global_env()).unwrap().unwrap()
     }
 
     fn run_env(source: &str, env: EnvRef) -> Value {
@@ -1577,7 +1597,7 @@ mod tests {
     fn test_to_s() {
         assert_eq!(run("42.to_s"), Value::Str("42".into()));
         assert_eq!(run("true.to_s"), Value::Str("true".into()));
-        assert_eq!(run("nil.to_s"), Value::Str("nil".into()));
+        assert_eq!(run("nil.to_s()"), Value::Str("nil".into()));
     }
 
     #[test]
@@ -1602,7 +1622,7 @@ mod tests {
 
     #[test]
     fn test_nil_check() {
-        assert_eq!(run("nil.nil?"), Value::Bool(true));
+        assert_eq!(run("nil.nil?()"), Value::Bool(true));
         assert_eq!(run("42.nil?"), Value::Bool(false));
         assert_eq!(run("\"hello\".nil?"), Value::Bool(false));
         assert_eq!(run("false.nil?"), Value::Bool(false));
