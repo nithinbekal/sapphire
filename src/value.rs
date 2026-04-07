@@ -14,12 +14,6 @@ pub enum Value {
     Bool(bool),
     Str(String),
     Nil,
-    Function {
-        params: Vec<ParamDef>,
-        return_type: Option<TypeExpr>,
-        body: Vec<Stmt>,
-        closure: EnvRef,
-    },
     Class {
         name: String,
         superclass: Option<String>,
@@ -85,7 +79,6 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{}", b),
             Value::Str(s) => write!(f, "{}", s),
             Value::Nil => write!(f, "nil"),
-            Value::Function { params, .. } => write!(f, "<fn({})>", params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")),
             Value::Class { name, .. } => write!(f, "<class {}>", name),
             Value::Constructor { class_name, .. } => write!(f, "<constructor {}>", class_name),
             Value::BoundMethod { .. } => write!(f, "<method>"),
