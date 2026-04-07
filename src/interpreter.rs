@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static FRAME_COUNTER: AtomicU64 = AtomicU64::new(1);
 fn next_frame_id() -> u64 { FRAME_COUNTER.fetch_add(1, Ordering::Relaxed) }
-use crate::ast::{Block, Expr, MethodDef, Stmt, StringPart};
+use crate::ast::{Block, Expr, MethodDef, Stmt, StringPart, TypeExpr};
 use crate::environment::Environment;
 use crate::value::EnvRef;
 use crate::error::SapphireError;
@@ -15,6 +15,43 @@ use crate::value::Value;
 
 const LIST_STDLIB: &str = include_str!("../stdlib/list.spr");
 const MAP_STDLIB: &str = include_str!("../stdlib/map.spr");
+
+fn check_type(value: &Value, te: &TypeExpr) -> bool {
+    match te {
+        TypeExpr::Any => true,
+        TypeExpr::Named(name) => match name.as_str() {
+            "Int"    => matches!(value, Value::Int(_)),
+            "Float"  => matches!(value, Value::Float(_)),
+            "String" => matches!(value, Value::Str(_)),
+            "Bool"   => matches!(value, Value::Bool(_)),
+            "Nil"    => matches!(value, Value::Nil),
+            "List"   => matches!(value, Value::List(_)),
+            "Map"    => matches!(value, Value::Map(_)),
+            class_name => matches!(value, Value::Instance { class_name: cn, .. } if cn == class_name),
+        },
+    }
+}
+
+fn value_type_description(value: &Value) -> String {
+    match value {
+        Value::Int(_)                      => "Int".to_string(),
+        Value::Float(_)                    => "Float".to_string(),
+        Value::Str(_)                      => "String".to_string(),
+        Value::Bool(_)                     => "Bool".to_string(),
+        Value::Nil                         => "Nil".to_string(),
+        Value::List(_)                     => "List".to_string(),
+        Value::Map(_)                      => "Map".to_string(),
+        Value::Instance { class_name, .. } => class_name.clone(),
+        _                                  => "unknown".to_string(),
+    }
+}
+
+fn type_expr_name(te: &TypeExpr) -> &str {
+    match te {
+        TypeExpr::Named(n) => n.as_str(),
+        TypeExpr::Any => "Any",
+    }
+}
 
 pub fn global_env() -> EnvRef {
     let env = Environment::new();
@@ -84,13 +121,13 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             env.borrow_mut().set(name, class);
             Ok(None)
         }
-        Stmt::Function { name, params, body } => {
+        Stmt::Function { name, params, return_type, body } => {
             if env.borrow().is_frozen(&name) {
                 return Err(SapphireError::RuntimeError {
                     message: format!("'{}' is reserved and cannot be redefined", name),
                 });
             }
-            let func = Value::Function { params, body, closure: env.clone() };
+            let func = Value::Function { params, return_type, body, closure: env.clone() };
             env.borrow_mut().set(name, func);
             Ok(None)
         }
@@ -294,6 +331,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         return Ok(Value::BoundMethod {
                             receiver: Box::new(obj),
                             params: method.params.clone(),
+                            return_type: method.return_type.clone(),
                             body: method.body.clone(),
                             closure,
                             defined_in: cname,
@@ -340,6 +378,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         return Ok(Value::BoundMethod {
                             receiver: Box::new(obj.clone()),
                             params: method.params.clone(),
+                            return_type: method.return_type.clone(),
                             body: method.body.clone(),
                             closure,
                             defined_in: class_name,
@@ -392,6 +431,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         return Ok(Value::BoundMethod {
                             receiver: Box::new(obj.clone()),
                             params: method.params.clone(),
+                            return_type: method.return_type.clone(),
                             body: method.body.clone(),
                             closure,
                             defined_in: class_name,
@@ -537,9 +577,20 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
         }
         Expr::Set { object, name, value } => {
             let obj = evaluate(*object, env.clone())?;
-            let val = evaluate(*value, env)?;
+            let val = evaluate(*value, env.clone())?;
             match obj {
-                Value::Instance { fields, .. } => {
+                Value::Instance { class_name: ref cn, ref fields } => {
+                    if let Some(Value::Class { fields: ref field_defs, .. }) = env.borrow().get(cn) {
+                        if let Some(fd) = field_defs.iter().find(|f| f.name == name) {
+                            if let Some(te) = &fd.type_ann {
+                                if !check_type(&val, te) {
+                                    return Err(SapphireError::TypeError {
+                                        message: format!("field '{}' expected {}, got {}", name, type_expr_name(te), value_type_description(&val)),
+                                    });
+                                }
+                            }
+                        }
+                    }
                     fields.borrow_mut().insert(name, val.clone());
                     Ok(val)
                 }
@@ -595,7 +646,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 eval_args.push((arg.name, evaluate(arg.value, env.clone())?));
             }
             match callee_val {
-                Value::Function { params, body, closure } => {
+                Value::Function { params, return_type, body, closure } => {
                     let arg_vals: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
                     if params.len() != arg_vals.len() {
                         return Err(SapphireError::RuntimeError {
@@ -605,8 +656,15 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     let call_env = Environment::new_child(closure);
                     let frame_id = next_frame_id();
                     call_env.borrow_mut().set("__frame_id__".to_string(), Value::Int(frame_id as i64));
-                    for (param, val) in params.iter().zip(arg_vals) {
-                        call_env.borrow_mut().set(param.clone(), val);
+                    for (param, val) in params.iter().zip(arg_vals.iter()) {
+                        if let Some(te) = &param.type_ann {
+                            if !check_type(val, te) {
+                                return Err(SapphireError::TypeError {
+                                    message: format!("argument '{}' expected {}, got {}", param.name, type_expr_name(te), value_type_description(val)),
+                                });
+                            }
+                        }
+                        call_env.borrow_mut().set(param.name.clone(), val.clone());
                     }
                     if let Some(blk) = block {
                         call_env.borrow_mut().set("__block__".to_string(), Value::Block(blk, env.clone()));
@@ -616,13 +674,29 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         match execute(stmt, call_env.clone()) {
                             Ok(Some(v)) => result = v,
                             Ok(None) => {}
-                            Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => return Ok(v),
+                            Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => {
+                                if let Some(te) = &return_type {
+                                    if !check_type(&v, te) {
+                                        return Err(SapphireError::TypeError {
+                                            message: format!("return value expected {}, got {}", type_expr_name(te), value_type_description(&v)),
+                                        });
+                                    }
+                                }
+                                return Ok(v);
+                            }
                             Err(e) => return Err(e),
+                        }
+                    }
+                    if let Some(te) = &return_type {
+                        if !check_type(&result, te) {
+                            return Err(SapphireError::TypeError {
+                                message: format!("return value expected {}, got {}", type_expr_name(te), value_type_description(&result)),
+                            });
                         }
                     }
                     Ok(result)
                 }
-                Value::BoundMethod { receiver, params, body, closure, defined_in } => {
+                Value::BoundMethod { receiver, params, return_type, body, closure, defined_in } => {
                     let arg_vals: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
                     if params.len() != arg_vals.len() {
                         return Err(SapphireError::RuntimeError {
@@ -634,8 +708,15 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     call_env.borrow_mut().set("__frame_id__".to_string(), Value::Int(frame_id as i64));
                     call_env.borrow_mut().set("self".to_string(), *receiver);
                     call_env.borrow_mut().set("__class__".to_string(), Value::Str(defined_in));
-                    for (param, val) in params.iter().zip(arg_vals) {
-                        call_env.borrow_mut().set(param.clone(), val);
+                    for (param, val) in params.iter().zip(arg_vals.iter()) {
+                        if let Some(te) = &param.type_ann {
+                            if !check_type(val, te) {
+                                return Err(SapphireError::TypeError {
+                                    message: format!("argument '{}' expected {}, got {}", param.name, type_expr_name(te), value_type_description(val)),
+                                });
+                            }
+                        }
+                        call_env.borrow_mut().set(param.name.clone(), val.clone());
                     }
                     if let Some(blk) = block {
                         call_env.borrow_mut().set("__block__".to_string(), Value::Block(blk, env.clone()));
@@ -645,8 +726,24 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         match execute(stmt, call_env.clone()) {
                             Ok(Some(v)) => result = v,
                             Ok(None) => {}
-                            Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => return Ok(v),
+                            Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => {
+                                if let Some(te) = &return_type {
+                                    if !check_type(&v, te) {
+                                        return Err(SapphireError::TypeError {
+                                            message: format!("return value expected {}, got {}", type_expr_name(te), value_type_description(&v)),
+                                        });
+                                    }
+                                }
+                                return Ok(v);
+                            }
                             Err(e) => return Err(e),
+                        }
+                    }
+                    if let Some(te) = &return_type {
+                        if !check_type(&result, te) {
+                            return Err(SapphireError::TypeError {
+                                message: format!("return value expected {}, got {}", type_expr_name(te), value_type_description(&result)),
+                            });
                         }
                     }
                     Ok(result)
@@ -669,6 +766,15 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                     return Err(SapphireError::RuntimeError {
                                         message: format!("unknown field '{}'", n),
                                     });
+                                }
+                                if let Some(fd) = fields.iter().find(|f| f.name == n) {
+                                    if let Some(te) = &fd.type_ann {
+                                        if !check_type(&val, te) {
+                                            return Err(SapphireError::TypeError {
+                                                message: format!("field '{}' expected {}, got {}", n, type_expr_name(te), value_type_description(&val)),
+                                            });
+                                        }
+                                    }
                                 }
                                 instance_fields.insert(n, val);
                             }
@@ -1176,7 +1282,7 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             call_env.borrow_mut().set("self".to_string(), self_val);
             call_env.borrow_mut().set("__class__".to_string(), Value::Str(super_name));
             for (param, val) in meth.params.iter().zip(arg_vals) {
-                call_env.borrow_mut().set(param.clone(), val);
+                call_env.borrow_mut().set(param.name.clone(), val);
             }
             let _ = block; // super calls don't support blocks for now
             let mut result = Value::Nil;
@@ -2343,5 +2449,108 @@ mod tests {
         } else {
             panic!("expected List");
         }
+    }
+
+    // --- Type annotation tests ---
+
+    // Runs all statements; returns the last produced value (Nil if none).
+    fn run_all(source: &str) -> Value {
+        let env = global_env();
+        let tokens = Lexer::new(source).scan_tokens();
+        let stmts = Parser::new(tokens).parse().unwrap();
+        let mut result = Value::Nil;
+        for stmt in stmts {
+            if let Ok(Some(v)) = execute(stmt, env.clone()) {
+                result = v;
+            }
+        }
+        result
+    }
+
+    // Runs all statements; returns the first error encountered.
+    fn run_err(source: &str) -> SapphireError {
+        let env = global_env();
+        let tokens = Lexer::new(source).scan_tokens();
+        let stmts = Parser::new(tokens).parse().expect("parse error");
+        for stmt in stmts {
+            if let Err(e) = execute(stmt, env.clone()) {
+                return e;
+            }
+        }
+        panic!("expected an error but none was raised");
+    }
+
+    #[test]
+    fn test_typed_param_accepts_correct_type() {
+        assert_eq!(run_all("def add(a: Int, b: Int) { a + b }; add(1, 2)"), Value::Int(3));
+    }
+
+    #[test]
+    fn test_typed_param_rejects_wrong_type() {
+        let err = run_err(r#"def add(a: Int, b: Int) { a + b }; add("x", 2)"#);
+        assert!(matches!(err, SapphireError::TypeError { .. }));
+        if let SapphireError::TypeError { message } = err {
+            assert!(message.contains("'a'") && message.contains("Int") && message.contains("String"), "unexpected message: {}", message);
+        }
+    }
+
+    #[test]
+    fn test_typed_return_accepts_correct_type() {
+        assert_eq!(run_all("def f() -> Int { 42 }; f()"), Value::Int(42));
+    }
+
+    #[test]
+    fn test_typed_return_rejects_wrong_type() {
+        let err = run_err(r#"def f() -> Int { "oops" }; f()"#);
+        assert!(matches!(err, SapphireError::TypeError { .. }));
+    }
+
+    #[test]
+    fn test_attr_type_enforced_on_constructor() {
+        let err = run_err(r#"class P { attr x: Int }; P.new(x: "bad")"#);
+        assert!(matches!(err, SapphireError::TypeError { .. }));
+        if let SapphireError::TypeError { message } = err {
+            assert!(message.contains("'x'") && message.contains("Int") && message.contains("String"), "unexpected message: {}", message);
+        }
+    }
+
+    #[test]
+    fn test_attr_type_accepted_on_constructor() {
+        let env = global_env();
+        exec_env("class P { attr x: Int }", env.clone());
+        exec_env("p = P.new(x: 42)", env.clone());
+        assert_eq!(run_env("p.x", env), Value::Int(42));
+    }
+
+    #[test]
+    fn test_attr_type_enforced_on_set() {
+        let err = run_err(r#"class P { attr x: Int }; p = P.new(x: 1); p.x = "bad""#);
+        assert!(matches!(err, SapphireError::TypeError { .. }));
+    }
+
+    #[test]
+    fn test_attr_type_accepted_on_set() {
+        let env = global_env();
+        exec_env("class P { attr x: Int }", env.clone());
+        exec_env("p = P.new(x: 1)", env.clone());
+        exec_env("p.x = 99", env.clone());
+        assert_eq!(run_env("p.x", env), Value::Int(99));
+    }
+
+    #[test]
+    fn test_unannotated_code_unchanged() {
+        assert_eq!(run_all(r#"def greet(name) { name }; greet("Alice")"#), Value::Str("Alice".into()));
+    }
+
+    #[test]
+    fn test_method_typed_param_rejects_wrong_type() {
+        let err = run_err(r#"class Calc { def double(n: Int) { n * 2 } }; Calc.new().double("x")"#);
+        assert!(matches!(err, SapphireError::TypeError { .. }));
+    }
+
+    #[test]
+    fn test_method_return_type_rejects_wrong_type() {
+        let err = run_err(r#"class Calc { def num() -> Int { "nope" } }; Calc.new().num()"#);
+        assert!(matches!(err, SapphireError::TypeError { .. }));
     }
 }

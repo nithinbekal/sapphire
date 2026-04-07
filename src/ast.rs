@@ -1,6 +1,21 @@
 use crate::token::Token;
 use crate::value::Value;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeExpr {
+    /// A bare type name: `Int`, `String`, `Bool`, `Float`, `Nil`, or a class name.
+    Named(String),
+    /// Escape hatch for future use (e.g. unannotated generics, explicit `Any` type).
+    #[allow(dead_code)]
+    Any,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParamDef {
+    pub name: String,
+    pub type_ann: Option<TypeExpr>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Block {
     pub params: Vec<String>,
@@ -14,17 +29,17 @@ pub enum StringPart {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct FieldDef {
     pub name: String,
-    pub type_name: Option<String>,
+    pub type_ann: Option<TypeExpr>,
     pub default: Option<Expr>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MethodDef {
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<ParamDef>,
+    pub return_type: Option<TypeExpr>,
     pub body: Vec<Stmt>,
     pub private: bool,
 }
@@ -50,7 +65,8 @@ pub enum Stmt {
     },
     Function {
         name: String,
-        params: Vec<String>,
+        params: Vec<ParamDef>,
+        return_type: Option<TypeExpr>,
         body: Vec<Stmt>,
     },
     Return(Expr),

@@ -30,6 +30,7 @@ pub enum TokenKind {
     Dot,
     DotDot,
     Colon,
+    Arrow,
 
     Number(i64),
     Float(f64),

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::ast::{Block, FieldDef, MethodDef, Stmt};
+use crate::ast::{Block, FieldDef, MethodDef, ParamDef, Stmt, TypeExpr};
 use crate::environment::Environment;
 
 pub type EnvRef = Rc<RefCell<Environment>>;
@@ -15,7 +15,8 @@ pub enum Value {
     Str(String),
     Nil,
     Function {
-        params: Vec<String>,
+        params: Vec<ParamDef>,
+        return_type: Option<TypeExpr>,
         body: Vec<Stmt>,
         closure: EnvRef,
     },
@@ -36,7 +37,8 @@ pub enum Value {
     },
     BoundMethod {
         receiver: Box<Value>,
-        params: Vec<String>,
+        params: Vec<ParamDef>,
+        return_type: Option<TypeExpr>,
         body: Vec<Stmt>,
         closure: EnvRef,
         defined_in: String,
@@ -83,7 +85,7 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{}", b),
             Value::Str(s) => write!(f, "{}", s),
             Value::Nil => write!(f, "nil"),
-            Value::Function { params, .. } => write!(f, "<fn({})>", params.join(", ")),
+            Value::Function { params, .. } => write!(f, "<fn({})>", params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")),
             Value::Class { name, .. } => write!(f, "<class {}>", name),
             Value::Constructor { class_name, .. } => write!(f, "<constructor {}>", class_name),
             Value::BoundMethod { .. } => write!(f, "<method>"),
