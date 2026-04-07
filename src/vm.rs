@@ -88,6 +88,10 @@ impl<'a> Vm<'a> {
                     self.ip += offset;
                 }
 
+                OpCode::Loop(offset) => {
+                    self.ip -= offset;
+                }
+
                 OpCode::JumpIfFalse(offset) => {
                     let cond = self.pop()?;
                     if is_falsy(&cond) {

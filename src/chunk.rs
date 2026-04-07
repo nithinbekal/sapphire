@@ -31,6 +31,8 @@ pub enum OpCode {
     Jump(usize),
     /// Pop the top of stack; if falsy, jump forward by `offset`.
     JumpIfFalse(usize),
+    /// Jump backward: subtract `offset` from ip (used for loops).
+    Loop(usize),
 
     // Stack manipulation
     Pop,
@@ -116,6 +118,7 @@ impl Chunk {
                 OpCode::SetLocal(slot)    => println!("SET_LOCAL      {:4}", slot),
                 OpCode::Jump(off)         => println!("JUMP           {:4}", off),
                 OpCode::JumpIfFalse(off)  => println!("JUMP_IF_FALSE  {:4}", off),
+                OpCode::Loop(off)         => println!("LOOP           {:4}", off),
                 other => println!("{:?}", other),
             }
         }

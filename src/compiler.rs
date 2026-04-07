@@ -97,6 +97,18 @@ impl Compiler {
                 }
             }
 
+            Stmt::While { condition, body } => {
+                let loop_start = self.chunk.code.len();
+
+                self.expr(condition)?;
+                let exit_jump = self.emit_jump(OpCode::JumpIfFalse(0));
+
+                self.stmts(body)?;
+                self.emit_loop(loop_start);
+
+                self.chunk.patch_jump(exit_jump);
+            }
+
             Stmt::Print(expr) => {
                 // The tree-walk interpreter has a built-in `print` statement.
                 // For now we can't call native functions, so we compile the
@@ -214,6 +226,14 @@ impl Compiler {
 
     fn emit(&mut self, op: OpCode) {
         self.chunk.write(op, self.current_line);
+    }
+
+    /// Emit a backward jump back to `loop_start`.
+    fn emit_loop(&mut self, loop_start: usize) {
+        // After the VM increments ip past this instruction, subtracting `offset`
+        // lands exactly on loop_start.
+        let offset = self.chunk.code.len() + 1 - loop_start;
+        self.emit(OpCode::Loop(offset));
     }
 
     /// Emit a jump placeholder and return the index to patch later.
@@ -351,6 +371,24 @@ mod tests {
     fn if_elsif() {
         let src = "x = 0\nif false { x = 1 } elsif true { x = 2 }\nx";
         assert_eq!(eval(src), VmValue::Int(2));
+    }
+
+    #[test]
+    fn while_loop_counts() {
+        let src = "i = 0\nwhile i < 5 { i = i + 1 }\ni";
+        assert_eq!(eval(src), VmValue::Int(5));
+    }
+
+    #[test]
+    fn while_false_never_executes() {
+        let src = "x = 42\nwhile false { x = 0 }\nx";
+        assert_eq!(eval(src), VmValue::Int(42));
+    }
+
+    #[test]
+    fn while_accumulates() {
+        let src = "i = 0\nsum = 0\nwhile i < 4 { sum = sum + i\ni = i + 1 }\nsum";
+        assert_eq!(eval(src), VmValue::Int(6)); // 0+1+2+3
     }
 
     #[test]
