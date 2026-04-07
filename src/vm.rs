@@ -84,6 +84,17 @@ impl<'a> Vm<'a> {
                 OpCode::False => self.stack.push(VmValue::Bool(false)),
                 OpCode::Nil   => self.stack.push(VmValue::Nil),
 
+                OpCode::Jump(offset) => {
+                    self.ip += offset;
+                }
+
+                OpCode::JumpIfFalse(offset) => {
+                    let cond = self.pop()?;
+                    if is_falsy(&cond) {
+                        self.ip += offset;
+                    }
+                }
+
                 // `GetLocal` pushes a copy of the value at the given stack slot.
                 OpCode::GetLocal(slot) => {
                     let val = self.stack.get(*slot)

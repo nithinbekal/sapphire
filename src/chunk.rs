@@ -27,6 +27,11 @@ pub enum OpCode {
     GetLocal(usize),
     SetLocal(usize),
 
+    // Jumps (offset = number of instructions to skip forward from the next ip)
+    Jump(usize),
+    /// Pop the top of stack; if falsy, jump forward by `offset`.
+    JumpIfFalse(usize),
+
     // Stack manipulation
     Pop,
     Return,
@@ -75,6 +80,17 @@ impl Chunk {
         self.lines.push(line);
     }
 
+    /// Overwrite a previously-emitted jump instruction with the correct offset.
+    /// Call this after the jump target has been emitted.
+    pub fn patch_jump(&mut self, jump_idx: usize) {
+        let offset = self.code.len() - jump_idx - 1;
+        match &self.code[jump_idx] {
+            OpCode::Jump(_)        => self.code[jump_idx] = OpCode::Jump(offset),
+            OpCode::JumpIfFalse(_) => self.code[jump_idx] = OpCode::JumpIfFalse(offset),
+            _ => panic!("patch_jump called on non-jump instruction"),
+        }
+    }
+
     /// Add a constant and return its index.
     pub fn add_constant(&mut self, value: Constant) -> usize {
         self.constants.push(value);
@@ -96,8 +112,10 @@ impl Chunk {
                 OpCode::Constant(idx) => {
                     println!("CONSTANT       {:4}  ({})", idx, self.constants[*idx])
                 }
-                OpCode::GetLocal(slot) => println!("GET_LOCAL      {:4}", slot),
-                OpCode::SetLocal(slot) => println!("SET_LOCAL      {:4}", slot),
+                OpCode::GetLocal(slot)    => println!("GET_LOCAL      {:4}", slot),
+                OpCode::SetLocal(slot)    => println!("SET_LOCAL      {:4}", slot),
+                OpCode::Jump(off)         => println!("JUMP           {:4}", off),
+                OpCode::JumpIfFalse(off)  => println!("JUMP_IF_FALSE  {:4}", off),
                 other => println!("{:?}", other),
             }
         }

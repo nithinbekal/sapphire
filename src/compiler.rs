@@ -76,6 +76,27 @@ impl Compiler {
                 self.expr(expr)?;
                 self.emit(OpCode::Return);
             }
+            Stmt::If { condition, then_branch, else_branch } => {
+                // Compile condition; JumpIfFalse pops it and skips then-branch if falsy.
+                self.expr(condition)?;
+                let jif = self.emit_jump(OpCode::JumpIfFalse(0));
+
+                self.stmts(then_branch)?;
+
+                match else_branch {
+                    Some(else_stmts) => {
+                        // Jump over the else-branch at the end of then-branch.
+                        let jump = self.emit_jump(OpCode::Jump(0));
+                        self.chunk.patch_jump(jif);
+                        self.stmts(else_stmts)?;
+                        self.chunk.patch_jump(jump);
+                    }
+                    None => {
+                        self.chunk.patch_jump(jif);
+                    }
+                }
+            }
+
             Stmt::Print(expr) => {
                 // The tree-walk interpreter has a built-in `print` statement.
                 // For now we can't call native functions, so we compile the
@@ -195,6 +216,18 @@ impl Compiler {
         self.chunk.write(op, self.current_line);
     }
 
+    /// Emit a jump placeholder and return the index to patch later.
+    fn emit_jump(&mut self, op: OpCode) -> usize {
+        let idx = self.chunk.code.len();
+        self.emit(op);
+        idx
+    }
+
+    fn stmts(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
+        for s in stmts { self.stmt(s)?; }
+        Ok(())
+    }
+
     fn resolve_local(&self, name: &str) -> Option<usize> {
         self.locals.iter().rposition(|n| n == name)
     }
@@ -297,6 +330,27 @@ mod tests {
     #[test]
     fn multiple_variables() {
         assert_eq!(eval("a = 3\nb = 4\na + b"), VmValue::Int(7));
+    }
+
+    #[test]
+    fn if_true_branch() {
+        assert_eq!(eval("x = 0\nif true { x = 1 }\nx"), VmValue::Int(1));
+    }
+
+    #[test]
+    fn if_false_branch_skipped() {
+        assert_eq!(eval("x = 0\nif false { x = 1 }\nx"), VmValue::Int(0));
+    }
+
+    #[test]
+    fn if_else_selects_branch() {
+        assert_eq!(eval("x = 0\nif false { x = 1 } else { x = 2 }\nx"), VmValue::Int(2));
+    }
+
+    #[test]
+    fn if_elsif() {
+        let src = "x = 0\nif false { x = 1 } elsif true { x = 2 }\nx";
+        assert_eq!(eval(src), VmValue::Int(2));
     }
 
     #[test]
