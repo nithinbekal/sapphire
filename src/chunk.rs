@@ -121,6 +121,18 @@ pub enum OpCode {
     /// Push `self` (slot 0) — emitted for `SelfExpr` inside methods.
     GetSelf,
 
+    // Blocks
+    /// Like `Call(n)` but also passes the block closure sitting one slot
+    /// above the function value (pushed there by the compiler before args).
+    /// Stack layout: [..., fn, block, arg0, …, argN-1]
+    CallWithBlock(usize),
+    /// Like `Invoke(name, n)` but passes an additional block argument.
+    /// Stack: [..., receiver, block, arg0, …, argN-1]
+    InvokeWithBlock(usize, usize),
+    /// Call the block that was passed to the current function.
+    /// The block lives in a dedicated upvalue slot set up at call time.
+    Yield(usize),
+
     // Output
     /// Pop TOS, print it with a newline, push Nil.
     Print,

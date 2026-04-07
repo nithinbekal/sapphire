@@ -170,6 +170,9 @@ struct CallFrame {
     /// Index into the VM stack where slot 0 of this frame begins.
     /// The function value itself lives at `base`.
     base:     usize,
+    /// Block passed to this call (if any), stored off-stack so `yield` can
+    /// reach it without disturbing the locals layout.
+    block: Option<VmMethod>,
 }
 
 // ── VM ────────────────────────────────────────────────────────────────────────
@@ -184,7 +187,7 @@ pub struct Vm {
 
 impl Vm {
     pub fn new(function: Rc<Function>) -> Self {
-        let frame = CallFrame { function, upvalues: vec![], ip: 0, base: 0 };
+        let frame = CallFrame { function, upvalues: vec![], ip: 0, base: 0, block: None };
         Vm { frames: vec![frame], stack: Vec::new(), open_upvalues: Vec::new() }
     }
 
@@ -552,6 +555,7 @@ impl Vm {
                         upvalues: method.upvalues,
                         ip:       0,
                         base:     recv_slot,
+                        block:    None,
                     });
                 }
 
@@ -559,6 +563,127 @@ impl Vm {
                     let base = self.frames.last().unwrap().base;
                     let val  = self.stack[base].clone();
                     self.stack.push(val);
+                }
+
+                // ── Block opcodes ─────────────────────────────────────────────
+
+                OpCode::CallWithBlock(arg_count) => {
+                    // Stack: [..., fn_or_closure, arg0, …, argN-1, block_closure]
+                    let block_val = self.pop()?;
+                    let block = match block_val {
+                        VmValue::Closure { function, upvalues } =>
+                            Some(VmMethod { function, upvalues }),
+                        VmValue::Nil => None,
+                        other => return Err(VmError::TypeError {
+                            message: format!("block must be a closure, got {}", other),
+                            line,
+                        }),
+                    };
+                    let fn_slot = self.stack.len()
+                        .checked_sub(arg_count + 1)
+                        .ok_or(VmError::StackUnderflow)?;
+                    let (function, upvalues) = match &self.stack[fn_slot] {
+                        VmValue::Function(f)  => (f.clone(), vec![]),
+                        VmValue::Closure { function, upvalues } =>
+                            (function.clone(), upvalues.clone()),
+                        other => return Err(VmError::TypeError {
+                            message: format!("'{}' is not callable", other), line,
+                        }),
+                    };
+                    if function.arity != arg_count {
+                        return Err(VmError::TypeError {
+                            message: format!(
+                                "'{}' expects {} arg(s), got {}",
+                                function.name, function.arity, arg_count
+                            ),
+                            line,
+                        });
+                    }
+                    self.frames.push(CallFrame {
+                        function, upvalues, ip: 0, base: fn_slot, block,
+                    });
+                }
+
+                OpCode::InvokeWithBlock(name_idx, arg_count) => {
+                    // Stack: [..., receiver, arg0, …, argN-1, block_closure]
+                    let block_val = self.pop()?;
+                    let block = match block_val {
+                        VmValue::Closure { function, upvalues } =>
+                            Some(VmMethod { function, upvalues }),
+                        VmValue::Nil => None,
+                        other => return Err(VmError::TypeError {
+                            message: format!("block must be a closure, got {}", other),
+                            line,
+                        }),
+                    };
+                    let method_name = match &self.frames.last().unwrap().function.chunk.constants[name_idx] {
+                        Constant::Str(s) => s.clone(),
+                        _ => panic!("InvokeWithBlock: expected Str constant"),
+                    };
+                    let recv_slot = self.stack.len()
+                        .checked_sub(arg_count + 1)
+                        .ok_or(VmError::StackUnderflow)?;
+                    let method = match &self.stack[recv_slot] {
+                        VmValue::Instance { methods, .. } =>
+                            methods.get(&method_name).cloned()
+                                .ok_or_else(|| VmError::TypeError {
+                                    message: format!("method '{}' not found", method_name),
+                                    line,
+                                })?,
+                        other => return Err(VmError::TypeError {
+                            message: format!("cannot invoke '{}' on {}", method_name, other),
+                            line,
+                        }),
+                    };
+                    if method.function.arity != arg_count {
+                        return Err(VmError::TypeError {
+                            message: format!(
+                                "method '{}' expects {} arg(s), got {}",
+                                method_name, method.function.arity, arg_count
+                            ),
+                            line,
+                        });
+                    }
+                    self.frames.push(CallFrame {
+                        function: method.function,
+                        upvalues: method.upvalues,
+                        ip: 0,
+                        base: recv_slot,
+                        block,
+                    });
+                }
+
+                OpCode::Yield(arg_count) => {
+                    let block = self.frames.last()
+                        .and_then(|f| f.block.clone())
+                        .ok_or_else(|| VmError::TypeError {
+                            message: "yield called without a block".into(), line,
+                        })?;
+                    if block.function.arity != arg_count {
+                        return Err(VmError::TypeError {
+                            message: format!(
+                                "block expects {} arg(s), got {}",
+                                block.function.arity, arg_count
+                            ),
+                            line,
+                        });
+                    }
+                    // Push the block closure as slot 0 of the new frame, then
+                    // the args that are already on the top of the stack slide in
+                    // as slots 1..arg_count.  We need to insert the closure
+                    // below the args already on the stack.
+                    let args_start = self.stack.len() - arg_count;
+                    self.stack.insert(args_start, VmValue::Closure {
+                        function: block.function.clone(),
+                        upvalues: block.upvalues.clone(),
+                    });
+                    self.frames.push(CallFrame {
+                        function: block.function,
+                        upvalues: block.upvalues,
+                        ip:    0,
+                        base:  args_start,
+                        block: None,
+                    });
                 }
 
                 OpCode::Print => {
@@ -595,7 +720,7 @@ impl Vm {
                     // Slot 0 of the new frame is the function itself (enables recursion).
                     // Slot 1..arity are the arguments.
                     let base = fn_slot;
-                    self.frames.push(CallFrame { function, upvalues, ip: 0, base });
+                    self.frames.push(CallFrame { function, upvalues, ip: 0, base, block: None });
                 }
 
                 OpCode::Return => {

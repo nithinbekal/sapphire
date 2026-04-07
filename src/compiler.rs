@@ -1,6 +1,6 @@
 use std::fmt;
 use std::rc::Rc;
-use crate::ast::{Expr, Stmt, StringPart, MethodDef};
+use crate::ast::{Block, Expr, Stmt, StringPart, MethodDef};
 use crate::chunk::{Chunk, Constant, Function, OpCode, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
@@ -310,12 +310,9 @@ impl Compiler {
             }
 
             Expr::Call { callee, args, block } => {
-                if block.is_some() {
-                    return Err(self.error("blocks not yet supported by compiler".into()));
-                }
-                // Method call: `obj.method(args)`
+                // Method call: `obj.method(args)` or `obj.method(args) { |x| ... }`
                 if let Expr::Get { object, name } = callee.as_ref() {
-                    if name == "new" {
+                    if name == "new" && block.is_none() {
                         // Class construction: `ClassName.new(field: val, ...)`
                         self.expr(object)?;
                         for arg in args {
@@ -325,6 +322,14 @@ impl Compiler {
                             self.expr(&arg.value)?;
                         }
                         self.emit(OpCode::NewInstance(args.len()));
+                    } else if let Some(blk) = block {
+                        self.expr(object)?;
+                        for arg in args {
+                            self.expr(&arg.value)?;
+                        }
+                        self.compile_block(blk)?;
+                        let ni = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                        self.emit(OpCode::InvokeWithBlock(ni, args.len()));
                     } else {
                         // Regular method invocation
                         self.expr(object)?;
@@ -336,13 +341,27 @@ impl Compiler {
                     }
                     return Ok(());
                 }
-                // Plain function call
+                // Plain function call (with or without block)
                 self.expr(callee)?;
                 let arg_count = args.len();
                 for arg in args {
                     self.expr(&arg.value)?;
                 }
-                self.emit(OpCode::Call(arg_count));
+                if let Some(blk) = block {
+                    self.compile_block(blk)?;
+                    self.emit(OpCode::CallWithBlock(arg_count));
+                } else {
+                    self.emit(OpCode::Call(arg_count));
+                }
+                Ok(())
+            }
+
+            Expr::Yield { args } => {
+                let n = args.len();
+                for a in args {
+                    self.expr(&a.value)?;
+                }
+                self.emit(OpCode::Yield(n));
                 Ok(())
             }
 
@@ -537,6 +556,24 @@ impl Compiler {
 
     fn patch_jump(&mut self, jump_idx: usize) {
         self.state_mut().chunk.patch_jump(jump_idx);
+    }
+
+    /// Compile a block literal into a closure and push it onto the stack.
+    /// The block's params become local slots 1..n (slot 0 is the closure itself).
+    fn compile_block(&mut self, block: &Block) -> Result<(), CompileError> {
+        let line  = self.state().current_line;
+        let arity = block.params.len();
+        self.push_fn("<block>", arity, line);
+        // Slot 0 = closure (anonymous; blocks don't recurse by name).
+        self.state_mut().locals.push(LocalInfo { name: String::new(), captured: false });
+        for p in &block.params {
+            self.state_mut().locals.push(LocalInfo { name: p.clone(), captured: false });
+        }
+        self.compile_body(&block.body)?;
+        let func = self.pop_fn();
+        let idx  = self.state_mut().chunk.add_constant(Constant::Function(func));
+        self.emit(OpCode::Closure(idx));
+        Ok(())
     }
 
     fn stmts(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
@@ -800,6 +837,43 @@ add5(1) + add10(1)";
     }
 
     // ── and / or / print ──────────────────────────────────────────────────────
+
+    // ── Blocks ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn block_yield_basic() {
+        let src = "
+def call_block() { yield }
+call_block() { 42 }";
+        assert_eq!(eval(src), VmValue::Int(42));
+    }
+
+    #[test]
+    fn block_yield_with_arg() {
+        let src = "
+def apply(x) { yield(x) }
+apply(10) { |n| n * 2 }";
+        assert_eq!(eval(src), VmValue::Int(20));
+    }
+
+    #[test]
+    fn block_captures_outer_var() {
+        let src = "
+def run() { yield(5) }
+factor = 3
+run() { |x| x * factor }";
+        assert_eq!(eval(src), VmValue::Int(15));
+    }
+
+    #[test]
+    fn block_yield_multiple_times() {
+        let src = "
+def twice() { yield(1)\nyield(2) }
+sum = 0
+twice() { |n| sum = sum + n }
+sum";
+        assert_eq!(eval(src), VmValue::Int(3));
+    }
 
     // ── Classes ───────────────────────────────────────────────────────────────
 
