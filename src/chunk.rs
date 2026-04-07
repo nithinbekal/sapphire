@@ -133,6 +133,20 @@ pub enum OpCode {
     /// The block lives in a dedicated upvalue slot set up at call time.
     Yield(usize),
 
+    // Exception-like control flow
+    /// Pop TOS and signal a raise: walks up frames looking for BeginRescue.
+    Raise,
+    /// Pop TOS and unwind to the nearest block-caller frame; push the value.
+    Break,
+    /// Pop TOS and immediately return from the current (block) frame with it.
+    Next,
+    /// Register a rescue handler for the current frame.
+    /// `handler_offset`: instruction offset from HERE to the rescue body.
+    /// `rescue_var_slot`: local slot index for the caught value (usize::MAX = none).
+    BeginRescue { handler_offset: usize, rescue_var_slot: usize },
+    /// Remove the most recently registered rescue handler (normal exit from body).
+    PopRescue,
+
     // Output
     /// Pop TOS, print it with a newline, push Nil.
     Print,
@@ -206,6 +220,19 @@ impl Chunk {
             OpCode::JumpIfFalseKeep(_)  => self.code[jump_idx] = OpCode::JumpIfFalseKeep(offset),
             OpCode::JumpIfTrueKeep(_)   => self.code[jump_idx] = OpCode::JumpIfTrueKeep(offset),
             _ => panic!("patch_jump called on non-jump instruction"),
+        }
+    }
+
+    /// Patch the handler_offset of a previously-emitted `BeginRescue`.
+    /// Call this when the rescue handler body's start position is known.
+    pub fn patch_rescue(&mut self, begin_idx: usize) {
+        let offset = self.code.len() - begin_idx - 1;
+        match &self.code[begin_idx] {
+            OpCode::BeginRescue { rescue_var_slot, .. } => {
+                let slot = *rescue_var_slot;
+                self.code[begin_idx] = OpCode::BeginRescue { handler_offset: offset, rescue_var_slot: slot };
+            }
+            _ => panic!("patch_rescue called on non-BeginRescue instruction"),
         }
     }
 

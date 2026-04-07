@@ -145,21 +145,37 @@ impl From<&Constant> for VmValue {
 #[derive(Debug, PartialEq)]
 pub enum VmError {
     StackUnderflow,
-    TypeError { message: String, line: u32 },
+    TypeError    { message: String, line: u32 },
+    /// `raise val` — propagates until caught by a `Begin` handler.
+    Raised(VmValue),
+    /// `break val` inside a block — unwinds to the enclosing call-with-block.
+    Break(VmValue),
+    /// `next val` inside a block — skips to the next `yield`.
+    Next(VmValue),
 }
 
 impl fmt::Display for VmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VmError::StackUnderflow => write!(f, "stack underflow"),
-            VmError::TypeError { message, line } => {
-                write!(f, "[line {}] type error: {}", line, message)
-            }
+            VmError::TypeError { message, line } =>
+                write!(f, "[line {}] type error: {}", line, message),
+            VmError::Raised(v)  => write!(f, "uncaught raise: {}", v),
+            VmError::Break(v)   => write!(f, "break outside block: {}", v),
+            VmError::Next(v)    => write!(f, "next outside block: {}", v),
         }
     }
 }
 
 // ── Call frame ────────────────────────────────────────────────────────────────
+
+/// Rescue handler registered by `BeginRescue`; popped by `PopRescue`.
+#[derive(Clone, Copy)]
+struct RescueInfo {
+    handler_ip:       usize,
+    rescue_var_slot:  usize, // usize::MAX means no variable
+    stack_height:     usize, // stack depth at BeginRescue time (for cleanup)
+}
 
 struct CallFrame {
     function: Rc<Function>,
@@ -173,6 +189,11 @@ struct CallFrame {
     /// Block passed to this call (if any), stored off-stack so `yield` can
     /// reach it without disturbing the locals layout.
     block: Option<VmMethod>,
+    /// True if this frame was pushed by `CallWithBlock`/`InvokeWithBlock`.
+    /// Signals `break` to stop unwinding here.
+    is_block_caller: bool,
+    /// Active rescue handlers within this frame (push on BeginRescue, pop on PopRescue).
+    rescues: Vec<RescueInfo>,
 }
 
 // ── VM ────────────────────────────────────────────────────────────────────────
@@ -187,7 +208,10 @@ pub struct Vm {
 
 impl Vm {
     pub fn new(function: Rc<Function>) -> Self {
-        let frame = CallFrame { function, upvalues: vec![], ip: 0, base: 0, block: None };
+        let frame = CallFrame {
+            function, upvalues: vec![], ip: 0, base: 0,
+            block: None, is_block_caller: false, rescues: vec![],
+        };
         Vm { frames: vec![frame], stack: Vec::new(), open_upvalues: Vec::new() }
     }
 
@@ -553,9 +577,8 @@ impl Vm {
                     self.frames.push(CallFrame {
                         function: method.function,
                         upvalues: method.upvalues,
-                        ip:       0,
-                        base:     recv_slot,
-                        block:    None,
+                        ip: 0, base: recv_slot,
+                        block: None, is_block_caller: false, rescues: vec![],
                     });
                 }
 
@@ -600,7 +623,8 @@ impl Vm {
                         });
                     }
                     self.frames.push(CallFrame {
-                        function, upvalues, ip: 0, base: fn_slot, block,
+                        function, upvalues, ip: 0, base: fn_slot,
+                        block, is_block_caller: true, rescues: vec![],
                     });
                 }
 
@@ -647,9 +671,8 @@ impl Vm {
                     self.frames.push(CallFrame {
                         function: method.function,
                         upvalues: method.upvalues,
-                        ip: 0,
-                        base: recv_slot,
-                        block,
+                        ip: 0, base: recv_slot,
+                        block, is_block_caller: true, rescues: vec![],
                     });
                 }
 
@@ -682,8 +705,86 @@ impl Vm {
                         upvalues: block.upvalues,
                         ip:    0,
                         base:  args_start,
-                        block: None,
+                        block: None, is_block_caller: false, rescues: vec![],
                     });
+                }
+
+                // ── Exception-like control flow ───────────────────────────────
+
+                OpCode::Raise => {
+                    let val = self.pop()?;
+                    // Walk up the frame stack looking for a rescue handler.
+                    loop {
+                        if let Some(frame) = self.frames.last_mut() {
+                            if let Some(info) = frame.rescues.pop() {
+                                // Restore the stack to its height at BeginRescue time,
+                                // then store the exception in the rescue variable (if any).
+                                self.stack.truncate(info.stack_height);
+                                if info.rescue_var_slot != usize::MAX {
+                                    let slot = self.frames.last().unwrap().base + info.rescue_var_slot;
+                                    while self.stack.len() <= slot {
+                                        self.stack.push(VmValue::Nil);
+                                    }
+                                    self.stack[slot] = val.clone();
+                                }
+                                self.frames.last_mut().unwrap().ip = info.handler_ip;
+                                break;
+                            }
+                            // No rescue in this frame; unwind it.
+                            let base = frame.base;
+                            self.close_upvalues_above(base);
+                            self.frames.pop();
+                            self.stack.truncate(base);
+                        } else {
+                            return Err(VmError::Raised(val));
+                        }
+                    }
+                }
+
+                OpCode::Break => {
+                    let val = self.pop()?;
+                    // Unwind until we reach a frame created by CallWithBlock /
+                    // InvokeWithBlock, then return the break value from IT too.
+                    loop {
+                        if let Some(frame) = self.frames.last() {
+                            let is_caller = frame.is_block_caller;
+                            let base      = frame.base;
+                            self.close_upvalues_above(base);
+                            self.frames.pop();
+                            self.stack.truncate(base);
+                            if is_caller {
+                                // Push break value as the result of the call-with-block.
+                                self.stack.push(val);
+                                break;
+                            }
+                        } else {
+                            return Err(VmError::Break(val));
+                        }
+                    }
+                }
+
+                OpCode::Next => {
+                    // Return from the current (block) frame immediately with `val`.
+                    let val   = self.pop()?;
+                    let frame = self.frames.pop().unwrap();
+                    self.close_upvalues_above(frame.base);
+                    if self.frames.is_empty() {
+                        return Ok(Some(val));
+                    }
+                    self.stack.truncate(frame.base);
+                    self.stack.push(val);
+                }
+
+                OpCode::BeginRescue { handler_offset, rescue_var_slot } => {
+                    let handler_ip   = self.frames.last().unwrap().ip + handler_offset;
+                    let stack_height = self.stack.len();
+                    self.frames.last_mut().unwrap().rescues.push(RescueInfo {
+                        handler_ip, rescue_var_slot, stack_height,
+                    });
+                }
+
+                OpCode::PopRescue => {
+                    self.frames.last_mut().unwrap().rescues.pop();
                 }
 
                 OpCode::Print => {
@@ -720,7 +821,10 @@ impl Vm {
                     // Slot 0 of the new frame is the function itself (enables recursion).
                     // Slot 1..arity are the arguments.
                     let base = fn_slot;
-                    self.frames.push(CallFrame { function, upvalues, ip: 0, base, block: None });
+                    self.frames.push(CallFrame {
+                        function, upvalues, ip: 0, base,
+                        block: None, is_block_caller: false, rescues: vec![],
+                    });
                 }
 
                 OpCode::Return => {
