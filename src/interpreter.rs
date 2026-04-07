@@ -1565,28 +1565,28 @@ mod tests {
 
     #[test]
     fn test_function_def_and_call() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("def add(a, b) { a + b }", env.clone());
         assert_eq!(run_env("add(1, 2)", env), Value::Int(3));
     }
 
     #[test]
     fn test_function_no_args() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("def answer() { 42 }", env.clone());
         assert_eq!(run_env("answer()", env), Value::Int(42));
     }
 
     #[test]
     fn test_function_closure() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("x = 10; def get_x() { x }", env.clone());
         assert_eq!(run_env("get_x()", env), Value::Int(10));
     }
 
     #[test]
     fn test_early_return() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("def abs(n) { if n < 0 { return -n }; n }", env.clone());
         assert_eq!(run_env("abs(-5)", env.clone()), Value::Int(5));
         assert_eq!(run_env("abs(3)", env.clone()), Value::Int(3));
@@ -1930,14 +1930,14 @@ mod tests {
 
     #[test]
     fn test_yield_basic() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("def call_block() { yield(42) }", env.clone());
         assert_eq!(run_env("call_block() { |x| x * 2 }", env.clone()), Value::Int(84));
     }
 
     #[test]
     fn test_yield_multiple_args() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("def call_block(a, b) { yield(a, b) }", env.clone());
         assert_eq!(run_env("call_block(3, 4) { |x, y| x + y }", env.clone()), Value::Int(7));
     }
@@ -1947,7 +1947,7 @@ mod tests {
         // Implement a custom each using yield
         // Note: `while i < list.length { }` would cause the parser to treat `{` as a block
         // for `length`, so we store the length in a variable first.
-        let env = Environment::new();
+        let env = global_env();
         exec_env("def my_each(list) { len = list.length; i = 0; while i < len { yield(list[i]); i = i + 1 } }", env.clone());
         exec_env("sum = 0; my_each([1, 2, 3]) { |x| sum = sum + x }", env.clone());
         assert_eq!(env.borrow().get("sum"), Some(Value::Int(6)));
@@ -2218,7 +2218,7 @@ mod tests {
 
     #[test]
     fn test_inline_rescue_in_function() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("def risky(x) { raise \"bad\" if x < 0\n x * 2\nrescue e\n 0 }", env.clone());
         assert_eq!(run_env("risky(5)", env.clone()), Value::Int(10));
         assert_eq!(run_env("risky(-1)", env.clone()), Value::Int(0));
@@ -2226,7 +2226,7 @@ mod tests {
 
     #[test]
     fn test_inline_rescue_binds_error() {
-        let env = Environment::new();
+        let env = global_env();
         exec_env("def boom() { raise \"oops\"\n 1\nrescue e\n e }", env.clone());
         assert_eq!(run_env("boom()", env.clone()), Value::Str("oops".into()));
     }
