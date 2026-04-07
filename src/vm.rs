@@ -216,7 +216,14 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> Result<Option<VmValue>, VmError> {
+        self.run_inner(0)
+    }
+
+    fn run_inner(&mut self, min_depth: usize) -> Result<Option<VmValue>, VmError> {
         loop {
+            if self.frames.len() <= min_depth {
+                return Ok(None);
+            }
             // Fetch the next instruction from the current frame, then release the borrow.
             let (op, line) = {
                 let frame = self.frames.last_mut().unwrap();
@@ -552,6 +559,18 @@ impl Vm {
                     let recv_slot = self.stack.len()
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
+
+                    // Try native dispatch for non-Instance types.
+                    let is_instance = matches!(&self.stack[recv_slot], VmValue::Instance { .. });
+                    if !is_instance {
+                        let recv = self.stack[recv_slot].clone();
+                        let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                        let result = dispatch_native_method(&recv, &method_name, &args, line)?;
+                        self.stack.truncate(recv_slot);
+                        self.stack.push(result);
+                        continue;
+                    }
+
                     let method = match &self.stack[recv_slot] {
                         VmValue::Instance { methods, .. } => {
                             methods.get(&method_name).cloned()
@@ -560,10 +579,7 @@ impl Vm {
                                     line,
                                 })?
                         }
-                        other => return Err(VmError::TypeError {
-                            message: format!("cannot invoke '{}' on {}", method_name, other),
-                            line,
-                        }),
+                        _ => unreachable!(),
                     };
                     if method.function.arity != arg_count {
                         return Err(VmError::TypeError {
@@ -647,6 +663,20 @@ impl Vm {
                     let recv_slot = self.stack.len()
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
+
+                    // Try native block dispatch for non-Instance types.
+                    let is_instance = matches!(&self.stack[recv_slot], VmValue::Instance { .. });
+                    if !is_instance {
+                        let recv = self.stack[recv_slot].clone();
+                        let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                        self.stack.truncate(recv_slot);
+                        let result = self.dispatch_native_block_method(
+                            &recv, &method_name, &args, block, line,
+                        )?;
+                        self.stack.push(result);
+                        continue;
+                    }
+
                     let method = match &self.stack[recv_slot] {
                         VmValue::Instance { methods, .. } =>
                             methods.get(&method_name).cloned()
@@ -654,10 +684,7 @@ impl Vm {
                                     message: format!("method '{}' not found", method_name),
                                     line,
                                 })?,
-                        other => return Err(VmError::TypeError {
-                            message: format!("cannot invoke '{}' on {}", method_name, other),
-                            line,
-                        }),
+                        _ => unreachable!(),
                     };
                     if method.function.arity != arg_count {
                         return Err(VmError::TypeError {
@@ -834,7 +861,7 @@ impl Vm {
                     // Close every upvalue that points into the returning frame.
                     self.close_upvalues_above(frame.base);
 
-                    if self.frames.is_empty() {
+                    if self.frames.len() <= min_depth {
                         return Ok(return_val);
                     }
 
@@ -916,6 +943,53 @@ impl Vm {
                 OpCode::Equal    => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a == b)); }
                 OpCode::NotEqual => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a != b)); }
 
+                OpCode::Len => {
+                    let val = self.pop()?;
+                    let n = match &val {
+                        VmValue::List(v) => v.borrow().len() as i64,
+                        VmValue::Map(m)  => m.borrow().len() as i64,
+                        VmValue::Str(s)  => s.chars().count() as i64,
+                        VmValue::Range { from, to } => (to - from).max(0),
+                        other => return Err(VmError::TypeError {
+                            message: format!("len() not supported for {}", other), line,
+                        }),
+                    };
+                    self.stack.push(VmValue::Int(n));
+                }
+
+                OpCode::MapKeys => {
+                    let val = self.pop()?;
+                    let mut keys = match val {
+                        VmValue::Map(m) => m.borrow().keys().cloned().collect::<Vec<_>>(),
+                        other => return Err(VmError::TypeError {
+                            message: format!("map_keys() not supported for {}", other), line,
+                        }),
+                    };
+                    keys.sort();
+                    let list = keys.into_iter().map(VmValue::Str).collect();
+                    self.stack.push(VmValue::List(Rc::new(RefCell::new(list))));
+                }
+
+                OpCode::RangeFrom => {
+                    let val = self.pop()?;
+                    match val {
+                        VmValue::Range { from, .. } => self.stack.push(VmValue::Int(from)),
+                        other => return Err(VmError::TypeError {
+                            message: format!("range_from() not supported for {}", other), line,
+                        }),
+                    }
+                }
+
+                OpCode::RangeTo => {
+                    let val = self.pop()?;
+                    match val {
+                        VmValue::Range { to, .. } => self.stack.push(VmValue::Int(to)),
+                        other => return Err(VmError::TypeError {
+                            message: format!("range_to() not supported for {}", other), line,
+                        }),
+                    }
+                }
+
                 OpCode::Less => {
                     let (a, b) = self.pop2()?;
                     self.stack.push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x < y)?));
@@ -967,6 +1041,225 @@ impl Vm {
             .retain(|uv| matches!(*uv.0.borrow(), UpvalueState::Open(_)));
     }
 
+    // ── Native stdlib helpers ─────────────────────────────────────────────────
+
+    /// Call a block (closure) with `args`, running until it returns.
+    fn call_block(&mut self, block: &VmMethod, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+        let min_depth = self.frames.len();
+        let base = self.stack.len();
+        self.stack.push(VmValue::Closure {
+            function: block.function.clone(),
+            upvalues: block.upvalues.clone(),
+        });
+        for arg in args {
+            self.stack.push(arg);
+        }
+        self.frames.push(CallFrame {
+            function: block.function.clone(),
+            upvalues: block.upvalues.clone(),
+            ip: 0, base,
+            block: None, is_block_caller: false, rescues: vec![],
+        });
+        // run_inner stops when the block's frame returns (frames.len() drops to min_depth)
+        // but does NOT truncate the stack back to `base` — we must do that here.
+        let result = self.run_inner(min_depth);
+        self.stack.truncate(base);
+        result.map(|v| v.unwrap_or(VmValue::Nil))
+    }
+
+    /// Native dispatch for block-taking methods (each, map, times, …).
+    fn dispatch_native_block_method(
+        &mut self,
+        recv: &VmValue,
+        name: &str,
+        args: &[VmValue],
+        block: Option<VmMethod>,
+        line: u32,
+    ) -> Result<VmValue, VmError> {
+        let blk = block.ok_or_else(|| VmError::TypeError {
+            message: format!("'{}' requires a block", name),
+            line,
+        })?;
+        match recv {
+            VmValue::List(elems) => match name {
+                "each" => {
+                    let items: Vec<VmValue> = elems.borrow().clone();
+                    for item in items {
+                        match self.call_block(&blk, vec![item]) {
+                            Err(VmError::Next(_)) => continue,
+                            Err(VmError::Break(v)) => return Ok(v),
+                            Err(e) => return Err(e),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(recv.clone())
+                }
+                "map" => {
+                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let mut out = Vec::with_capacity(items.len());
+                    for item in items {
+                        match self.call_block(&blk, vec![item]) {
+                            Err(VmError::Next(v)) => out.push(v),
+                            Err(VmError::Break(v)) => { out.push(v); break; }
+                            Err(e) => return Err(e),
+                            Ok(v) => out.push(v),
+                        }
+                    }
+                    Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                }
+                "select" | "filter" => {
+                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let mut out = Vec::new();
+                    for item in items {
+                        match self.call_block(&blk, vec![item.clone()]) {
+                            Err(VmError::Break(_)) => break,
+                            Err(e) => return Err(e),
+                            Ok(v) if !is_falsy(&v) => out.push(item),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                }
+                "reject" => {
+                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let mut out = Vec::new();
+                    for item in items {
+                        match self.call_block(&blk, vec![item.clone()]) {
+                            Err(VmError::Break(_)) => break,
+                            Err(e) => return Err(e),
+                            Ok(v) if is_falsy(&v) => out.push(item),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                }
+                "reduce" | "inject" => {
+                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let mut acc = if args.is_empty() {
+                        items.first().cloned().unwrap_or(VmValue::Nil)
+                    } else {
+                        args[0].clone()
+                    };
+                    let skip = if args.is_empty() { 1 } else { 0 };
+                    for item in items.into_iter().skip(skip) {
+                        acc = self.call_block(&blk, vec![acc, item])?;
+                    }
+                    Ok(acc)
+                }
+                "each_with_index" => {
+                    let items: Vec<VmValue> = elems.borrow().clone();
+                    for (i, item) in items.into_iter().enumerate() {
+                        match self.call_block(&blk, vec![item, VmValue::Int(i as i64)]) {
+                            Err(VmError::Break(v)) => return Ok(v),
+                            Err(e) => return Err(e),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(recv.clone())
+                }
+                _ => Err(VmError::TypeError {
+                    message: format!("List has no block method '{}'", name), line,
+                }),
+            },
+
+            VmValue::Range { from, to } => {
+                let (from, to) = (*from, *to);
+                match name {
+                    "each" => {
+                        let mut i = from;
+                        while i < to {
+                            match self.call_block(&blk, vec![VmValue::Int(i)]) {
+                                Err(VmError::Next(_)) => { i += 1; continue; }
+                                Err(VmError::Break(v)) => return Ok(v),
+                                Err(e) => return Err(e),
+                                Ok(_) => {}
+                            }
+                            i += 1;
+                        }
+                        Ok(recv.clone())
+                    }
+                    "map" => {
+                        let mut out = Vec::new();
+                        for i in from..to {
+                            out.push(self.call_block(&blk, vec![VmValue::Int(i)])?);
+                        }
+                        Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                    }
+                    _ => Err(VmError::TypeError {
+                        message: format!("Range has no block method '{}'", name), line,
+                    }),
+                }
+            }
+
+            VmValue::Int(n) => match name {
+                "times" => {
+                    let n = *n;
+                    for i in 0..n {
+                        match self.call_block(&blk, vec![VmValue::Int(i)]) {
+                            Err(VmError::Next(_)) => continue,
+                            Err(VmError::Break(v)) => return Ok(v),
+                            Err(e) => return Err(e),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(recv.clone())
+                }
+                "upto" => {
+                    let from = *n;
+                    let to = match args.first() {
+                        Some(VmValue::Int(t)) => *t,
+                        _ => return Err(VmError::TypeError { message: "upto expects an Int".into(), line }),
+                    };
+                    for i in from..=to {
+                        match self.call_block(&blk, vec![VmValue::Int(i)]) {
+                            Err(VmError::Break(v)) => return Ok(v),
+                            Err(e) => return Err(e),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(recv.clone())
+                }
+                _ => Err(VmError::TypeError {
+                    message: format!("Int has no block method '{}'", name), line,
+                }),
+            },
+
+            VmValue::Map(map) => match name {
+                "each" => {
+                    let pairs: Vec<(String, VmValue)> = map.borrow().iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    for (k, v) in pairs {
+                        match self.call_block(&blk, vec![VmValue::Str(k), v]) {
+                            Err(VmError::Break(val)) => return Ok(val),
+                            Err(e) => return Err(e),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(recv.clone())
+                }
+                "map" => {
+                    let pairs: Vec<(String, VmValue)> = map.borrow().iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    let mut out = Vec::with_capacity(pairs.len());
+                    for (k, v) in pairs {
+                        out.push(self.call_block(&blk, vec![VmValue::Str(k), v])?);
+                    }
+                    Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                }
+                _ => Err(VmError::TypeError {
+                    message: format!("Map has no block method '{}'", name), line,
+                }),
+            },
+
+            other => Err(VmError::TypeError {
+                message: format!("'{}' does not support block method '{}'", other, name),
+                line,
+            }),
+        }
+    }
+
     // ── Stack helpers ─────────────────────────────────────────────────────────
 
     fn pop(&mut self) -> Result<VmValue, VmError> {
@@ -977,6 +1270,298 @@ impl Vm {
         let b = self.pop()?;
         let a = self.pop()?;
         Ok((a, b))
+    }
+}
+
+/// Dispatch a native (non-block) method call on a built-in type.
+fn dispatch_native_method(
+    recv: &VmValue,
+    name: &str,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+
+    match recv {
+        VmValue::Int(n) => match (name, args) {
+            ("to_s",  [])                           => Ok(VmValue::Str(n.to_string())),
+            ("to_f",  [])                           => Ok(VmValue::Float(*n as f64)),
+            ("abs",   [])                           => Ok(VmValue::Int(n.abs())),
+            ("even?", [])                           => Ok(VmValue::Bool(n % 2 == 0)),
+            ("odd?",  [])                           => Ok(VmValue::Bool(n % 2 != 0)),
+            ("zero?", [])                           => Ok(VmValue::Bool(*n == 0)),
+            ("to_r",  [])                           => Ok(recv.clone()),
+            ("pow",   [VmValue::Int(e)]) if *e >= 0 => Ok(VmValue::Int(n.pow(*e as u32))),
+            ("max",   [VmValue::Int(other)])        => Ok(VmValue::Int(*n.max(other))),
+            ("min",   [VmValue::Int(other)])        => Ok(VmValue::Int(*n.min(other))),
+            _ => Err(type_err(&format!("Int has no method '{}'", name))),
+        },
+
+        VmValue::Float(n) => match (name, args) {
+            ("to_s",  []) => Ok(VmValue::Str(format!("{}", n))),
+            ("to_i",  []) => Ok(VmValue::Int(*n as i64)),
+            ("abs",   []) => Ok(VmValue::Float(n.abs())),
+            ("round", []) => Ok(VmValue::Int(n.round() as i64)),
+            ("floor", []) => Ok(VmValue::Int(n.floor() as i64)),
+            ("ceil",  []) => Ok(VmValue::Int(n.ceil() as i64)),
+            ("sqrt",  []) => Ok(VmValue::Float(n.sqrt())),
+            ("nan?",  []) => Ok(VmValue::Bool(n.is_nan())),
+            ("infinite?", []) => Ok(VmValue::Bool(n.is_infinite())),
+            _ => Err(type_err(&format!("Float has no method '{}'", name))),
+        },
+
+        VmValue::Str(s) => match name {
+            "size" | "length" if args.is_empty() => Ok(VmValue::Int(s.chars().count() as i64)),
+            "upcase"   if args.is_empty() => Ok(VmValue::Str(s.to_uppercase())),
+            "downcase" if args.is_empty() => Ok(VmValue::Str(s.to_lowercase())),
+            "reverse"  if args.is_empty() => Ok(VmValue::Str(s.chars().rev().collect())),
+            "strip" | "trim" if args.is_empty() => Ok(VmValue::Str(s.trim().to_string())),
+            "chomp"    if args.is_empty() => Ok(VmValue::Str(s.trim_end_matches('\n').to_string())),
+            "to_i"     if args.is_empty() => Ok(VmValue::Int(s.trim().parse::<i64>().unwrap_or(0))),
+            "to_f"     if args.is_empty() => Ok(VmValue::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
+            "to_s"     if args.is_empty() => Ok(recv.clone()),
+            "empty?"   if args.is_empty() => Ok(VmValue::Bool(s.is_empty())),
+            "chars"    if args.is_empty() => {
+                let chars: Vec<VmValue> = s.chars().map(|c| VmValue::Str(c.to_string())).collect();
+                Ok(VmValue::List(Rc::new(RefCell::new(chars))))
+            }
+            "bytes"    if args.is_empty() => {
+                let bytes: Vec<VmValue> = s.bytes().map(|b| VmValue::Int(b as i64)).collect();
+                Ok(VmValue::List(Rc::new(RefCell::new(bytes))))
+            }
+            "lines"    if args.is_empty() => {
+                let lines: Vec<VmValue> = s.lines().map(|l| VmValue::Str(l.to_string())).collect();
+                Ok(VmValue::List(Rc::new(RefCell::new(lines))))
+            }
+            "include?" if args.len() == 1 => match &args[0] {
+                VmValue::Str(pat) => Ok(VmValue::Bool(s.contains(pat.as_str()))),
+                _ => Err(type_err("include? expects a String")),
+            },
+            "starts_with?" if args.len() == 1 => match &args[0] {
+                VmValue::Str(pat) => Ok(VmValue::Bool(s.starts_with(pat.as_str()))),
+                _ => Err(type_err("starts_with? expects a String")),
+            },
+            "ends_with?" if args.len() == 1 => match &args[0] {
+                VmValue::Str(pat) => Ok(VmValue::Bool(s.ends_with(pat.as_str()))),
+                _ => Err(type_err("ends_with? expects a String")),
+            },
+            "split" => match args {
+                [] => {
+                    let parts: Vec<VmValue> = s.split_whitespace().map(|p| VmValue::Str(p.to_string())).collect();
+                    Ok(VmValue::List(Rc::new(RefCell::new(parts))))
+                }
+                [VmValue::Str(sep)] => {
+                    let parts: Vec<VmValue> = s.split(sep.as_str()).map(|p| VmValue::Str(p.to_string())).collect();
+                    Ok(VmValue::List(Rc::new(RefCell::new(parts))))
+                }
+                _ => Err(type_err("split expects a String delimiter")),
+            },
+            "replace" if args.len() == 2 => match (&args[0], &args[1]) {
+                (VmValue::Str(from), VmValue::Str(to)) => Ok(VmValue::Str(s.replacen(from.as_str(), to.as_str(), 1))),
+                _ => Err(type_err("replace expects two Strings")),
+            },
+            "replace_all" if args.len() == 2 => match (&args[0], &args[1]) {
+                (VmValue::Str(from), VmValue::Str(to)) => Ok(VmValue::Str(s.replace(from.as_str(), to.as_str()))),
+                _ => Err(type_err("replace_all expects two Strings")),
+            },
+            "slice" if args.len() == 2 => match (&args[0], &args[1]) {
+                (VmValue::Int(start), VmValue::Int(len)) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let n = chars.len() as i64;
+                    let start = if *start < 0 { (n + start).max(0) as usize } else { *start as usize };
+                    let len = *len as usize;
+                    let end = (start + len).min(chars.len());
+                    Ok(VmValue::Str(chars[start..end].iter().collect()))
+                }
+                _ => Err(type_err("slice expects (Int, Int)")),
+            },
+            _ => Err(type_err(&format!("String has no method '{}'", name))),
+        },
+
+        VmValue::Bool(b) => match (name, args) {
+            ("to_s",   []) => Ok(VmValue::Str(b.to_string())),
+            ("nil?",   []) => Ok(VmValue::Bool(false)),
+            _ => Err(type_err(&format!("Bool has no method '{}'", name))),
+        },
+
+        VmValue::Nil => match (name, args) {
+            ("to_s",   []) => Ok(VmValue::Str(String::new())),
+            ("nil?",   []) => Ok(VmValue::Bool(true)),
+            ("inspect",[]) => Ok(VmValue::Str("nil".to_string())),
+            _ => Err(type_err(&format!("Nil has no method '{}'", name))),
+        },
+
+        VmValue::List(elems) => match name {
+            "size" | "length" if args.is_empty() => Ok(VmValue::Int(elems.borrow().len() as i64)),
+            "empty?"   if args.is_empty() => Ok(VmValue::Bool(elems.borrow().is_empty())),
+            "first"    if args.is_empty() => Ok(elems.borrow().first().cloned().unwrap_or(VmValue::Nil)),
+            "last"     if args.is_empty() => Ok(elems.borrow().last().cloned().unwrap_or(VmValue::Nil)),
+            "pop"      if args.is_empty() => Ok(elems.borrow_mut().pop().unwrap_or(VmValue::Nil)),
+            "reverse"  if args.is_empty() => {
+                let v: Vec<VmValue> = elems.borrow().iter().cloned().rev().collect();
+                Ok(VmValue::List(Rc::new(RefCell::new(v))))
+            }
+            "sort"     if args.is_empty() => {
+                let mut v: Vec<VmValue> = elems.borrow().clone();
+                v.sort_by(|a, b| vm_value_partial_cmp(a, b));
+                Ok(VmValue::List(Rc::new(RefCell::new(v))))
+            }
+            "include?" if args.len() == 1 => Ok(VmValue::Bool(elems.borrow().contains(&args[0]))),
+            "push" | "append" if args.len() == 1 => {
+                elems.borrow_mut().push(args[0].clone());
+                Ok(recv.clone())
+            }
+            "unshift" | "prepend" if args.len() == 1 => {
+                elems.borrow_mut().insert(0, args[0].clone());
+                Ok(recv.clone())
+            }
+            "concat" if args.len() == 1 => match &args[0] {
+                VmValue::List(other) => {
+                    elems.borrow_mut().extend(other.borrow().iter().cloned());
+                    Ok(recv.clone())
+                }
+                _ => Err(type_err("concat expects a List")),
+            },
+            "join" => {
+                let sep = match args.first() {
+                    Some(VmValue::Str(s)) => s.clone(),
+                    None => String::new(),
+                    _ => return Err(type_err("join expects a String")),
+                };
+                let s = elems.borrow().iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(&sep);
+                Ok(VmValue::Str(s))
+            }
+            "flatten" if args.is_empty() => {
+                fn flatten_list(v: &VmValue) -> Vec<VmValue> {
+                    match v {
+                        VmValue::List(inner) => inner.borrow().iter().flat_map(flatten_list).collect(),
+                        other => vec![other.clone()],
+                    }
+                }
+                let v = elems.borrow().iter().flat_map(flatten_list).collect();
+                Ok(VmValue::List(Rc::new(RefCell::new(v))))
+            }
+            "uniq" if args.is_empty() => {
+                let mut seen = Vec::new();
+                for item in elems.borrow().iter() {
+                    if !seen.contains(item) { seen.push(item.clone()); }
+                }
+                Ok(VmValue::List(Rc::new(RefCell::new(seen))))
+            }
+            "min" if args.is_empty() => {
+                let v = elems.borrow();
+                if v.is_empty() { return Ok(VmValue::Nil); }
+                let m = v.iter().min_by(|a, b| vm_value_partial_cmp(a, b)).cloned().unwrap();
+                Ok(m)
+            }
+            "max" if args.is_empty() => {
+                let v = elems.borrow();
+                if v.is_empty() { return Ok(VmValue::Nil); }
+                let m = v.iter().max_by(|a, b| vm_value_partial_cmp(a, b)).cloned().unwrap();
+                Ok(m)
+            }
+            "sum" if args.is_empty() => {
+                let v = elems.borrow();
+                let mut acc = VmValue::Int(0);
+                for item in v.iter() {
+                    acc = match (&acc, item) {
+                        (VmValue::Int(a), VmValue::Int(b)) => VmValue::Int(a + b),
+                        (VmValue::Float(a), VmValue::Float(b)) => VmValue::Float(a + b),
+                        (VmValue::Int(a), VmValue::Float(b)) => VmValue::Float(*a as f64 + b),
+                        (VmValue::Float(a), VmValue::Int(b)) => VmValue::Float(a + *b as f64),
+                        _ => return Err(type_err("sum: non-numeric element")),
+                    };
+                }
+                Ok(acc)
+            }
+            "any?" if args.is_empty() => Err(type_err("any? requires a block")),
+            "all?" if args.is_empty() => Err(type_err("all? requires a block")),
+            "to_s" if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
+            _ => Err(type_err(&format!("List has no method '{}'", name))),
+        },
+
+        VmValue::Map(map) => match name {
+            "size" | "length" if args.is_empty() => Ok(VmValue::Int(map.borrow().len() as i64)),
+            "empty?"   if args.is_empty() => Ok(VmValue::Bool(map.borrow().is_empty())),
+            "keys"     if args.is_empty() => {
+                let mut keys: Vec<VmValue> = map.borrow().keys().map(|k| VmValue::Str(k.clone())).collect();
+                keys.sort_by(|a, b| vm_value_partial_cmp(a, b));
+                Ok(VmValue::List(Rc::new(RefCell::new(keys))))
+            }
+            "values"   if args.is_empty() => {
+                let mut pairs: Vec<(String, VmValue)> = map.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
+                let vals: Vec<VmValue> = pairs.into_iter().map(|(_, v)| v).collect();
+                Ok(VmValue::List(Rc::new(RefCell::new(vals))))
+            }
+            "has_key?" if args.len() == 1 => match &args[0] {
+                VmValue::Str(k) => Ok(VmValue::Bool(map.borrow().contains_key(k.as_str()))),
+                _ => Err(type_err("has_key? expects a String")),
+            },
+            "get" if args.len() == 1 => match &args[0] {
+                VmValue::Str(k) => Ok(map.borrow().get(k.as_str()).cloned().unwrap_or(VmValue::Nil)),
+                _ => Err(type_err("get expects a String key")),
+            },
+            "set" if args.len() == 2 => match &args[0] {
+                VmValue::Str(k) => {
+                    map.borrow_mut().insert(k.clone(), args[1].clone());
+                    Ok(args[1].clone())
+                }
+                _ => Err(type_err("set expects a String key")),
+            },
+            "delete" if args.len() == 1 => match &args[0] {
+                VmValue::Str(k) => Ok(map.borrow_mut().remove(k.as_str()).unwrap_or(VmValue::Nil)),
+                _ => Err(type_err("delete expects a String key")),
+            },
+            "merge" if args.len() == 1 => match &args[0] {
+                VmValue::Map(other) => {
+                    let mut new_map = map.borrow().clone();
+                    for (k, v) in other.borrow().iter() {
+                        new_map.insert(k.clone(), v.clone());
+                    }
+                    Ok(VmValue::Map(Rc::new(RefCell::new(new_map))))
+                }
+                _ => Err(type_err("merge expects a Map")),
+            },
+            "to_s" if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
+            _ => Err(type_err(&format!("Map has no method '{}'", name))),
+        },
+
+        VmValue::Range { from, to } => match name {
+            "size" | "length" if args.is_empty() => Ok(VmValue::Int((to - from).max(0))),
+            "to_a" if args.is_empty() => {
+                let v: Vec<VmValue> = (*from..*to).map(VmValue::Int).collect();
+                Ok(VmValue::List(Rc::new(RefCell::new(v))))
+            }
+            "include?" if args.len() == 1 => match &args[0] {
+                VmValue::Int(n) => Ok(VmValue::Bool(n >= from && n < to)),
+                _ => Err(type_err("include? expects an Int")),
+            },
+            "first" if args.is_empty() => Ok(VmValue::Int(*from)),
+            "last"  if args.is_empty() => Ok(VmValue::Int(to - 1)),
+            "min"   if args.is_empty() => Ok(VmValue::Int(*from)),
+            "max"   if args.is_empty() => Ok(VmValue::Int(to - 1)),
+            "to_s"  if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
+            _ => Err(type_err(&format!("Range has no method '{}'", name))),
+        },
+
+        other => Err(VmError::TypeError {
+            message: format!("'{}' has no method '{}'", other, name),
+            line,
+        }),
+    }
+}
+
+/// Simple comparison for sorting — numbers compare numerically, strings lexicographically.
+fn vm_value_partial_cmp(a: &VmValue, b: &VmValue) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (VmValue::Int(x),   VmValue::Int(y))   => x.cmp(y),
+        (VmValue::Float(x), VmValue::Float(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (VmValue::Int(x),   VmValue::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal),
+        (VmValue::Float(x), VmValue::Int(y))   => x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal),
+        (VmValue::Str(x),   VmValue::Str(y))   => x.cmp(y),
+        _ => Ordering::Equal,
     }
 }
 

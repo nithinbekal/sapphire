@@ -1188,4 +1188,111 @@ f = outer(42)()
 f()";
         assert_eq!(eval(src), VmValue::Int(42));
     }
+
+    // ── Stdlib native methods ─────────────────────────────────────────────────
+
+    #[test]
+    fn int_methods() {
+        assert_eq!(eval("42.to_s()"),           VmValue::Str("42".into()));
+        assert_eq!(eval("42.to_f()"),           VmValue::Float(42.0));
+        assert_eq!(eval("n = -5\nn.abs()"),     VmValue::Int(5));
+        assert_eq!(eval("4.even?()"),           VmValue::Bool(true));
+        assert_eq!(eval("3.odd?()"),            VmValue::Bool(true));
+        assert_eq!(eval("0.zero?()"),           VmValue::Bool(true));
+    }
+
+    #[test]
+    fn float_methods() {
+        assert_eq!(eval("3.7.round()"),           VmValue::Int(4));
+        assert_eq!(eval("3.7.floor()"),           VmValue::Int(3));
+        assert_eq!(eval("3.2.ceil()"),            VmValue::Int(4));
+        assert_eq!(eval("3.5.to_i()"),            VmValue::Int(3));
+        assert_eq!(eval("n = -2.5\nn.abs()"),     VmValue::Float(2.5));
+    }
+
+    #[test]
+    fn string_methods() {
+        assert_eq!(eval(r#""hello".size()"#),          VmValue::Int(5));
+        assert_eq!(eval(r#""hello".upcase()"#),        VmValue::Str("HELLO".into()));
+        assert_eq!(eval(r#""HELLO".downcase()"#),      VmValue::Str("hello".into()));
+        assert_eq!(eval(r#""abc".reverse()"#),         VmValue::Str("cba".into()));
+        assert_eq!(eval(r#""  hi  ".strip()"#),        VmValue::Str("hi".into()));
+        assert_eq!(eval(r#""42".to_i()"#),             VmValue::Int(42));
+        assert_eq!(eval(r#""3.14".to_f()"#),           VmValue::Float(3.14));
+        assert_eq!(eval(r#""".empty?()"#),             VmValue::Bool(true));
+        assert_eq!(eval(r#""hi".include?("i")"#),      VmValue::Bool(true));
+        assert_eq!(eval(r#""hi".starts_with?("h")"#),  VmValue::Bool(true));
+        assert_eq!(eval(r#""hi".ends_with?("i")"#),    VmValue::Bool(true));
+    }
+
+    #[test]
+    fn string_split() {
+        let src = r#""a,b,c".split(",")"#;
+        // Test via size since List equality uses ptr equality
+        assert_eq!(eval(&format!("{}.size()", src)), VmValue::Int(3));
+    }
+
+    #[test]
+    fn list_methods() {
+        assert_eq!(eval("a = [1,2,3]\na.size()"),    VmValue::Int(3));
+        assert_eq!(eval("a = [1,2,3]\na.first()"),   VmValue::Int(1));
+        assert_eq!(eval("a = [1,2,3]\na.last()"),    VmValue::Int(3));
+        assert_eq!(eval("[].empty?()"),               VmValue::Bool(true));
+        assert_eq!(eval("[1,2].empty?()"),            VmValue::Bool(false));
+        assert_eq!(eval("a = [1,2,3]\na.include?(2)"), VmValue::Bool(true));
+        assert_eq!(eval("a = [3,1,2]\na.sort().first()"), VmValue::Int(1));
+        assert_eq!(eval(r#"[1,2,3].join(",")"#),     VmValue::Str("1,2,3".into()));
+    }
+
+    #[test]
+    fn list_push_and_pop() {
+        assert_eq!(eval("a = [1,2]\na.push(3)\na.size()"), VmValue::Int(3));
+        assert_eq!(eval("a = [1,2,3]\na.pop()"),            VmValue::Int(3));
+    }
+
+    #[test]
+    fn list_each() {
+        let src = "a = [1,2,3]\nsum = 0\na.each() { |x| sum = sum + x }\nsum";
+        assert_eq!(eval(src), VmValue::Int(6));
+    }
+
+    #[test]
+    fn list_map() {
+        let src = "a = [1,2,3]\nb = a.map() { |x| x * 2 }\nb[1]";
+        assert_eq!(eval(src), VmValue::Int(4));
+    }
+
+    #[test]
+    fn int_times() {
+        let src = "sum = 0\n3.times() { |i| sum = sum + i }\nsum";
+        assert_eq!(eval(src), VmValue::Int(3)); // 0+1+2
+    }
+
+    #[test]
+    fn range_each() {
+        let src = "sum = 0\n(1..4).each() { |i| sum = sum + i }\nsum";
+        assert_eq!(eval(src), VmValue::Int(6)); // 1+2+3
+    }
+
+    #[test]
+    fn range_to_a() {
+        let src = "r = 1..4\nr.to_a().size()";
+        assert_eq!(eval(src), VmValue::Int(3));
+    }
+
+    #[test]
+    fn map_methods() {
+        assert_eq!(eval("m = {a: 1, b: 2}\nm.size()"),          VmValue::Int(2));
+        assert_eq!(eval("m = {a: 1}\nm.has_key?(\"a\")"),        VmValue::Bool(true));
+        assert_eq!(eval("m = {a: 1}\nm.has_key?(\"z\")"),        VmValue::Bool(false));
+        assert_eq!(eval("m = {a: 1}\nm.delete(\"a\")"),          VmValue::Int(1));
+    }
+
+    #[test]
+    fn nil_bool_methods() {
+        assert_eq!(eval("nil.nil?()"),   VmValue::Bool(true));
+        assert_eq!(eval("false.nil?()"), VmValue::Bool(false));
+        assert_eq!(eval("nil.to_s()"),   VmValue::Str("".into()));
+        assert_eq!(eval("true.to_s()"),  VmValue::Str("true".into()));
+    }
 }

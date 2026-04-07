@@ -147,6 +147,16 @@ pub enum OpCode {
     /// Remove the most recently registered rescue handler (normal exit from body).
     PopRescue,
 
+    // Native helpers used by pre-built stdlib functions
+    /// Pop a List/Map/Str/Range and push its length as Int.
+    Len,
+    /// Pop a Map and push a List of its string keys (sorted).
+    MapKeys,
+    /// Pop a Range and push its `from` field as Int.
+    RangeFrom,
+    /// Pop a Range and push its `to` field as Int.
+    RangeTo,
+
     // Output
     /// Pop TOS, print it with a newline, push Nil.
     Print,
