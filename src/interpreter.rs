@@ -13,6 +13,7 @@ use crate::error::SapphireError;
 use crate::token::TokenKind;
 use crate::value::Value;
 
+const OBJECT_STDLIB: &str = include_str!("../stdlib/object.spr");
 const LIST_STDLIB: &str = include_str!("../stdlib/list.spr");
 const MAP_STDLIB: &str = include_str!("../stdlib/map.spr");
 
@@ -64,8 +65,7 @@ pub fn global_env() -> EnvRef {
         closure: env.clone(),
     };
     env.borrow_mut().set("Object".to_string(), object_class);
-    env.borrow_mut().freeze("Object");
-    for (src, label) in [(LIST_STDLIB, "stdlib/list.spr"), (MAP_STDLIB, "stdlib/map.spr")] {
+    for (src, label) in [(OBJECT_STDLIB, "stdlib/object.spr"), (LIST_STDLIB, "stdlib/list.spr"), (MAP_STDLIB, "stdlib/map.spr")] {
         let tokens = crate::lexer::Lexer::new(src).scan_tokens();
         let stmts = crate::parser::Parser::new(tokens).parse()
             .unwrap_or_else(|e| panic!("{} failed to parse: {}", label, e));
@@ -74,6 +74,7 @@ pub fn global_env() -> EnvRef {
                 .unwrap_or_else(|e| panic!("{} failed to execute: {}", label, e));
         }
     }
+    env.borrow_mut().freeze("Object");
     env.borrow_mut().freeze("List");
     env.borrow_mut().freeze("Map");
     env
@@ -341,6 +342,9 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 // Built-in fallbacks for instances
                 return match name.as_str() {
                     "nil?" => Ok(Value::Bool(false)),
+                    "class" => env.borrow().get(class_name).ok_or_else(|| SapphireError::RuntimeError {
+                        message: format!("class '{}' not found", class_name),
+                    }),
                     "to_s" => Ok(Value::Str(format!("{}", obj))),
                     "to_i" => Err(SapphireError::RuntimeError {
                         message: format!("cannot convert {} to integer", obj),
@@ -479,14 +483,14 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 };
             }
 
-            // Class: only .new
+            // Class: .new, .name
             if let Value::Class { name: class_name, fields, .. } = obj {
-                return if name == "new" {
-                    Ok(Value::Constructor { class_name, fields })
-                } else {
-                    Err(SapphireError::RuntimeError {
+                return match name.as_str() {
+                    "new"  => Ok(Value::Constructor { class_name, fields }),
+                    "name" => Ok(Value::Str(class_name)),
+                    _ => Err(SapphireError::RuntimeError {
                         message: format!("unknown class method '{}'", name),
-                    })
+                    }),
                 };
             }
 

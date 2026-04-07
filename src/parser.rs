@@ -619,6 +619,8 @@ impl Parser {
                 self.advance(); // consume '.'
                 let name = match self.peek().kind.clone() {
                     TokenKind::Identifier(n) => { self.advance(); n }
+                    // Allow keywords as method/field names after '.' (e.g. self.class)
+                    TokenKind::Class => { self.advance(); "class".to_string() }
                     _ => return Err(SapphireError::ParseError {
                         message: "expected field or method name after '.'".into(),
                         line: self.peek().line,

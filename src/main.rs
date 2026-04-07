@@ -70,7 +70,7 @@ fn typecheck_file(path: &str) {
 }
 
 fn run_repl() {
-    println!("Sapphire 0.1.0 — :q to quit");
+    println!("Sapphire 0.1.0 — Ctrl+D to quit");
 
     let env = interpreter::global_env();
 
@@ -79,8 +79,9 @@ fn run_repl() {
         io::stdout().flush().unwrap();
 
         let mut line = String::new();
-        if io::stdin().read_line(&mut line).is_err() || line.trim() == ":q" {
-            break;
+        match io::stdin().read_line(&mut line) {
+            Ok(0) | Err(_) => { println!(); break; }
+            _ => {}
         }
 
         let source = line.trim();
