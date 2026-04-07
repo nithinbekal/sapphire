@@ -96,6 +96,13 @@ pub fn global_env() -> EnvRef {
     env.borrow_mut().freeze("Bool");
     env.borrow_mut().freeze("List");
     env.borrow_mut().freeze("Map");
+    // Establish an implicit top-level 'self' (main), an instance of Object,
+    // so that bare calls to top-level methods resolve via the implicit-self fallback.
+    let main_obj = Value::Instance {
+        class_name: "Object".to_string(),
+        fields: Rc::new(RefCell::new(HashMap::new())),
+    };
+    env.borrow_mut().set("self".to_string(), main_obj);
     env
 }
 
@@ -142,13 +149,19 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             Ok(None)
         }
         Stmt::Function { name, params, return_type, body } => {
-            if env.borrow().is_frozen(&name) {
-                return Err(SapphireError::RuntimeError {
-                    message: format!("'{}' is reserved and cannot be redefined", name),
-                });
-            }
-            let func = Value::Function { params, return_type, body, closure: env.clone() };
-            env.borrow_mut().set(name, func);
+            let method = MethodDef { name: name.clone(), params, return_type, body, private: false };
+            let object_val = env.borrow().get("Object").ok_or_else(|| SapphireError::RuntimeError {
+                message: "Object class not found".into(),
+            })?;
+            let updated = match object_val {
+                Value::Class { name: cn, superclass, fields, mut methods, closure } => {
+                    methods.retain(|m: &MethodDef| m.name != name);
+                    methods.push(method);
+                    Value::Class { name: cn, superclass, fields, methods, closure }
+                }
+                _ => return Err(SapphireError::RuntimeError { message: "Object is not a class".into() }),
+            };
+            env.borrow_mut().assign("Object", updated);
             Ok(None)
         }
         Stmt::Return(expr) => {
@@ -772,56 +785,6 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 eval_args.push((arg.name, evaluate(arg.value, env.clone())?));
             }
             match callee_val {
-                Value::Function { params, return_type, body, closure } => {
-                    let arg_vals: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
-                    if params.len() != arg_vals.len() {
-                        return Err(SapphireError::RuntimeError {
-                            message: format!("expected {} argument(s), got {}", params.len(), arg_vals.len()),
-                        });
-                    }
-                    let call_env = Environment::new_child(closure);
-                    let frame_id = next_frame_id();
-                    call_env.borrow_mut().set("__frame_id__".to_string(), Value::Int(frame_id as i64));
-                    for (param, val) in params.iter().zip(arg_vals.iter()) {
-                        if let Some(te) = &param.type_ann {
-                            if !check_type(val, te) {
-                                return Err(SapphireError::TypeError {
-                                    message: format!("argument '{}' expected {}, got {}", param.name, type_expr_name(te), value_type_description(val)),
-                                });
-                            }
-                        }
-                        call_env.borrow_mut().set(param.name.clone(), val.clone());
-                    }
-                    if let Some(blk) = block {
-                        call_env.borrow_mut().set("__block__".to_string(), Value::Block(blk, env.clone()));
-                    }
-                    let mut result = Value::Nil;
-                    for stmt in body {
-                        match execute(stmt, call_env.clone()) {
-                            Ok(Some(v)) => result = v,
-                            Ok(None) => {}
-                            Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => {
-                                if let Some(te) = &return_type {
-                                    if !check_type(&v, te) {
-                                        return Err(SapphireError::TypeError {
-                                            message: format!("return value expected {}, got {}", type_expr_name(te), value_type_description(&v)),
-                                        });
-                                    }
-                                }
-                                return Ok(v);
-                            }
-                            Err(e) => return Err(e),
-                        }
-                    }
-                    if let Some(te) = &return_type {
-                        if !check_type(&result, te) {
-                            return Err(SapphireError::TypeError {
-                                message: format!("return value expected {}, got {}", type_expr_name(te), value_type_description(&result)),
-                            });
-                        }
-                    }
-                    Ok(result)
-                }
                 Value::BoundMethod { receiver, params, return_type, body, closure, defined_in } => {
                     let arg_vals: Vec<Value> = eval_args.into_iter().map(|(_, v)| v).collect();
                     if params.len() != arg_vals.len() {
