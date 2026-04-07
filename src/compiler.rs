@@ -1,6 +1,6 @@
 use std::fmt;
 use std::rc::Rc;
-use crate::ast::{Expr, Stmt, StringPart};
+use crate::ast::{Expr, Stmt, StringPart, MethodDef};
 use crate::chunk::{Chunk, Constant, Function, OpCode, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
@@ -205,6 +205,10 @@ impl Compiler {
                 self.emit(OpCode::Print);
             }
 
+            Stmt::Class { name, fields, methods, .. } => {
+                self.compile_class(name, fields, methods)?;
+            }
+
             other => {
                 return Err(self.error(format!(
                     "statement not yet supported by compiler: {:?}",
@@ -300,16 +304,60 @@ impl Compiler {
                 Ok(())
             }
 
+            Expr::SelfExpr => {
+                self.emit(OpCode::GetSelf);
+                Ok(())
+            }
+
             Expr::Call { callee, args, block } => {
                 if block.is_some() {
                     return Err(self.error("blocks not yet supported by compiler".into()));
                 }
+                // Method call: `obj.method(args)`
+                if let Expr::Get { object, name } = callee.as_ref() {
+                    if name == "new" {
+                        // Class construction: `ClassName.new(field: val, ...)`
+                        self.expr(object)?;
+                        for arg in args {
+                            let arg_name = arg.name.clone().unwrap_or_default();
+                            let ni = self.state_mut().chunk.add_constant(Constant::Str(arg_name));
+                            self.emit(OpCode::Constant(ni));
+                            self.expr(&arg.value)?;
+                        }
+                        self.emit(OpCode::NewInstance(args.len()));
+                    } else {
+                        // Regular method invocation
+                        self.expr(object)?;
+                        for arg in args {
+                            self.expr(&arg.value)?;
+                        }
+                        let ni = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                        self.emit(OpCode::Invoke(ni, args.len()));
+                    }
+                    return Ok(());
+                }
+                // Plain function call
                 self.expr(callee)?;
                 let arg_count = args.len();
                 for arg in args {
                     self.expr(&arg.value)?;
                 }
                 self.emit(OpCode::Call(arg_count));
+                Ok(())
+            }
+
+            Expr::Get { object, name } => {
+                self.expr(object)?;
+                let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                self.emit(OpCode::GetField(idx));
+                Ok(())
+            }
+
+            Expr::Set { object, name, value } => {
+                self.expr(object)?;
+                self.expr(value)?;
+                let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                self.emit(OpCode::SetField(idx));
                 Ok(())
             }
 
@@ -493,6 +541,43 @@ impl Compiler {
 
     fn stmts(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
         for s in stmts { self.stmt(s)?; }
+        Ok(())
+    }
+
+    /// Compile a class definition: emit each method as a closure, then emit
+    /// `DefClass` which collects them into a Class value stored as a local.
+    fn compile_class(
+        &mut self,
+        name:    &str,
+        fields:  &[crate::ast::FieldDef],
+        methods: &[MethodDef],
+    ) -> Result<(), CompileError> {
+        let line = self.state().current_line;
+
+        for method in methods {
+            let arity = method.params.len();
+            self.push_fn(&method.name, arity, line);
+            // Slot 0 = `self` (the receiver); it is NOT counted in `arity`.
+            self.state_mut().locals.push(LocalInfo { name: "self".into(), captured: false });
+            for p in &method.params {
+                self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
+            }
+            self.compile_body(&method.body)?;
+            let func = self.pop_fn();
+            let fi = self.state_mut().chunk.add_constant(Constant::Function(func));
+            self.emit(OpCode::Closure(fi));
+        }
+
+        let field_names:  Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+        let method_names: Vec<String> = methods.iter().map(|m| m.name.clone()).collect();
+        let desc_idx = self.state_mut().chunk.add_constant(Constant::ClassDesc {
+            name: name.to_string(),
+            field_names,
+            method_names,
+        });
+        self.emit(OpCode::DefClass(desc_idx));
+        // Store the class value in a local slot named after the class.
+        self.state_mut().locals.push(LocalInfo { name: name.to_string(), captured: false });
         Ok(())
     }
 
@@ -715,6 +800,55 @@ add5(1) + add10(1)";
     }
 
     // ── and / or / print ──────────────────────────────────────────────────────
+
+    // ── Classes ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn class_instantiation_and_field_read() {
+        let src = "class Point { attr x\nattr y }\np = Point.new(x: 3, y: 4)\np.x";
+        assert_eq!(eval(src), VmValue::Int(3));
+    }
+
+    #[test]
+    fn class_field_write() {
+        let src = "class Box { attr val }\nb = Box.new(val: 1)\nb.val = 99\nb.val";
+        assert_eq!(eval(src), VmValue::Int(99));
+    }
+
+    #[test]
+    fn class_method_call() {
+        let src = "class Counter {
+  attr n
+  def inc() { self.n = self.n + 1 }
+  def get() { self.n }
+}
+c = Counter.new(n: 0)
+c.inc()
+c.inc()
+c.get()";
+        assert_eq!(eval(src), VmValue::Int(2));
+    }
+
+    #[test]
+    fn class_method_with_args() {
+        let src = "class Math {
+  def add(a, b) { a + b }
+}
+m = Math.new()
+m.add(3, 4)";
+        assert_eq!(eval(src), VmValue::Int(7));
+    }
+
+    #[test]
+    fn class_method_returns_self_field() {
+        let src = "class Dog {
+  attr name
+  def bark() { self.name }
+}
+d = Dog.new(name: \"Rex\")
+d.bark()";
+        assert_eq!(eval(src), VmValue::Str("Rex".into()));
+    }
 
     // ── Lists / maps / ranges ─────────────────────────────────────────────────
 

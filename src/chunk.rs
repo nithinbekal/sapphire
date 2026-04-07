@@ -103,6 +103,24 @@ pub enum OpCode {
     /// Pop value, index, then object; set the element; push value.
     IndexSet,
 
+    // Classes
+    /// Pops N method closures (N = ClassDesc.method_names.len()) and the
+    /// constant at `const_idx` provides the ClassDesc; pushes a Class value.
+    DefClass(usize),
+    /// Class construction: the stack has [class, name0, val0, …, nameN, valN].
+    /// Pops 2*n+1 values, creates an Instance with the supplied field values.
+    NewInstance(usize),
+    /// Pop object, look up field `const_idx` (a Str constant) in instance
+    /// fields, push the value (or Nil if absent).
+    GetField(usize),
+    /// Stack: [object, value]; set instance field `const_idx`; push value.
+    SetField(usize),
+    /// Method call: receiver is at stack[len - arg_count - 1].
+    /// `name_idx` is a Str constant; looks up the method, pushes a new frame.
+    Invoke(usize, usize),
+    /// Push `self` (slot 0) — emitted for `SelfExpr` inside methods.
+    GetSelf,
+
     // Output
     /// Pop TOS, print it with a newline, push Nil.
     Print,
@@ -125,15 +143,24 @@ pub enum Constant {
     Float(f64),
     Str(String),
     Function(Rc<Function>),
+    /// Static descriptor for a class: its name, field names (in declaration
+    /// order), and method names (in the same order as the closures that will
+    /// be popped off the stack by `DefClass`).
+    ClassDesc {
+        name:         String,
+        field_names:  Vec<String>,
+        method_names: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Constant::Int(n)         => write!(f, "{}", n),
-            Constant::Float(n)       => write!(f, "{}", n),
-            Constant::Str(s)         => write!(f, "{:?}", s),
-            Constant::Function(func) => write!(f, "<fn {}>", func.name),
+            Constant::Int(n)              => write!(f, "{}", n),
+            Constant::Float(n)            => write!(f, "{}", n),
+            Constant::Str(s)              => write!(f, "{:?}", s),
+            Constant::Function(func)      => write!(f, "<fn {}>", func.name),
+            Constant::ClassDesc { name, .. } => write!(f, "<class {}>", name),
         }
     }
 }
@@ -201,6 +228,11 @@ impl Chunk {
                 OpCode::BuildString(n)          => println!("BUILD_STRING        {:4}", n),
                 OpCode::BuildList(n)            => println!("BUILD_LIST          {:4}", n),
                 OpCode::BuildMap(n)             => println!("BUILD_MAP           {:4}", n),
+                OpCode::DefClass(idx)           => println!("DEF_CLASS           {:4}  ({})", idx, self.constants[*idx]),
+                OpCode::NewInstance(n)          => println!("NEW_INSTANCE        {:4}", n),
+                OpCode::GetField(idx)           => println!("GET_FIELD           {:4}  ({})", idx, self.constants[*idx]),
+                OpCode::SetField(idx)           => println!("SET_FIELD           {:4}  ({})", idx, self.constants[*idx]),
+                OpCode::Invoke(n, argc)         => println!("INVOKE              {:4}  argc={}", n, argc),
                 OpCode::JumpIfFalseKeep(off)    => println!("JUMP_IF_FALSE_KEEP  {:4}", off),
                 OpCode::JumpIfTrueKeep(off)     => println!("JUMP_IF_TRUE_KEEP   {:4}", off),
                 other                           => println!("{:?}", other),

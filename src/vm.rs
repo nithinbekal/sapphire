@@ -51,6 +51,25 @@ pub enum VmValue {
     List(Rc<RefCell<Vec<VmValue>>>),
     Map(Rc<RefCell<HashMap<String, VmValue>>>),
     Range { from: i64, to: i64 },
+    /// A compiled class: holds the static field list and the method table.
+    Class {
+        name:    String,
+        fields:  Vec<String>,
+        methods: Rc<HashMap<String, VmMethod>>,
+    },
+    /// A live instance of a class.
+    Instance {
+        class_name: String,
+        fields:     Rc<RefCell<HashMap<String, VmValue>>>,
+        methods:    Rc<HashMap<String, VmMethod>>,
+    },
+}
+
+/// A compiled method: a function together with any upvalues it closed over.
+#[derive(Debug, Clone)]
+pub struct VmMethod {
+    pub function: Rc<Function>,
+    pub upvalues: Vec<Upvalue>,
 }
 
 impl PartialEq for VmValue {
@@ -68,6 +87,8 @@ impl PartialEq for VmValue {
             (VmValue::Map(a),   VmValue::Map(b))   => Rc::ptr_eq(a, b),
             (VmValue::Range { from: f1, to: t1 },
              VmValue::Range { from: f2, to: t2 })  => f1 == f2 && t1 == t2,
+            (VmValue::Instance { fields: f1, .. },
+             VmValue::Instance { fields: f2, .. }) => Rc::ptr_eq(f1, f2),
             _ => false,
         }
     }
@@ -95,6 +116,14 @@ impl fmt::Display for VmValue {
                 write!(f, "{{{}}}", parts.join(", "))
             }
             VmValue::Range { from, to } => write!(f, "{}..{}", from, to),
+            VmValue::Class { name, .. }  => write!(f, "<class {}>", name),
+            VmValue::Instance { class_name, fields, .. } => {
+                let mut pairs: Vec<String> = fields.borrow().iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect();
+                pairs.sort();
+                write!(f, "#<{} {}>", class_name, pairs.join(", "))
+            }
         }
     }
 }
@@ -105,7 +134,8 @@ impl From<&Constant> for VmValue {
             Constant::Int(n)         => VmValue::Int(*n),
             Constant::Float(n)       => VmValue::Float(*n),
             Constant::Str(s)         => VmValue::Str(s.clone()),
-            Constant::Function(func) => VmValue::Function(func.clone()),
+            Constant::Function(func)    => VmValue::Function(func.clone()),
+            Constant::ClassDesc { .. }  => panic!("ClassDesc cannot be used as a stack value"),
         }
     }
 }
@@ -383,6 +413,151 @@ impl Vm {
                             line,
                         }),
                     }
+                    self.stack.push(val);
+                }
+
+                // ── Class opcodes ────────────────────────────────────────────
+
+                OpCode::DefClass(desc_idx) => {
+                    let (class_name, field_names, method_names) = {
+                        let consts = &self.frames.last().unwrap().function.chunk.constants;
+                        match &consts[desc_idx] {
+                            Constant::ClassDesc { name, field_names, method_names } =>
+                                (name.clone(), field_names.clone(), method_names.clone()),
+                            _ => panic!("DefClass: expected ClassDesc constant"),
+                        }
+                    };
+                    let n = method_names.len();
+                    let start = self.stack.len().checked_sub(n).ok_or(VmError::StackUnderflow)?;
+                    let closures: Vec<VmValue> = self.stack.drain(start..).collect();
+                    let mut methods = HashMap::new();
+                    for (name, closure) in method_names.iter().zip(closures) {
+                        match closure {
+                            VmValue::Closure { function, upvalues } =>
+                                { methods.insert(name.clone(), VmMethod { function, upvalues }); }
+                            _ => panic!("DefClass: method is not a closure"),
+                        }
+                    }
+                    self.stack.push(VmValue::Class {
+                        name:    class_name,
+                        fields:  field_names,
+                        methods: Rc::new(methods),
+                    });
+                }
+
+                OpCode::NewInstance(n_pairs) => {
+                    // Stack: [class, name0, val0, …, nameN, valN]
+                    let base = self.stack.len()
+                        .checked_sub(1 + n_pairs * 2)
+                        .ok_or(VmError::StackUnderflow)?;
+                    let (class_name, field_decls, methods) = match &self.stack[base] {
+                        VmValue::Class { name, fields, methods } =>
+                            (name.clone(), fields.clone(), methods.clone()),
+                        other => return Err(VmError::TypeError {
+                            message: format!("'{}' is not a class", other),
+                            line,
+                        }),
+                    };
+                    // Initialise all declared fields to nil.
+                    let mut instance_fields: HashMap<String, VmValue> =
+                        field_decls.iter().map(|n| (n.clone(), VmValue::Nil)).collect();
+                    // Apply named constructor arguments.
+                    for i in 0..n_pairs {
+                        let name_val = self.stack[base + 1 + i * 2].clone();
+                        let val      = self.stack[base + 2 + i * 2].clone();
+                        match name_val {
+                            VmValue::Str(ref n) if !n.is_empty() => {
+                                instance_fields.insert(n.clone(), val);
+                            }
+                            _ => {}
+                        }
+                    }
+                    self.stack.drain(base..);
+                    self.stack.push(VmValue::Instance {
+                        class_name,
+                        fields:  Rc::new(RefCell::new(instance_fields)),
+                        methods,
+                    });
+                }
+
+                OpCode::GetField(idx) => {
+                    let name = match &self.frames.last().unwrap().function.chunk.constants[idx] {
+                        Constant::Str(s) => s.clone(),
+                        _ => panic!("GetField: expected Str constant"),
+                    };
+                    let obj = self.pop()?;
+                    match obj {
+                        VmValue::Instance { ref fields, .. } => {
+                            let val = fields.borrow().get(&name).cloned().unwrap_or(VmValue::Nil);
+                            self.stack.push(val);
+                        }
+                        other => return Err(VmError::TypeError {
+                            message: format!("cannot get field '{}' on {}", name, other),
+                            line,
+                        }),
+                    }
+                }
+
+                OpCode::SetField(idx) => {
+                    let name = match &self.frames.last().unwrap().function.chunk.constants[idx] {
+                        Constant::Str(s) => s.clone(),
+                        _ => panic!("SetField: expected Str constant"),
+                    };
+                    let val = self.pop()?;
+                    let obj = self.pop()?;
+                    match obj {
+                        VmValue::Instance { ref fields, .. } => {
+                            fields.borrow_mut().insert(name, val.clone());
+                            self.stack.push(val);
+                        }
+                        other => return Err(VmError::TypeError {
+                            message: format!("cannot set field '{}' on {}", name, other),
+                            line,
+                        }),
+                    }
+                }
+
+                OpCode::Invoke(name_idx, arg_count) => {
+                    let method_name = match &self.frames.last().unwrap().function.chunk.constants[name_idx] {
+                        Constant::Str(s) => s.clone(),
+                        _ => panic!("Invoke: expected Str constant for method name"),
+                    };
+                    let recv_slot = self.stack.len()
+                        .checked_sub(arg_count + 1)
+                        .ok_or(VmError::StackUnderflow)?;
+                    let method = match &self.stack[recv_slot] {
+                        VmValue::Instance { methods, .. } => {
+                            methods.get(&method_name).cloned()
+                                .ok_or_else(|| VmError::TypeError {
+                                    message: format!("method '{}' not found", method_name),
+                                    line,
+                                })?
+                        }
+                        other => return Err(VmError::TypeError {
+                            message: format!("cannot invoke '{}' on {}", method_name, other),
+                            line,
+                        }),
+                    };
+                    if method.function.arity != arg_count {
+                        return Err(VmError::TypeError {
+                            message: format!(
+                                "method '{}' expects {} arg(s), got {}",
+                                method_name, method.function.arity, arg_count
+                            ),
+                            line,
+                        });
+                    }
+                    self.frames.push(CallFrame {
+                        function: method.function,
+                        upvalues: method.upvalues,
+                        ip:       0,
+                        base:     recv_slot,
+                    });
+                }
+
+                OpCode::GetSelf => {
+                    let base = self.frames.last().unwrap().base;
+                    let val  = self.stack[base].clone();
                     self.stack.push(val);
                 }
 
