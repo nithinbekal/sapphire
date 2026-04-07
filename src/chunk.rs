@@ -1,3 +1,20 @@
+use std::rc::Rc;
+
+/// A compiled function: its own bytecode chunk, name, and arity.
+#[derive(Debug)]
+pub struct Function {
+    pub name:  String,
+    pub arity: usize,
+    pub chunk: Chunk,
+}
+
+/// Two `Function` values are equal only if they are the exact same allocation.
+impl PartialEq for Function {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
 /// A single VM instruction.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
@@ -34,6 +51,10 @@ pub enum OpCode {
     /// Jump backward: subtract `offset` from ip (used for loops).
     Loop(usize),
 
+    // Functions
+    /// Call the function sitting `arg_count` slots below the top of the stack.
+    Call(usize),
+
     // Stack manipulation
     Pop,
     Return,
@@ -51,14 +72,16 @@ pub enum Constant {
     Int(i64),
     Float(f64),
     Str(String),
+    Function(Rc<Function>),
 }
 
 impl std::fmt::Display for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Constant::Int(n)   => write!(f, "{}", n),
-            Constant::Float(n) => write!(f, "{}", n),
-            Constant::Str(s)   => write!(f, "{:?}", s),
+            Constant::Int(n)      => write!(f, "{}", n),
+            Constant::Float(n)    => write!(f, "{}", n),
+            Constant::Str(s)      => write!(f, "{:?}", s),
+            Constant::Function(func) => write!(f, "<fn {}>", func.name),
         }
     }
 }
@@ -119,6 +142,7 @@ impl Chunk {
                 OpCode::Jump(off)         => println!("JUMP           {:4}", off),
                 OpCode::JumpIfFalse(off)  => println!("JUMP_IF_FALSE  {:4}", off),
                 OpCode::Loop(off)         => println!("LOOP           {:4}", off),
+                OpCode::Call(argc)        => println!("CALL           {:4}", argc),
                 other => println!("{:?}", other),
             }
         }

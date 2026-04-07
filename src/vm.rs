@@ -1,5 +1,6 @@
 use std::fmt;
-use crate::chunk::{Chunk, Constant, OpCode};
+use std::rc::Rc;
+use crate::chunk::{Constant, Function, OpCode};
 
 // ── Runtime value ────────────────────────────────────────────────────────────
 
@@ -11,16 +12,18 @@ pub enum VmValue {
     Str(String),
     Bool(bool),
     Nil,
+    Function(Rc<Function>),
 }
 
 impl fmt::Display for VmValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VmValue::Int(n)   => write!(f, "{}", n),
-            VmValue::Float(n) => write!(f, "{}", n),
-            VmValue::Str(s)   => write!(f, "{}", s),
-            VmValue::Bool(b)  => write!(f, "{}", b),
-            VmValue::Nil      => write!(f, "nil"),
+            VmValue::Int(n)      => write!(f, "{}", n),
+            VmValue::Float(n)    => write!(f, "{}", n),
+            VmValue::Str(s)      => write!(f, "{}", s),
+            VmValue::Bool(b)     => write!(f, "{}", b),
+            VmValue::Nil         => write!(f, "nil"),
+            VmValue::Function(func) => write!(f, "<fn {}>", func.name),
         }
     }
 }
@@ -28,9 +31,10 @@ impl fmt::Display for VmValue {
 impl From<&Constant> for VmValue {
     fn from(c: &Constant) -> Self {
         match c {
-            Constant::Int(n)   => VmValue::Int(*n),
-            Constant::Float(n) => VmValue::Float(*n),
-            Constant::Str(s)   => VmValue::Str(s.clone()),
+            Constant::Int(n)         => VmValue::Int(*n),
+            Constant::Float(n)       => VmValue::Float(*n),
+            Constant::Str(s)         => VmValue::Str(s.clone()),
+            Constant::Function(func) => VmValue::Function(func.clone()),
         }
     }
 }
@@ -54,29 +58,46 @@ impl fmt::Display for VmError {
     }
 }
 
-// ── VM ───────────────────────────────────────────────────────────────────────
+// ── Call frame ───────────────────────────────────────────────────────────────
 
-pub struct Vm<'a> {
-    chunk: &'a Chunk,
-    ip:    usize,
-    stack: Vec<VmValue>,
+struct CallFrame {
+    function: Rc<Function>,
+    /// Instruction pointer within this frame's chunk.
+    ip:   usize,
+    /// Index into the VM stack where slot 0 of this frame begins.
+    /// The function value itself lives at `base - 1`.
+    base: usize,
 }
 
-impl<'a> Vm<'a> {
-    pub fn new(chunk: &'a Chunk) -> Self {
-        Vm { chunk, ip: 0, stack: Vec::new() }
+// ── VM ───────────────────────────────────────────────────────────────────────
+
+pub struct Vm {
+    frames: Vec<CallFrame>,
+    stack:  Vec<VmValue>,
+}
+
+impl Vm {
+    pub fn new(function: Rc<Function>) -> Self {
+        let frame = CallFrame { function, ip: 0, base: 0 };
+        Vm { frames: vec![frame], stack: Vec::new() }
     }
 
-    /// Execute the chunk and return the top-of-stack value when `Return` is hit.
     pub fn run(&mut self) -> Result<Option<VmValue>, VmError> {
         loop {
-            let op = &self.chunk.code[self.ip];
-            let line = self.chunk.lines[self.ip];
-            self.ip += 1;
+            // Fetch the next instruction from the current frame, then release the borrow.
+            let (op, line) = {
+                let frame = self.frames.last_mut().unwrap();
+                let op   = frame.function.chunk.code[frame.ip].clone();
+                let line = frame.function.chunk.lines[frame.ip];
+                frame.ip += 1;
+                (op, line)
+            };
 
             match op {
                 OpCode::Constant(idx) => {
-                    let val = VmValue::from(&self.chunk.constants[*idx]);
+                    let val = VmValue::from(
+                        &self.frames.last().unwrap().function.chunk.constants[idx]
+                    );
                     self.stack.push(val);
                 }
 
@@ -84,39 +105,73 @@ impl<'a> Vm<'a> {
                 OpCode::False => self.stack.push(VmValue::Bool(false)),
                 OpCode::Nil   => self.stack.push(VmValue::Nil),
 
+                OpCode::Pop => { self.pop()?; }
+
+                // Local slots are relative to the current frame's base.
+                OpCode::GetLocal(slot) => {
+                    let base = self.frames.last().unwrap().base;
+                    let val  = self.stack[base + slot].clone();
+                    self.stack.push(val);
+                }
+                OpCode::SetLocal(slot) => {
+                    let base = self.frames.last().unwrap().base;
+                    let val  = self.stack.last().ok_or(VmError::StackUnderflow)?.clone();
+                    self.stack[base + slot] = val;
+                }
+
                 OpCode::Jump(offset) => {
-                    self.ip += offset;
+                    self.frames.last_mut().unwrap().ip += offset;
                 }
-
-                OpCode::Loop(offset) => {
-                    self.ip -= offset;
-                }
-
                 OpCode::JumpIfFalse(offset) => {
                     let cond = self.pop()?;
                     if is_falsy(&cond) {
-                        self.ip += offset;
+                        self.frames.last_mut().unwrap().ip += offset;
                     }
                 }
-
-                // `GetLocal` pushes a copy of the value at the given stack slot.
-                OpCode::GetLocal(slot) => {
-                    let val = self.stack.get(*slot)
-                        .ok_or(VmError::StackUnderflow)?
-                        .clone();
-                    self.stack.push(val);
+                OpCode::Loop(offset) => {
+                    self.frames.last_mut().unwrap().ip -= offset;
                 }
 
-                // `SetLocal` overwrites the slot but leaves the value on the stack
-                // (assignment is an expression that returns the assigned value).
-                OpCode::SetLocal(slot) => {
-                    let val = self.stack.last()
-                        .ok_or(VmError::StackUnderflow)?
-                        .clone();
-                    self.stack[*slot] = val;
+                OpCode::Call(arg_count) => {
+                    // Stack: [..., fn, arg0, arg1, ..., argN-1]
+                    let fn_slot = self.stack.len()
+                        .checked_sub(arg_count + 1)
+                        .ok_or(VmError::StackUnderflow)?;
+
+                    let function = match &self.stack[fn_slot] {
+                        VmValue::Function(f) => f.clone(),
+                        other => return Err(VmError::TypeError {
+                            message: format!("'{}' is not callable", other),
+                            line,
+                        }),
+                    };
+                    if function.arity != arg_count {
+                        return Err(VmError::TypeError {
+                            message: format!(
+                                "'{}' expects {} argument(s), got {}",
+                                function.name, function.arity, arg_count
+                            ),
+                            line,
+                        });
+                    }
+                    // Slot 0 of the new frame is the function itself (enables recursion).
+                    // Slot 1..arity are the arguments.
+                    let base = fn_slot;
+                    self.frames.push(CallFrame { function, ip: 0, base });
                 }
 
-                OpCode::Pop => { self.pop()?; }
+                OpCode::Return => {
+                    let return_val = self.stack.pop();
+                    let frame = self.frames.pop().unwrap();
+
+                    if self.frames.is_empty() {
+                        return Ok(return_val);
+                    }
+
+                    // Discard the function value and all frame locals.
+                    self.stack.truncate(frame.base);
+                    self.stack.push(return_val.unwrap_or(VmValue::Nil));
+                }
 
                 OpCode::Negate => {
                     let v = self.pop()?;
@@ -129,7 +184,6 @@ impl<'a> Vm<'a> {
                         }),
                     });
                 }
-
                 OpCode::Not => {
                     let v = self.pop()?;
                     self.stack.push(VmValue::Bool(is_falsy(&v)));
@@ -149,7 +203,6 @@ impl<'a> Vm<'a> {
                         }),
                     });
                 }
-
                 OpCode::Sub => {
                     let (a, b) = self.pop2()?;
                     self.stack.push(match (&a, &b) {
@@ -163,7 +216,6 @@ impl<'a> Vm<'a> {
                         }),
                     });
                 }
-
                 OpCode::Mul => {
                     let (a, b) = self.pop2()?;
                     self.stack.push(match (&a, &b) {
@@ -177,7 +229,6 @@ impl<'a> Vm<'a> {
                         }),
                     });
                 }
-
                 OpCode::Div => {
                     let (a, b) = self.pop2()?;
                     self.stack.push(match (&a, &b) {
@@ -211,10 +262,6 @@ impl<'a> Vm<'a> {
                     let (a, b) = self.pop2()?;
                     self.stack.push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x >= y)?));
                 }
-
-                OpCode::Return => {
-                    return Ok(self.stack.pop());
-                }
             }
         }
     }
@@ -223,7 +270,6 @@ impl<'a> Vm<'a> {
         self.stack.pop().ok_or(VmError::StackUnderflow)
     }
 
-    /// Pop two values; the first pushed is `a`, last pushed is `b`.
     fn pop2(&mut self) -> Result<(VmValue, VmValue), VmError> {
         let b = self.pop()?;
         let a = self.pop()?;
@@ -265,10 +311,11 @@ fn to_float(v: &VmValue) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::{Chunk, Constant, OpCode};
+    use crate::chunk::{Chunk, Constant, Function, OpCode};
 
     fn run(chunk: Chunk) -> Result<Option<VmValue>, VmError> {
-        Vm::new(&chunk).run()
+        let f = Rc::new(Function { name: String::new(), arity: 0, chunk });
+        Vm::new(f).run()
     }
 
     fn chunk_with(ops: impl Fn(&mut Chunk)) -> Chunk {

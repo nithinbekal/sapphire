@@ -1,6 +1,7 @@
 use std::fmt;
-use crate::ast::{Expr, Stmt};
-use crate::chunk::{Chunk, Constant, OpCode};
+use std::rc::Rc;
+use crate::ast::{Expr, ParamDef, Stmt};
+use crate::chunk::{Chunk, Constant, Function, OpCode};
 use crate::token::TokenKind;
 use crate::value::Value;
 
@@ -20,44 +21,70 @@ impl fmt::Display for CompileError {
 
 // ── Compiler ─────────────────────────────────────────────────────────────────
 
-pub struct Compiler {
+struct Compiler {
     chunk:        Chunk,
     current_line: u32,
-    /// Names of locals in declaration order; index = stack slot.
+    /// Names of locals in declaration order; index = stack slot within this frame.
     locals:       Vec<String>,
 }
 
 impl Compiler {
-    /// Compile a list of statements into a `Chunk`.
-    ///
-    /// If the last statement is a bare expression, its value is returned
-    /// (implicit return, Ruby-style). Otherwise an implicit `nil` is returned.
-    pub fn compile(stmts: &[Stmt]) -> Result<Chunk, CompileError> {
-        let mut c = Compiler { chunk: Chunk::new(), current_line: 0, locals: Vec::new() };
+    fn new(line: u32) -> Self {
+        Compiler { chunk: Chunk::new(), current_line: line, locals: Vec::new() }
+    }
+
+    // ── Public entry points ───────────────────────────────────────────────
+
+    /// Compile a top-level program (arity 0, anonymous).
+    pub fn compile(stmts: &[Stmt]) -> Result<Rc<Function>, CompileError> {
+        let mut c = Compiler::new(0);
+        c.compile_body(stmts)?;
+        Ok(Rc::new(Function { name: String::new(), arity: 0, chunk: c.chunk }))
+    }
+
+    /// Compile a named function with parameters.
+    fn compile_fn(
+        name: &str,
+        params: &[ParamDef],
+        body: &[Stmt],
+        line: u32,
+    ) -> Result<Rc<Function>, CompileError> {
+        let mut c = Compiler::new(line);
+        // Slot 0 is the function itself — enables direct recursion by name.
+        c.locals.push(name.to_string());
+        for p in params {
+            c.locals.push(p.name.clone());
+        }
+        c.compile_body(body)?;
+        Ok(Rc::new(Function { name: name.to_string(), arity: params.len(), chunk: c.chunk }))
+    }
+
+    // ── Body compilation (shared between top-level and functions) ─────────
+
+    /// Compile a list of statements, treating the last expression as an
+    /// implicit return value (Ruby-style).
+    fn compile_body(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
         let (last, rest) = match stmts.split_last() {
             Some(pair) => pair,
             None => {
-                c.emit(OpCode::Nil);
-                c.emit(OpCode::Return);
-                return Ok(c.chunk);
+                self.emit(OpCode::Nil);
+                self.emit(OpCode::Return);
+                return Ok(());
             }
         };
-        for stmt in rest {
-            c.stmt(stmt)?;
-        }
-        // Last statement: if it's an expression, leave its value on the stack.
+        self.stmts(rest)?;
         match last {
             Stmt::Expression(expr) => {
-                c.expr(expr)?;
-                c.emit(OpCode::Return);
+                self.expr(expr)?;
+                self.emit(OpCode::Return);
             }
             other => {
-                c.stmt(other)?;
-                c.emit(OpCode::Nil);
-                c.emit(OpCode::Return);
+                self.stmt(other)?;
+                self.emit(OpCode::Nil);
+                self.emit(OpCode::Return);
             }
         }
-        Ok(c.chunk)
+        Ok(())
     }
 
     // ── Statements ────────────────────────────────────────────────────────
@@ -72,12 +99,21 @@ impl Compiler {
                     self.emit(OpCode::Pop);
                 }
             }
+
             Stmt::Return(expr) => {
                 self.expr(expr)?;
                 self.emit(OpCode::Return);
             }
+
+            Stmt::Function { name, params, body, .. } => {
+                let func = Compiler::compile_fn(name, params, body, self.current_line)?;
+                let idx  = self.chunk.add_constant(Constant::Function(func));
+                self.emit(OpCode::Constant(idx));
+                // The function value on the stack becomes this local's slot.
+                self.locals.push(name.clone());
+            }
+
             Stmt::If { condition, then_branch, else_branch } => {
-                // Compile condition; JumpIfFalse pops it and skips then-branch if falsy.
                 self.expr(condition)?;
                 let jif = self.emit_jump(OpCode::JumpIfFalse(0));
 
@@ -85,7 +121,6 @@ impl Compiler {
 
                 match else_branch {
                     Some(else_stmts) => {
-                        // Jump over the else-branch at the end of then-branch.
                         let jump = self.emit_jump(OpCode::Jump(0));
                         self.chunk.patch_jump(jif);
                         self.stmts(else_stmts)?;
@@ -110,13 +145,10 @@ impl Compiler {
             }
 
             Stmt::Print(expr) => {
-                // The tree-walk interpreter has a built-in `print` statement.
-                // For now we can't call native functions, so we compile the
-                // expression and leave the value on the stack, then pop it.
-                // A dedicated Print opcode can be added later.
                 self.expr(expr)?;
                 self.emit(OpCode::Pop);
             }
+
             other => {
                 return Err(self.error(format!(
                     "statement not yet supported by compiler: {:?}",
@@ -176,15 +208,22 @@ impl Compiler {
             Expr::Assign { name, value } => {
                 self.expr(value)?;
                 match self.resolve_local(name) {
-                    Some(slot) => {
-                        // Reassignment: overwrite the existing slot.
-                        self.emit(OpCode::SetLocal(slot));
-                    }
-                    None => {
-                        // First assignment: the value already on the stack becomes the slot.
-                        self.locals.push(name.clone());
-                    }
+                    Some(slot) => { self.emit(OpCode::SetLocal(slot)); }
+                    None       => { self.locals.push(name.clone()); }
                 }
+                Ok(())
+            }
+
+            Expr::Call { callee, args, block } => {
+                if block.is_some() {
+                    return Err(self.error("blocks not yet supported by compiler".into()));
+                }
+                self.expr(callee)?;
+                let arg_count = args.len();
+                for arg in args {
+                    self.expr(&arg.value)?;
+                }
+                self.emit(OpCode::Call(arg_count));
                 Ok(())
             }
 
@@ -228,19 +267,15 @@ impl Compiler {
         self.chunk.write(op, self.current_line);
     }
 
-    /// Emit a backward jump back to `loop_start`.
-    fn emit_loop(&mut self, loop_start: usize) {
-        // After the VM increments ip past this instruction, subtracting `offset`
-        // lands exactly on loop_start.
-        let offset = self.chunk.code.len() + 1 - loop_start;
-        self.emit(OpCode::Loop(offset));
-    }
-
-    /// Emit a jump placeholder and return the index to patch later.
     fn emit_jump(&mut self, op: OpCode) -> usize {
         let idx = self.chunk.code.len();
         self.emit(op);
         idx
+    }
+
+    fn emit_loop(&mut self, loop_start: usize) {
+        let offset = self.chunk.code.len() + 1 - loop_start;
+        self.emit(OpCode::Loop(offset));
     }
 
     fn stmts(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
@@ -261,6 +296,11 @@ impl Compiler {
     }
 }
 
+// Re-export compile as the public API.
+pub fn compile(stmts: &[Stmt]) -> Result<Rc<Function>, CompileError> {
+    Compiler::compile(stmts)
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -272,8 +312,8 @@ mod tests {
     fn eval(src: &str) -> VmValue {
         let tokens = crate::lexer::Lexer::new(src).scan_tokens();
         let stmts  = crate::parser::Parser::new(tokens).parse().expect("parse error");
-        let chunk  = Compiler::compile(&stmts).expect("compile error");
-        Vm::new(&chunk).run().expect("vm error").expect("empty stack")
+        let func   = compile(&stmts).expect("compile error");
+        Vm::new(func).run().expect("vm error").expect("empty stack")
     }
 
     #[test]
@@ -388,17 +428,39 @@ mod tests {
     #[test]
     fn while_accumulates() {
         let src = "i = 0\nsum = 0\nwhile i < 4 { sum = sum + i\ni = i + 1 }\nsum";
-        assert_eq!(eval(src), VmValue::Int(6)); // 0+1+2+3
+        assert_eq!(eval(src), VmValue::Int(6));
     }
 
     #[test]
     fn last_expr_is_implicit_return() {
-        // All but the last expression statement are popped;
-        // the last one is returned implicitly.
         let tokens = crate::lexer::Lexer::new("1 + 1\n2 + 2").scan_tokens();
         let stmts  = crate::parser::Parser::new(tokens).parse().unwrap();
-        let chunk  = Compiler::compile(&stmts).unwrap();
-        let result = Vm::new(&chunk).run().unwrap();
+        let func   = compile(&stmts).unwrap();
+        let result = Vm::new(func).run().unwrap();
         assert_eq!(result, Some(VmValue::Int(4)));
+    }
+
+    #[test]
+    fn function_call_no_args() {
+        let src = "def answer() { 42 }\nanswer()";
+        assert_eq!(eval(src), VmValue::Int(42));
+    }
+
+    #[test]
+    fn function_call_with_args() {
+        let src = "def add(a, b) { a + b }\nadd(3, 4)";
+        assert_eq!(eval(src), VmValue::Int(7));
+    }
+
+    #[test]
+    fn function_local_vars_dont_leak() {
+        let src = "def f() { x = 99\nx }\nx = 1\nf()\nx";
+        assert_eq!(eval(src), VmValue::Int(1));
+    }
+
+    #[test]
+    fn recursive_function() {
+        let src = "def fact(n) { if n <= 1 { return 1 }\nn * fact(n - 1) }\nfact(5)";
+        assert_eq!(eval(src), VmValue::Int(120));
     }
 }
