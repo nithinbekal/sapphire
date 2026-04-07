@@ -235,6 +235,31 @@ impl Vm {
                     self.frames.last_mut().unwrap().ip -= offset;
                 }
 
+                // Short-circuit: peek TOS; if falsy, keep it and jump; else pop and fall through.
+                OpCode::JumpIfFalseKeep(offset) => {
+                    let falsy = is_falsy(self.stack.last().ok_or(VmError::StackUnderflow)?);
+                    if falsy {
+                        self.frames.last_mut().unwrap().ip += offset;
+                    } else {
+                        self.stack.pop();
+                    }
+                }
+                // Short-circuit: peek TOS; if truthy, keep it and jump; else pop and fall through.
+                OpCode::JumpIfTrueKeep(offset) => {
+                    let truthy = !is_falsy(self.stack.last().ok_or(VmError::StackUnderflow)?);
+                    if truthy {
+                        self.frames.last_mut().unwrap().ip += offset;
+                    } else {
+                        self.stack.pop();
+                    }
+                }
+
+                OpCode::Print => {
+                    let val = self.pop()?;
+                    println!("{}", val);
+                    self.stack.push(VmValue::Nil);
+                }
+
                 OpCode::Call(arg_count) => {
                     // Stack: [..., fn_or_closure, arg0, …, argN-1]
                     let fn_slot = self.stack.len()

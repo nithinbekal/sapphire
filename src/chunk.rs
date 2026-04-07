@@ -76,6 +76,18 @@ pub enum OpCode {
     /// Call the callable sitting `arg_count` slots below the top of the stack.
     Call(usize),
 
+    // Short-circuit boolean ops: peek at TOS; if the condition holds, jump
+    // without popping (leaves the short-circuit value as the result); if the
+    // condition does NOT hold, pop TOS and fall through to evaluate the RHS.
+    /// Used for `and`: if TOS is falsy, jump keeping TOS; else pop and continue.
+    JumpIfFalseKeep(usize),
+    /// Used for `or`: if TOS is truthy, jump keeping TOS; else pop and continue.
+    JumpIfTrueKeep(usize),
+
+    // Output
+    /// Pop TOS, print it with a newline, push Nil.
+    Print,
+
     // Stack manipulation
     Pop,
     Return,
@@ -131,8 +143,10 @@ impl Chunk {
     pub fn patch_jump(&mut self, jump_idx: usize) {
         let offset = self.code.len() - jump_idx - 1;
         match &self.code[jump_idx] {
-            OpCode::Jump(_)        => self.code[jump_idx] = OpCode::Jump(offset),
-            OpCode::JumpIfFalse(_) => self.code[jump_idx] = OpCode::JumpIfFalse(offset),
+            OpCode::Jump(_)             => self.code[jump_idx] = OpCode::Jump(offset),
+            OpCode::JumpIfFalse(_)      => self.code[jump_idx] = OpCode::JumpIfFalse(offset),
+            OpCode::JumpIfFalseKeep(_)  => self.code[jump_idx] = OpCode::JumpIfFalseKeep(offset),
+            OpCode::JumpIfTrueKeep(_)   => self.code[jump_idx] = OpCode::JumpIfTrueKeep(offset),
             _ => panic!("patch_jump called on non-jump instruction"),
         }
     }
@@ -164,8 +178,10 @@ impl Chunk {
                 OpCode::Jump(off)         => println!("JUMP           {:4}", off),
                 OpCode::JumpIfFalse(off)  => println!("JUMP_IF_FALSE  {:4}", off),
                 OpCode::Loop(off)         => println!("LOOP           {:4}", off),
-                OpCode::Call(argc)        => println!("CALL           {:4}", argc),
-                other                     => println!("{:?}", other),
+                OpCode::Call(argc)              => println!("CALL                {:4}", argc),
+                OpCode::JumpIfFalseKeep(off)    => println!("JUMP_IF_FALSE_KEEP  {:4}", off),
+                OpCode::JumpIfTrueKeep(off)     => println!("JUMP_IF_TRUE_KEEP   {:4}", off),
+                other                           => println!("{:?}", other),
             }
         }
     }

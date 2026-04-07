@@ -202,7 +202,7 @@ impl Compiler {
 
             Stmt::Print(expr) => {
                 self.expr(expr)?;
-                self.emit(OpCode::Pop);
+                self.emit(OpCode::Print);
             }
 
             other => {
@@ -236,6 +236,26 @@ impl Compiler {
 
             Expr::Binary { left, op, right } => {
                 self.state_mut().current_line = op.line as u32;
+                // Short-circuit operators: evaluate only the left side first.
+                match &op.kind {
+                    TokenKind::AmpAmp => {
+                        // `a and b`: if a is falsy keep a as result; else result is b.
+                        self.expr(left)?;
+                        let jump = self.emit_jump(OpCode::JumpIfFalseKeep(0));
+                        self.expr(right)?;
+                        self.patch_jump(jump);
+                        return Ok(());
+                    }
+                    TokenKind::PipePipe => {
+                        // `a or b`: if a is truthy keep a as result; else result is b.
+                        self.expr(left)?;
+                        let jump = self.emit_jump(OpCode::JumpIfTrueKeep(0));
+                        self.expr(right)?;
+                        self.patch_jump(jump);
+                        return Ok(());
+                    }
+                    _ => {}
+                }
                 self.expr(left)?;
                 self.expr(right)?;
                 match &op.kind {
@@ -632,6 +652,39 @@ add5 = make_adder(5)
 add10 = make_adder(10)
 add5(1) + add10(1)";
         assert_eq!(eval(src), VmValue::Int(17));
+    }
+
+    // ── and / or / print ──────────────────────────────────────────────────────
+
+    #[test]
+    fn and_short_circuits_false() {
+        // false && anything → false (right side never evaluated)
+        assert_eq!(eval("false && true"),  VmValue::Bool(false));
+        assert_eq!(eval("nil && 42"),      VmValue::Nil);
+    }
+
+    #[test]
+    fn and_returns_rhs_when_truthy() {
+        assert_eq!(eval("true && 42"),  VmValue::Int(42));
+        assert_eq!(eval("1 && 2"),      VmValue::Int(2));
+    }
+
+    #[test]
+    fn or_short_circuits_truthy() {
+        assert_eq!(eval("42 || false"),  VmValue::Int(42));
+        assert_eq!(eval("true || nil"),  VmValue::Bool(true));
+    }
+
+    #[test]
+    fn or_returns_rhs_when_falsy() {
+        assert_eq!(eval("false || 99"), VmValue::Int(99));
+        assert_eq!(eval("nil || nil"),  VmValue::Nil);
+    }
+
+    #[test]
+    fn print_statement_returns_nil() {
+        // `print` is a statement; the last expr is what the program returns.
+        assert_eq!(eval("print 42\n99"), VmValue::Int(99));
     }
 
     #[test]
