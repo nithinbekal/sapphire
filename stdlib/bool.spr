@@ -1,0 +1,5 @@
+class Bool {
+  def to_s() {
+    if self { "true" } else { "false" }
+  }
+}

@@ -15,6 +15,10 @@ use crate::value::Value;
 
 const OBJECT_STDLIB: &str = include_str!("../stdlib/object.spr");
 const NIL_STDLIB: &str = include_str!("../stdlib/nil.spr");
+const INT_STDLIB: &str = include_str!("../stdlib/int.spr");
+const FLOAT_STDLIB: &str = include_str!("../stdlib/float.spr");
+const STRING_STDLIB: &str = include_str!("../stdlib/string.spr");
+const BOOL_STDLIB: &str = include_str!("../stdlib/bool.spr");
 const LIST_STDLIB: &str = include_str!("../stdlib/list.spr");
 const MAP_STDLIB: &str = include_str!("../stdlib/map.spr");
 
@@ -66,7 +70,16 @@ pub fn global_env() -> EnvRef {
         closure: env.clone(),
     };
     env.borrow_mut().set("Object".to_string(), object_class);
-    for (src, label) in [(OBJECT_STDLIB, "stdlib/object.spr"), (NIL_STDLIB, "stdlib/nil.spr"), (LIST_STDLIB, "stdlib/list.spr"), (MAP_STDLIB, "stdlib/map.spr")] {
+    for (src, label) in [
+        (OBJECT_STDLIB, "stdlib/object.spr"),
+        (NIL_STDLIB,    "stdlib/nil.spr"),
+        (INT_STDLIB,    "stdlib/int.spr"),
+        (FLOAT_STDLIB,  "stdlib/float.spr"),
+        (STRING_STDLIB, "stdlib/string.spr"),
+        (BOOL_STDLIB,   "stdlib/bool.spr"),
+        (LIST_STDLIB,   "stdlib/list.spr"),
+        (MAP_STDLIB,    "stdlib/map.spr"),
+    ] {
         let tokens = crate::lexer::Lexer::new(src).scan_tokens();
         let stmts = crate::parser::Parser::new(tokens).parse()
             .unwrap_or_else(|e| panic!("{} failed to parse: {}", label, e));
@@ -77,6 +90,10 @@ pub fn global_env() -> EnvRef {
     }
     env.borrow_mut().freeze("Object");
     env.borrow_mut().freeze("Nil");
+    env.borrow_mut().freeze("Int");
+    env.borrow_mut().freeze("Float");
+    env.borrow_mut().freeze("String");
+    env.borrow_mut().freeze("Bool");
     env.borrow_mut().freeze("List");
     env.borrow_mut().freeze("Map");
     env
@@ -242,11 +259,14 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
                 }),
             };
             if let Some(stmts) = branch {
+                let mut result = None;
                 for stmt in stmts {
-                    execute(stmt, env.clone())?;
+                    result = execute(stmt, env.clone())?;
                 }
+                Ok(result)
+            } else {
+                Ok(None)
             }
-            Ok(None)
         }
     }
 }
@@ -287,6 +307,14 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
 
             // Nil: dispatch to Nil stdlib class
             if obj == Value::Nil {
+                if name == "class" {
+                    return env.borrow().get("Nil").ok_or_else(|| SapphireError::RuntimeError {
+                        message: "class 'Nil' not found".into(),
+                    });
+                }
+                if name == "is_a?" {
+                    return Ok(Value::NativeMethod { receiver: Box::new(obj), name });
+                }
                 if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("Nil") {
                     if let Some(method) = methods.iter().find(|m| m.name == name) {
                         return Ok(Value::BoundMethod {
@@ -309,6 +337,12 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             if !matches!(obj, Value::Instance { .. }) {
                 match name.as_str() {
                     "nil?" => return Ok(Value::Bool(false)),
+                    "class" => {
+                        let cn = value_type_description(&obj);
+                        return env.borrow().get(&cn).ok_or_else(|| SapphireError::RuntimeError {
+                            message: format!("class '{}' not found", cn),
+                        });
+                    }
                     "to_s" => return Ok(Value::Str(format!("{}", obj))),
                     "to_i" => return match obj {
                         Value::Int(n) => Ok(Value::Int(n)),
@@ -330,6 +364,10 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             message: format!("cannot convert {} to float", obj),
                         }),
                     },
+                    "is_a?" => return Ok(Value::NativeMethod {
+                        receiver: Box::new(obj),
+                        name,
+                    }),
                     _ => {}
                 }
             }
@@ -469,38 +507,102 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
 
             // Integers
             if let Value::Int(n) = obj {
-                return match name.as_str() {
-                    "downto" => Ok(Value::NativeMethod {
+                match name.as_str() {
+                    "downto" => return Ok(Value::NativeMethod {
                         receiver: Box::new(Value::Int(n)),
                         name,
                     }),
-                    _ => Err(SapphireError::RuntimeError {
-                        message: format!("unknown integer method '{}'", name),
-                    }),
-                };
+                    _ => {}
+                }
+                if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("Int") {
+                    if let Some(method) = methods.iter().find(|m| m.name == name) {
+                        return Ok(Value::BoundMethod {
+                            receiver: Box::new(Value::Int(n)),
+                            params: method.params.clone(),
+                            return_type: method.return_type.clone(),
+                            body: method.body.clone(),
+                            closure,
+                            defined_in: class_name,
+                        });
+                    }
+                }
+                return Err(SapphireError::RuntimeError {
+                    message: format!("undefined method '{}' on Int", name),
+                });
+            }
+
+            // Floats
+            if let Value::Float(f) = obj {
+                if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("Float") {
+                    if let Some(method) = methods.iter().find(|m| m.name == name) {
+                        return Ok(Value::BoundMethod {
+                            receiver: Box::new(Value::Float(f)),
+                            params: method.params.clone(),
+                            return_type: method.return_type.clone(),
+                            body: method.body.clone(),
+                            closure,
+                            defined_in: class_name,
+                        });
+                    }
+                }
+                return Err(SapphireError::RuntimeError {
+                    message: format!("undefined method '{}' on Float", name),
+                });
+            }
+
+            // Booleans
+            if let Value::Bool(b) = obj {
+                if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("Bool") {
+                    if let Some(method) = methods.iter().find(|m| m.name == name) {
+                        return Ok(Value::BoundMethod {
+                            receiver: Box::new(Value::Bool(b)),
+                            params: method.params.clone(),
+                            return_type: method.return_type.clone(),
+                            body: method.body.clone(),
+                            closure,
+                            defined_in: class_name,
+                        });
+                    }
+                }
+                return Err(SapphireError::RuntimeError {
+                    message: format!("undefined method '{}' on Bool", name),
+                });
             }
 
             // Strings
             if let Value::Str(ref s) = obj {
-                return match name.as_str() {
-                    "length" => Ok(Value::Int(s.chars().count() as i64)),
-                    "upcase"          => Ok(Value::Str(s.to_uppercase())),
-                    "downcase"        => Ok(Value::Str(s.to_lowercase())),
-                    "strip"           => Ok(Value::Str(s.trim().to_string())),
-                    "chomp"           => Ok(Value::Str(s.trim_end_matches('\n').trim_end_matches('\r').to_string())),
-                    "empty?"          => Ok(Value::Bool(s.is_empty())),
+                match name.as_str() {
+                    "length" => return Ok(Value::Int(s.chars().count() as i64)),
+                    "upcase"   => return Ok(Value::Str(s.to_uppercase())),
+                    "downcase" => return Ok(Value::Str(s.to_lowercase())),
+                    "strip"    => return Ok(Value::Str(s.trim().to_string())),
+                    "chomp"    => return Ok(Value::Str(s.trim_end_matches('\n').trim_end_matches('\r').to_string())),
+                    "empty?"   => return Ok(Value::Bool(s.is_empty())),
                     "chars" => {
                         let chars: Vec<Value> = s.chars().map(|c| Value::Str(c.to_string())).collect();
-                        Ok(Value::List(Rc::new(RefCell::new(chars))))
+                        return Ok(Value::List(Rc::new(RefCell::new(chars))));
                     }
-                    "split" | "include?" | "starts_with?" | "ends_with?" => Ok(Value::NativeMethod {
+                    "split" | "include?" | "starts_with?" | "ends_with?" => return Ok(Value::NativeMethod {
                         receiver: Box::new(obj.clone()),
                         name,
                     }),
-                    _ => Err(SapphireError::RuntimeError {
-                        message: format!("unknown string method '{}'", name),
-                    }),
-                };
+                    _ => {}
+                }
+                if let Some(Value::Class { name: class_name, methods, closure, .. }) = env.borrow().get("String") {
+                    if let Some(method) = methods.iter().find(|m| m.name == name) {
+                        return Ok(Value::BoundMethod {
+                            receiver: Box::new(obj.clone()),
+                            params: method.params.clone(),
+                            return_type: method.return_type.clone(),
+                            body: method.body.clone(),
+                            closure,
+                            defined_in: class_name,
+                        });
+                    }
+                }
+                return Err(SapphireError::RuntimeError {
+                    message: format!("undefined method '{}' on String", name),
+                });
             }
 
             // Class: .new, .name
@@ -1079,14 +1181,18 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             };
                             Ok(Value::Bool(s.ends_with(suffix.as_str())))
                         }
-                        (Value::Instance { class_name, .. }, "is_a?") => {
+                        (receiver, "is_a?") => {
                             let target = match args.into_iter().next() {
                                 Some(Value::Class { name, .. }) => name,
                                 _ => return Err(SapphireError::RuntimeError {
                                     message: "is_a? requires a class argument".into(),
                                 }),
                             };
-                            let mut current: Option<String> = Some(class_name);
+                            let start = match receiver {
+                                Value::Instance { class_name, .. } => class_name,
+                                other => value_type_description(&other),
+                            };
+                            let mut current: Option<String> = Some(start);
                             loop {
                                 match current {
                                     None => return Ok(Value::Bool(false)),

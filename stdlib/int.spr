@@ -1,0 +1,7 @@
+class Int {
+  def zero?() { self == 0 }
+  def positive?() { self > 0 }
+  def negative?() { self < 0 }
+  def abs() { if self < 0 { -self } else { self } }
+  def clamp(min, max) { if self < min { min } elsif self > max { max } else { self } }
+}
