@@ -84,6 +84,11 @@ pub enum OpCode {
     /// Used for `or`: if TOS is truthy, jump keeping TOS; else pop and continue.
     JumpIfTrueKeep(usize),
 
+    // String interpolation
+    /// Pop `n` values off the stack, convert each to its Display string,
+    /// concatenate them in order, and push the resulting Str.
+    BuildString(usize),
+
     // Output
     /// Pop TOS, print it with a newline, push Nil.
     Print,
@@ -179,6 +184,7 @@ impl Chunk {
                 OpCode::JumpIfFalse(off)  => println!("JUMP_IF_FALSE  {:4}", off),
                 OpCode::Loop(off)         => println!("LOOP           {:4}", off),
                 OpCode::Call(argc)              => println!("CALL                {:4}", argc),
+                OpCode::BuildString(n)          => println!("BUILD_STRING        {:4}", n),
                 OpCode::JumpIfFalseKeep(off)    => println!("JUMP_IF_FALSE_KEEP  {:4}", off),
                 OpCode::JumpIfTrueKeep(off)     => println!("JUMP_IF_TRUE_KEEP   {:4}", off),
                 other                           => println!("{:?}", other),

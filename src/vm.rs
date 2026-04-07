@@ -254,6 +254,14 @@ impl Vm {
                     }
                 }
 
+                OpCode::BuildString(n) => {
+                    let start = self.stack.len().checked_sub(n).ok_or(VmError::StackUnderflow)?;
+                    let parts: Vec<String> = self.stack.drain(start..)
+                        .map(|v| format!("{}", v))
+                        .collect();
+                    self.stack.push(VmValue::Str(parts.concat()));
+                }
+
                 OpCode::Print => {
                     let val = self.pop()?;
                     println!("{}", val);

@@ -1,6 +1,6 @@
 use std::fmt;
 use std::rc::Rc;
-use crate::ast::{Expr, Stmt};
+use crate::ast::{Expr, Stmt, StringPart};
 use crate::chunk::{Chunk, Constant, Function, OpCode, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
@@ -310,6 +310,23 @@ impl Compiler {
                     self.expr(&arg.value)?;
                 }
                 self.emit(OpCode::Call(arg_count));
+                Ok(())
+            }
+
+            Expr::StringInterp(parts) => {
+                let n = parts.len();
+                for part in parts {
+                    match part {
+                        StringPart::Lit(s) => {
+                            let idx = self.state_mut().chunk.add_constant(Constant::Str(s.clone()));
+                            self.emit(OpCode::Constant(idx));
+                        }
+                        StringPart::Expr(inner) => {
+                            self.expr(inner)?;
+                        }
+                    }
+                }
+                self.emit(OpCode::BuildString(n));
                 Ok(())
             }
 
@@ -655,6 +672,32 @@ add5(1) + add10(1)";
     }
 
     // ── and / or / print ──────────────────────────────────────────────────────
+
+    // ── String interpolation ──────────────────────────────────────────────────
+
+    #[test]
+    fn string_interp_plain() {
+        assert_eq!(eval(r#""hello""#), VmValue::Str("hello".into()));
+    }
+
+    #[test]
+    fn string_interp_with_expr() {
+        assert_eq!(
+            eval(r#"x = 42
+"value is #{x}""#),
+            VmValue::Str("value is 42".into())
+        );
+    }
+
+    #[test]
+    fn string_interp_multiple_parts() {
+        assert_eq!(
+            eval(r##"a = 1
+b = 2
+"#{a} + #{b} = #{a + b}""##),
+            VmValue::Str("1 + 2 = 3".into())
+        );
+    }
 
     #[test]
     fn and_short_circuits_false() {
