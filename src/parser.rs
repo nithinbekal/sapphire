@@ -1,4 +1,4 @@
-use crate::ast::{Block, CallArg, Expr, FieldDef, MethodDef, Stmt, StringPart};
+use crate::ast::{Block, CallArg, Expr, FieldDef, MethodDef, ParamDef, Stmt, StringPart, TypeExpr};
 use crate::error::SapphireError;
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
@@ -34,6 +34,36 @@ impl Parser {
                 Some(TokenKind::Colon)
             ),
             _ => true,
+        }
+    }
+
+    fn parse_type_ann(&mut self) -> Result<Option<TypeExpr>, SapphireError> {
+        if !self.check(&TokenKind::Colon) {
+            return Ok(None);
+        }
+        self.advance(); // consume ':'
+        match self.peek().kind.clone() {
+            TokenKind::Identifier(t) => { self.advance(); Ok(Some(TypeExpr::Named(t))) }
+            TokenKind::Nil => { self.advance(); Ok(Some(TypeExpr::Named("Nil".to_string()))) }
+            _ => Err(SapphireError::ParseError {
+                message: "expected type name after ':'".into(),
+                line: self.peek().line,
+            }),
+        }
+    }
+
+    fn parse_return_type(&mut self) -> Result<Option<TypeExpr>, SapphireError> {
+        if !self.check(&TokenKind::Arrow) {
+            return Ok(None);
+        }
+        self.advance(); // consume '->'
+        match self.peek().kind.clone() {
+            TokenKind::Identifier(t) => { self.advance(); Ok(Some(TypeExpr::Named(t))) }
+            TokenKind::Nil => { self.advance(); Ok(Some(TypeExpr::Named("Nil".to_string()))) }
+            _ => Err(SapphireError::ParseError {
+                message: "expected return type after '->'".into(),
+                line: self.peek().line,
+            }),
         }
     }
 
@@ -181,25 +211,14 @@ impl Parser {
                         line: self.peek().line,
                     }),
                 };
-                let type_name = if self.check(&TokenKind::Colon) {
-                    self.advance();
-                    match self.peek().kind.clone() {
-                        TokenKind::Identifier(t) => { self.advance(); Some(t) }
-                        _ => return Err(SapphireError::ParseError {
-                            message: "expected type name after ':'".into(),
-                            line: self.peek().line,
-                        }),
-                    }
-                } else {
-                    None
-                };
+                let type_ann = self.parse_type_ann()?;
                 let default = if self.check(&TokenKind::Eq) {
                     self.advance();
                     Some(self.logical()?)
                 } else {
                     None
                 };
-                fields.push(FieldDef { name: field_name, type_name, default });
+                fields.push(FieldDef { name: field_name, type_ann, default });
             } else if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
                 let private = self.check(&TokenKind::Defp);
                 methods.push(self.method_def(private)?);
@@ -274,7 +293,11 @@ impl Parser {
         if !self.check(&TokenKind::RightParen) {
             loop {
                 match self.peek().kind.clone() {
-                    TokenKind::Identifier(p) => { self.advance(); params.push(p); }
+                    TokenKind::Identifier(p) => {
+                        self.advance();
+                        let type_ann = self.parse_type_ann()?;
+                        params.push(ParamDef { name: p, type_ann });
+                    }
                     _ => return Err(SapphireError::ParseError {
                         message: "expected parameter name".into(),
                         line: self.peek().line,
@@ -291,8 +314,9 @@ impl Parser {
             });
         }
         self.advance(); // consume ')'
+        let return_type = self.parse_return_type()?;
         let body = self.block_with_rescue()?;
-        Ok(Stmt::Function { name, params, body })
+        Ok(Stmt::Function { name, params, return_type, body })
     }
 
     fn method_def(&mut self, private: bool) -> Result<MethodDef, SapphireError> {
@@ -315,7 +339,11 @@ impl Parser {
         if !self.check(&TokenKind::RightParen) {
             loop {
                 match self.peek().kind.clone() {
-                    TokenKind::Identifier(p) => { self.advance(); params.push(p); }
+                    TokenKind::Identifier(p) => {
+                        self.advance();
+                        let type_ann = self.parse_type_ann()?;
+                        params.push(ParamDef { name: p, type_ann });
+                    }
                     _ => return Err(SapphireError::ParseError {
                         message: "expected parameter name".into(),
                         line: self.peek().line,
@@ -332,8 +360,9 @@ impl Parser {
             });
         }
         self.advance(); // consume ')'
+        let return_type = self.parse_return_type()?;
         let body = self.block_with_rescue()?;
-        Ok(MethodDef { name, params, body, private })
+        Ok(MethodDef { name, params, return_type, body, private })
     }
 
     fn while_statement(&mut self) -> Result<Stmt, SapphireError> {

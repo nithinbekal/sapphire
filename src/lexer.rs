@@ -49,7 +49,7 @@ impl Lexer {
                 '(' => TokenKind::LeftParen,
                 ')' => TokenKind::RightParen,
                 '+' => TokenKind::Plus,
-                '-' => TokenKind::Minus,
+                '-' => if self.match_next('>') { TokenKind::Arrow } else { TokenKind::Minus },
                 '*' => TokenKind::Star,
                 '/' => TokenKind::Slash,
                 '%' => TokenKind::Percent,

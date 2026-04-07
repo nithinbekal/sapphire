@@ -5,6 +5,7 @@ mod interpreter;
 mod lexer;
 mod parser;
 mod token;
+mod typechecker;
 mod value;
 
 use std::io::{self, Write};
@@ -12,10 +13,11 @@ use std::io::{self, Write};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.as_slice() {
-        [_, cmd, path] if cmd == "run" => run_file(path),
+        [_, cmd, path] if cmd == "run"       => run_file(path),
+        [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
         [_] => run_repl(),
         _ => {
-            eprintln!("Usage: sapphire [run <file.spr>]");
+            eprintln!("Usage: sapphire [run <file.spr> | typecheck <file.spr>]");
             std::process::exit(1);
         }
     }
@@ -42,6 +44,26 @@ fn run_file(path: &str) {
                     eprintln!("{}", e);
                     std::process::exit(1);
                 }
+            }
+        }
+    }
+}
+
+fn typecheck_file(path: &str) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("error reading '{}': {}", path, e); std::process::exit(1); }
+    };
+    let tokens = lexer::Lexer::new(&source).scan_tokens();
+    match parser::Parser::new(tokens).parse() {
+        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+        Ok(stmts) => {
+            let errors = typechecker::TypeChecker::check(&stmts);
+            if errors.is_empty() {
+                println!("No type errors found.");
+            } else {
+                for e in &errors { eprintln!("{}", e); }
+                std::process::exit(1);
             }
         }
     }
