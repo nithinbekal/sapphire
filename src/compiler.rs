@@ -778,12 +778,21 @@ impl Compiler {
             self.emit(OpCode::Closure(fi));
         }
 
-        let field_names:  Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+        let field_names:    Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+        let field_defaults: Vec<Option<Constant>> = fields.iter().map(|f| {
+            match &f.default {
+                Some(Expr::Literal(Value::Int(n)))   => Some(Constant::Int(*n)),
+                Some(Expr::Literal(Value::Float(n))) => Some(Constant::Float(*n)),
+                Some(Expr::Literal(Value::Str(s)))   => Some(Constant::Str(s.clone())),
+                _ => None,
+            }
+        }).collect();
         let method_names: Vec<String> = methods.iter().map(|m| m.name.clone()).collect();
         let desc_idx = self.state_mut().chunk.add_constant(Constant::ClassDesc {
             name:       name.to_string(),
             superclass: superclass.map(|s| s.to_string()),
             field_names,
+            field_defaults,
             method_names,
         });
         self.emit(OpCode::DefClass(desc_idx));

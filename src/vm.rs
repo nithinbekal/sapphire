@@ -51,11 +51,11 @@ pub enum VmValue {
     List(Rc<RefCell<Vec<VmValue>>>),
     Map(Rc<RefCell<HashMap<String, VmValue>>>),
     Range { from: i64, to: i64 },
-    /// A compiled class: holds the static field list and the method table.
+    /// A compiled class: holds the static field list (with defaults) and the method table.
     Class {
         name:       String,
         superclass: Option<String>,
-        fields:     Vec<String>,
+        fields:     Vec<(String, VmValue)>,
         methods:    Rc<HashMap<String, VmMethod>>,
     },
     /// A live instance of a class.
@@ -215,8 +215,8 @@ struct CallFrame {
 ///   correct merged map for that ancestor level.
 struct ClassEntry {
     superclass: Option<String>,
-    /// The merged (inherited + own) field list for this class.
-    fields:     Vec<String>,
+    /// The merged (inherited + own) field list with default values.
+    fields:     Vec<(String, VmValue)>,
     /// Merged (inherited + own) methods.  Used for both primitive dispatch and
     /// `SuperInvoke` (which looks in the *parent's* merged map).
     methods:    Rc<HashMap<String, VmMethod>>,
@@ -520,11 +520,16 @@ impl Vm {
                 // ── Class opcodes ────────────────────────────────────────────
 
                 OpCode::DefClass(desc_idx) => {
-                    let (class_name, superclass_name, own_field_names, method_names) = {
+                    let (class_name, superclass_name, own_fields, method_names) = {
                         let consts = &self.frames.last().unwrap().function.chunk.constants;
                         match &consts[desc_idx] {
-                            Constant::ClassDesc { name, superclass, field_names, method_names } =>
-                                (name.clone(), superclass.clone(), field_names.clone(), method_names.clone()),
+                            Constant::ClassDesc { name, superclass, field_names, field_defaults, method_names } => {
+                                let own_fields: Vec<(String, VmValue)> = field_names.iter()
+                                    .zip(field_defaults.iter())
+                                    .map(|(n, d)| (n.clone(), d.as_ref().map(VmValue::from).unwrap_or(VmValue::Nil)))
+                                    .collect();
+                                (name.clone(), superclass.clone(), own_fields, method_names.clone())
+                            }
                             _ => panic!("DefClass: expected ClassDesc constant"),
                         }
                     };
@@ -562,12 +567,12 @@ impl Vm {
                             }),
                         };
                         let mut mf = parent_fields;
-                        mf.extend(own_field_names);
+                        mf.extend(own_fields);
                         let mut mm = parent_methods;
                         mm.extend(own_methods);
                         (mf, mm)
                     } else {
-                        (own_field_names, own_methods)
+                        (own_fields, own_methods)
                     };
                     // Register with merged methods so both primitive dispatch and
                     // SuperInvoke can find inherited methods without extra lookups.
@@ -598,9 +603,9 @@ impl Vm {
                             line,
                         }),
                     };
-                    // Initialise all declared fields to nil.
+                    // Initialise fields to their declared defaults (or nil if none).
                     let mut instance_fields: HashMap<String, VmValue> =
-                        field_decls.iter().map(|n| (n.clone(), VmValue::Nil)).collect();
+                        field_decls.iter().map(|(n, default)| (n.clone(), default.clone())).collect();
                     // Apply named constructor arguments.
                     for i in 0..n_pairs {
                         let name_val = self.stack[base + 1 + i * 2].clone();
