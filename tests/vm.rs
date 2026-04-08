@@ -270,6 +270,18 @@ x"#;
 }
 
 #[test]
+fn begin_expr_value_assigned() {
+    let src = "x = begin 7 end\nx";
+    assert_eq!(eval(src), VmValue::Int(7));
+}
+
+#[test]
+fn begin_expr_else_value() {
+    let src = "x = begin 1 rescue e 0 else 2 end\nx";
+    assert_eq!(eval(src), VmValue::Int(2));
+}
+
+#[test]
 fn next_skips_rest_of_block() {
     let src = "def collect() {
   a = yield(1)

@@ -164,7 +164,7 @@ impl Parser {
             return Ok(Stmt::Raise(self.logical()?));
         }
         if self.check(&TokenKind::Begin) {
-            return self.begin_statement();
+            return Ok(Stmt::Expression(self.begin_expr()?));
         }
         if self.check(&TokenKind::Print) {
             self.advance();
@@ -431,7 +431,7 @@ impl Parser {
         Ok(Stmt::MultiAssign { names, values })
     }
 
-    fn begin_statement(&mut self) -> Result<Stmt, SapphireError> {
+    fn begin_expr(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'begin'
         let mut body = Vec::new();
         loop {
@@ -476,10 +476,15 @@ impl Parser {
             });
         }
         self.advance(); // consume 'end'
-        Ok(Stmt::Begin { body, rescue_var, rescue_body, else_body })
+        Ok(Expr::Begin {
+            body,
+            rescue_var,
+            rescue_body,
+            else_body,
+        })
     }
 
-    // Like block(), but wraps the body in Stmt::Begin if a rescue clause is present.
+    // Like block(), but wraps the body in Expr::Begin if a rescue clause is present.
     // Used by function and method definitions.
     fn block_with_rescue(&mut self) -> Result<Vec<Stmt>, SapphireError> {
         if !self.check(&TokenKind::LeftBrace) {
@@ -516,7 +521,12 @@ impl Parser {
                 });
             }
             self.advance(); // consume '}'
-            Ok(vec![Stmt::Begin { body, rescue_var, rescue_body, else_body: Vec::new() }])
+            Ok(vec![Stmt::Expression(Expr::Begin {
+                body,
+                rescue_var,
+                rescue_body,
+                else_body: Vec::new(),
+            })])
         } else {
             if !self.check(&TokenKind::RightBrace) {
                 return Err(SapphireError::ParseError {
@@ -557,6 +567,9 @@ impl Parser {
     fn logical(&mut self) -> Result<Expr, SapphireError> {
         if self.check(&TokenKind::If) {
             return self.if_expr();
+        }
+        if self.check(&TokenKind::Begin) {
+            return self.begin_expr();
         }
         let mut left = self.range()?;
         while self.check(&TokenKind::AmpAmp) || self.check(&TokenKind::PipePipe) {
