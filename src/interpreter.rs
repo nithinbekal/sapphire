@@ -50,6 +50,7 @@ fn value_type_description(value: &Value) -> String {
         Value::List(_)                     => "List".to_string(),
         Value::Map(_)                      => "Map".to_string(),
         Value::Instance { class_name, .. } => class_name.clone(),
+        Value::Lambda { .. }               => "Lambda".to_string(),
         _                                  => "unknown".to_string(),
     }
 }
@@ -91,6 +92,14 @@ pub fn global_env() -> EnvRef {
                 .unwrap_or_else(|e| panic!("{} failed to execute: {}", label, e));
         }
     }
+    let lambda_class = Value::Class {
+        name: "Lambda".to_string(),
+        superclass: Some("Object".to_string()),
+        fields: Vec::new(),
+        methods: Vec::new(),
+        closure: env.clone(),
+    };
+    env.borrow_mut().set("Lambda".to_string(), lambda_class);
     env.borrow_mut().freeze("Object");
     env.borrow_mut().freeze("Nil");
     env.borrow_mut().freeze("Num");
@@ -100,6 +109,7 @@ pub fn global_env() -> EnvRef {
     env.borrow_mut().freeze("Bool");
     env.borrow_mut().freeze("List");
     env.borrow_mut().freeze("Map");
+    env.borrow_mut().freeze("Lambda");
     // Establish an implicit top-level 'self' (main), an instance of Object,
     // so that bare calls to top-level methods resolve via the implicit-self fallback.
     let main_obj = Value::Instance {
@@ -296,7 +306,7 @@ fn evaluate_impl(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             message: format!("cannot convert {} to float", obj),
                         }),
                     },
-                    "is_a?" => return Ok(Value::NativeMethod {
+                    "is_a?" | "call" => return Ok(Value::NativeMethod {
                         receiver: Box::new(obj),
                         name,
                     }),

@@ -1346,3 +1346,8 @@ outer()
 "#;
     assert_eq!(run_all(src), Value::Int(11));
 }
+
+#[test]
+fn test_lambda_class() {
+    assert_eq!(run_all("f = def(x) { x }; f.class.name"), Value::Str("Lambda".into()));
+}
