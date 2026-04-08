@@ -102,4 +102,8 @@ echo ""
 [[ "$run_vm"          == true ]] && echo "VM:          ${vm_pass} passed, ${vm_fail} failed"
 [[ "$run_typecheck"   == true ]] && echo "Typechecker: ${tc_pass} passed, ${tc_fail} failed"
 
-[[ "$run_interpreter" == false ]] || [[ $interp_fail -eq 0 ]]
+exit_code=0
+[[ "$run_interpreter" == false ]] || [[ $interp_fail -eq 0 ]] || exit_code=1
+[[ "$run_vm"          == false ]] || [[ $vm_fail -eq 0 ]]     || exit_code=1
+[[ "$run_typecheck"   == false ]] || [[ $tc_fail -eq 0 ]]     || exit_code=1
+exit $exit_code
