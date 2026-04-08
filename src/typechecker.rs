@@ -377,7 +377,9 @@ impl TypeChecker {
 fn types_compatible(actual: &TypeExpr, expected: &TypeExpr) -> bool {
     match (actual, expected) {
         (_, TypeExpr::Any) | (TypeExpr::Any, _) => true,
-        (TypeExpr::Named(a), TypeExpr::Named(e)) => a == e,
+        (TypeExpr::Named(a), TypeExpr::Named(e)) => {
+            a == e || (e == "Num" && (a == "Int" || a == "Float"))
+        }
     }
 }
 

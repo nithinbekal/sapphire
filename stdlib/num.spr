@@ -1,0 +1,52 @@
+# Num is the common superclass of Int and Float.
+# It provides numeric helper methods shared by both types.
+#
+class Num {
+  # Returns true if the value is zero.
+  #
+  #   0.zero?()    # true
+  #   1.zero?()    # false
+  #   0.0.zero?()  # true
+  #
+
+  def zero?() { self == 0 }
+
+  # Returns true if the value is greater than zero.
+  #
+  #   1.positive?()    # true
+  #   0.positive?()    # false
+  #   (-1).positive?() # false
+  #
+
+  def positive?() { self > 0 }
+
+  # Returns true if the value is less than zero.
+  #
+  #   (-1).negative?() # true
+  #   0.negative?()    # false
+  #   1.negative?()    # false
+  #
+
+  def negative?() { self < 0 }
+
+  # Returns the absolute value.
+  #
+  #   (-5).abs()  # 5
+  #   5.abs()     # 5
+  #   (-2.5).abs() # 2.5
+  #
+
+  def abs() { if self < 0 { -self } else { self } }
+
+  # Returns the value clamped between min and max.
+  # If the value is less than min, returns min.
+  # If the value is greater than max, returns max.
+  # Otherwise returns the value unchanged.
+  #
+  #   10.clamp(1, 5)  # 5
+  #   0.clamp(1, 5)   # 1
+  #   3.clamp(1, 5)   # 3
+  #
+
+  def clamp(min, max) { if self < min { min } elsif self > max { max } else { self } }
+}
