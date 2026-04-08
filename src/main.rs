@@ -70,7 +70,12 @@ fn run_file_vm(path: &str) {
         Ok(f) => f,
         Err(e) => { eprintln!("{}", e); std::process::exit(1); }
     };
-    if let Err(e) = vm::Vm::new(func).run() {
+    let mut vm = vm::Vm::new(func);
+    if let Err(e) = vm.load_stdlib() {
+        eprintln!("stdlib error: {}", e);
+        std::process::exit(1);
+    }
+    if let Err(e) = vm.run() {
         eprintln!("{}", e);
         std::process::exit(1);
     }

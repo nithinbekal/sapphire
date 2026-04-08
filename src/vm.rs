@@ -205,14 +205,20 @@ struct CallFrame {
 
 // ── VM ────────────────────────────────────────────────────────────────────────
 
-/// Per-class metadata stored by DefClass; used by SuperInvoke to walk
-/// the inheritance chain without keeping the Class value on the stack.
+/// Per-class metadata stored by DefClass.
+///
+/// `methods` holds the *merged* (inherited + own) method table — the same map
+/// that lives on `VmValue::Class`.  Using the merged table means:
+///
+/// * Primitive dispatch (`Invoke` on Int/Str/…) finds inherited Object methods.
+/// * `SuperInvoke` looks up `classes[super_name].methods` and gets the
+///   correct merged map for that ancestor level.
 struct ClassEntry {
     superclass: Option<String>,
     /// The merged (inherited + own) field list for this class.
     fields:     Vec<String>,
-    /// This class's own methods only (not inherited), keyed by name.
-    /// SuperInvoke looks here when dispatching to a specific class level.
+    /// Merged (inherited + own) methods.  Used for both primitive dispatch and
+    /// `SuperInvoke` (which looks in the *parent's* merged map).
     methods:    Rc<HashMap<String, VmMethod>>,
 }
 
@@ -239,6 +245,44 @@ impl Vm {
 
     pub fn run(&mut self) -> Result<Option<VmValue>, VmError> {
         self.run_inner(0)
+    }
+
+    /// Run a compiled top-level function in the current VM context (for stdlib loading).
+    fn run_extra(&mut self, func: Rc<Function>) -> Result<(), VmError> {
+        let min_depth = self.frames.len();
+        let base = self.stack.len();
+        self.stack.push(VmValue::Function(func.clone()));
+        self.frames.push(CallFrame {
+            function: func, upvalues: vec![], ip: 0, base,
+            block: None, is_block_caller: false, rescues: vec![],
+            class_name: None,
+        });
+        self.run_inner(min_depth)?;
+        self.stack.truncate(base);
+        Ok(())
+    }
+
+    /// Compile and execute the stdlib Sapphire files to populate the class registry.
+    pub fn load_stdlib(&mut self) -> Result<(), VmError> {
+        const SOURCES: &[(&str, &str)] = &[
+            ("stdlib/object.spr", include_str!("../stdlib/object.spr")),
+            ("stdlib/nil.spr",    include_str!("../stdlib/nil.spr")),
+            ("stdlib/int.spr",    include_str!("../stdlib/int.spr")),
+            ("stdlib/float.spr",  include_str!("../stdlib/float.spr")),
+            ("stdlib/string.spr", include_str!("../stdlib/string.spr")),
+            ("stdlib/bool.spr",   include_str!("../stdlib/bool.spr")),
+            ("stdlib/list.spr",   include_str!("../stdlib/list.spr")),
+            ("stdlib/map.spr",    include_str!("../stdlib/map.spr")),
+        ];
+        for (name, src) in SOURCES {
+            let tokens = crate::lexer::Lexer::new(src).scan_tokens();
+            let stmts = crate::parser::Parser::new(tokens).parse()
+                .map_err(|e| VmError::TypeError { message: format!("{}: {}", name, e), line: 0 })?;
+            let func = crate::compiler::compile(&stmts)
+                .map_err(|e| VmError::TypeError { message: format!("{}: {}", name, e), line: 0 })?;
+            self.run_extra(func)?;
+        }
+        Ok(())
     }
 
     fn run_inner(&mut self, min_depth: usize) -> Result<Option<VmValue>, VmError> {
@@ -498,8 +542,17 @@ impl Vm {
                             _ => panic!("DefClass: method is not a closure"),
                         }
                     }
+                    // If no explicit superclass and Object is loaded, inherit from it
+                    // (mirrors the interpreter's implicit-Object rule).
+                    let effective_super = superclass_name.clone().or_else(|| {
+                        if class_name != "Object" && self.classes.contains_key("Object") {
+                            Some("Object".to_string())
+                        } else {
+                            None
+                        }
+                    });
                     // Merge inherited fields and methods (parent first, child overrides).
-                    let (merged_fields, merged_methods) = if let Some(ref sname) = superclass_name {
+                    let (merged_fields, merged_methods) = if let Some(ref sname) = effective_super {
                         let (parent_fields, parent_methods) = match self.classes.get(sname) {
                             Some(entry) => (entry.fields.clone(), (*entry.methods).clone()),
                             None => return Err(VmError::TypeError {
@@ -510,23 +563,24 @@ impl Vm {
                         let mut mf = parent_fields;
                         mf.extend(own_field_names);
                         let mut mm = parent_methods;
-                        mm.extend(own_methods.clone());
+                        mm.extend(own_methods);
                         (mf, mm)
                     } else {
-                        (own_field_names, own_methods.clone())
+                        (own_field_names, own_methods)
                     };
-                    // Register in the class registry: store own methods (not merged)
-                    // so SuperInvoke can dispatch to the correct class level.
+                    // Register with merged methods so both primitive dispatch and
+                    // SuperInvoke can find inherited methods without extra lookups.
+                    let merged_rc = Rc::new(merged_methods);
                     self.classes.insert(class_name.clone(), ClassEntry {
-                        superclass: superclass_name.clone(),
+                        superclass: effective_super.clone(),
                         fields:     merged_fields.clone(),
-                        methods:    Rc::new(own_methods),
+                        methods:    merged_rc.clone(),
                     });
                     self.stack.push(VmValue::Class {
                         name:       class_name,
-                        superclass: superclass_name,
+                        superclass: effective_super,
                         fields:     merged_fields,
-                        methods:    Rc::new(merged_methods),
+                        methods:    merged_rc,
                     });
                 }
 
@@ -576,10 +630,36 @@ impl Vm {
                             let val = fields.borrow().get(&name).cloned().unwrap_or(VmValue::Nil);
                             self.stack.push(val);
                         }
-                        other => return Err(VmError::TypeError {
-                            message: format!("cannot get field '{}' on {}", name, other),
-                            line,
-                        }),
+                        // For primitives, treat `obj.name` as a zero-arg method call.
+                        ref other => {
+                            match try_native_method(other, &name, &[], line) {
+                                Some(Ok(result)) => { self.stack.push(result); }
+                                Some(Err(e)) => return Err(e),
+                                None => {
+                                    // Try compiled stdlib methods from class registry.
+                                    let method = primitive_class_name(other)
+                                        .and_then(|cls| self.classes.get(cls))
+                                        .and_then(|entry| entry.methods.get(&name).cloned());
+                                    match method {
+                                        Some(m) => {
+                                            let recv_slot = self.stack.len();
+                                            self.stack.push(other.clone());
+                                            let class_name = Some(m.defined_in.clone());
+                                            self.frames.push(CallFrame {
+                                                function: m.function, upvalues: m.upvalues,
+                                                ip: 0, base: recv_slot,
+                                                block: None, is_block_caller: false, rescues: vec![],
+                                                class_name,
+                                            });
+                                        }
+                                        None => return Err(VmError::TypeError {
+                                            message: format!("cannot get field '{}' on {}", name, other),
+                                            line,
+                                        }),
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -637,10 +717,48 @@ impl Vm {
                     if !is_instance {
                         let recv = self.stack[recv_slot].clone();
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                        let result = dispatch_native_method(&recv, &method_name, &args, line)?;
-                        self.stack.truncate(recv_slot);
-                        self.stack.push(result);
-                        continue;
+                        // Try Rust native method first; if not found try compiled stdlib.
+                        match try_native_method(&recv, &method_name, &args, line) {
+                            Some(Ok(result)) => {
+                                self.stack.truncate(recv_slot);
+                                self.stack.push(result);
+                                continue;
+                            }
+                            Some(Err(e)) => return Err(e),
+                            None => {}
+                        }
+                        // Native didn't handle it — look in the class registry.
+                        let method = primitive_class_name(&recv)
+                            .and_then(|cls| self.classes.get(cls))
+                            .and_then(|entry| entry.methods.get(&method_name).cloned());
+                        match method {
+                            Some(m) => {
+                                if m.function.arity != arg_count {
+                                    return Err(VmError::TypeError {
+                                        message: format!(
+                                            "method '{}' expects {} arg(s), got {}",
+                                            method_name, m.function.arity, arg_count
+                                        ),
+                                        line,
+                                    });
+                                }
+                                // recv and args are already on the stack at recv_slot..
+                                // so the new frame's slot 0 = recv, slots 1.. = args.
+                                let class_name = Some(m.defined_in.clone());
+                                self.frames.push(CallFrame {
+                                    function: m.function,
+                                    upvalues: m.upvalues,
+                                    ip: 0, base: recv_slot,
+                                    block: None, is_block_caller: false, rescues: vec![],
+                                    class_name,
+                                });
+                                continue;
+                            }
+                            None => return Err(VmError::TypeError {
+                                message: format!("'{}' has no method '{}'", recv, method_name),
+                                line,
+                            }),
+                        }
                     }
 
                     let method = match &self.stack[recv_slot] {
@@ -790,17 +908,51 @@ impl Vm {
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
 
-                    // Try native block dispatch for non-Instance types.
+                    // Try native block dispatch for non-Instance types; fall back to
+                    // compiled stdlib methods in the class registry.
                     let is_instance = matches!(&self.stack[recv_slot], VmValue::Instance { .. });
                     if !is_instance {
                         let recv = self.stack[recv_slot].clone();
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                        self.stack.truncate(recv_slot);
-                        let result = self.dispatch_native_block_method(
-                            &recv, &method_name, &args, block, line,
-                        )?;
-                        self.stack.push(result);
-                        continue;
+                        // Peek at whether native dispatch handles this method.
+                        let native_result = self.dispatch_native_block_method(
+                            &recv, &method_name, &args, block.clone(), line,
+                        );
+                        let is_native_miss = matches!(&native_result,
+                            Err(VmError::TypeError { message, .. })
+                            if message.contains("has no block method") || message.contains("requires a block")
+                        );
+                        if !is_native_miss {
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(native_result?);
+                            continue;
+                        }
+                        // Native didn't handle it — try the class registry.
+                        let method = primitive_class_name(&recv)
+                            .and_then(|cls| self.classes.get(cls))
+                            .and_then(|entry| entry.methods.get(&method_name).cloned());
+                        match method {
+                            Some(m) => {
+                                // Stack is still [..., recv, args...]; leave it for the frame.
+                                let class_name = Some(m.defined_in.clone());
+                                self.frames.push(CallFrame {
+                                    function: m.function, upvalues: m.upvalues,
+                                    ip: 0, base: recv_slot,
+                                    block, is_block_caller: true, rescues: vec![],
+                                    class_name,
+                                });
+                                continue;
+                            }
+                            None => {
+                                return Err(VmError::TypeError {
+                                    message: format!(
+                                        "no method '{}' on {}",
+                                        method_name, recv
+                                    ),
+                                    line,
+                                });
+                            }
+                        }
                     }
 
                     let method = match &self.stack[recv_slot] {
@@ -832,8 +984,10 @@ impl Vm {
                 }
 
                 OpCode::Yield(arg_count) => {
-                    let block = self.frames.last()
-                        .and_then(|f| f.block.clone())
+                    // Walk up the frame stack to find the nearest block — this allows
+                    // `yield` inside an inner block to call back to the enclosing method's block.
+                    let block = self.frames.iter().rev()
+                        .find_map(|f| f.block.clone())
                         .ok_or_else(|| VmError::TypeError {
                             message: "yield called without a block".into(), line,
                         })?;
@@ -946,7 +1100,6 @@ impl Vm {
                 OpCode::Print => {
                     let val = self.pop()?;
                     println!("{}", val);
-                    self.stack.push(VmValue::Nil);
                 }
 
                 OpCode::Call(arg_count) => {
@@ -1263,6 +1416,42 @@ impl Vm {
                         }
                     }
                     Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                }
+                "any?" => {
+                    let items: Vec<VmValue> = elems.borrow().clone();
+                    for item in items {
+                        match self.call_block(&blk, vec![item]) {
+                            Err(VmError::Break(_)) => return Ok(VmValue::Bool(false)),
+                            Err(e) => return Err(e),
+                            Ok(v) if !is_falsy(&v) => return Ok(VmValue::Bool(true)),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(VmValue::Bool(false))
+                }
+                "all?" => {
+                    let items: Vec<VmValue> = elems.borrow().clone();
+                    for item in items {
+                        match self.call_block(&blk, vec![item]) {
+                            Err(VmError::Break(_)) => return Ok(VmValue::Bool(true)),
+                            Err(e) => return Err(e),
+                            Ok(v) if is_falsy(&v) => return Ok(VmValue::Bool(false)),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(VmValue::Bool(true))
+                }
+                "none?" => {
+                    let items: Vec<VmValue> = elems.borrow().clone();
+                    for item in items {
+                        match self.call_block(&blk, vec![item]) {
+                            Err(VmError::Break(_)) => return Ok(VmValue::Bool(true)),
+                            Err(e) => return Err(e),
+                            Ok(v) if !is_falsy(&v) => return Ok(VmValue::Bool(false)),
+                            Ok(_) => {}
+                        }
+                    }
+                    Ok(VmValue::Bool(true))
                 }
                 "reduce" | "inject" => {
                     let items: Vec<VmValue> = elems.borrow().clone();
@@ -1680,6 +1869,36 @@ fn dispatch_native_method(
             message: format!("'{}' has no method '{}'", other, name),
             line,
         }),
+    }
+}
+
+/// Like `dispatch_native_method` but returns `None` when no native handler
+/// exists for this method, allowing callers to try the class registry next.
+/// Any real type error (wrong arg count, wrong type, etc.) is still `Some(Err)`.
+fn try_native_method(
+    recv: &VmValue,
+    name: &str,
+    args: &[VmValue],
+    line: u32,
+) -> Option<Result<VmValue, VmError>> {
+    match dispatch_native_method(recv, name, args, line) {
+        Err(VmError::TypeError { ref message, .. }) if message.contains("has no method") => None,
+        result => Some(result),
+    }
+}
+
+/// Return the stdlib class name for a primitive value, used to look up
+/// compiled stdlib methods in the class registry.
+fn primitive_class_name(val: &VmValue) -> Option<&'static str> {
+    match val {
+        VmValue::Int(_)   => Some("Int"),
+        VmValue::Float(_) => Some("Float"),
+        VmValue::Str(_)   => Some("String"),
+        VmValue::Bool(_)  => Some("Bool"),
+        VmValue::Nil      => Some("Nil"),
+        VmValue::List(_)  => Some("List"),
+        VmValue::Map(_)   => Some("Map"),
+        _                 => None,
     }
 }
 

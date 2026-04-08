@@ -403,6 +403,30 @@ impl Compiler {
                     }
                     return Ok(());
                 }
+                // Implicit self dispatch: if the callee is a bare name that can't be
+                // resolved as a local/upvalue, but `self` is in scope (we're inside a
+                // method body), rewrite as `self.name(args)`.
+                if let Expr::Variable(name) = callee.as_ref() {
+                    let depth = self.states.len() - 1;
+                    let is_unresolved = self.resolve_local(depth, name).is_none()
+                        && self.resolve_upvalue(depth, name).is_none();
+                    let self_in_scope = self.resolve_local(depth, "self").is_some();
+                    if is_unresolved && self_in_scope {
+                        self.emit(OpCode::GetSelf);
+                        let arg_count = args.len();
+                        for arg in args {
+                            self.expr(&arg.value)?;
+                        }
+                        let ni = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                        if let Some(blk) = block {
+                            self.compile_block(blk)?;
+                            self.emit(OpCode::InvokeWithBlock(ni, arg_count));
+                        } else {
+                            self.emit(OpCode::Invoke(ni, arg_count));
+                        }
+                        return Ok(());
+                    }
+                }
                 // Plain function call (with or without block)
                 self.expr(callee)?;
                 let arg_count = args.len();
