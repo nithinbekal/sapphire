@@ -1,0 +1,64 @@
+# collections.spr — lists, maps, ranges
+
+# ── Lists ──────────────────────────────────────────────────────────────────────
+
+numbers = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3]
+
+print "length: #{numbers.length}"
+print "first:  #{numbers.first}"
+print "last:   #{numbers.last}"
+
+doubled = numbers.map { |n| n * 2 }
+doubled.each { |n| print n }
+
+evens = numbers.select { |n| n % 2 == 0 }
+print "even count: #{evens.length}"
+
+total = numbers.reduce(0) { |acc, n| acc + n }
+print "sum: #{total}"
+
+sorted = numbers.sort()
+print "min: #{sorted.first}"
+print "max: #{sorted.last}"
+
+unique = numbers.uniq()
+print "unique: #{unique.length} values"
+
+numbers.each_with_index { |n, i| print "  [#{i}] = #{n}" }
+
+print "any > 8?  #{numbers.any? { |n| n > 8 }}"
+print "all > 0?  #{numbers.all? { |n| n > 0 }}"
+print "none < 0? #{numbers.none? { |n| n < 0 }}"
+
+# List mutation
+stack = []
+stack.push(10)
+stack.push(20)
+stack.push(30)
+print "popped: #{stack.pop()}"
+print "stack length: #{stack.length}"
+
+# ── Maps ───────────────────────────────────────────────────────────────────────
+
+scores = { alice: 95, bob: 82, carol: 91 }
+
+print "length: #{scores.length}"
+print "has alice? #{scores.has_key?("alice")}"
+print "has dave?  #{scores.has_key?("dave")}"
+
+scores.each { |name, score| print "  #{name}: #{score}" }
+
+passing = scores.select { |name, score| score >= 90 }
+print "passing count: #{passing.length}"
+
+extras = { dave: 78 }
+all_scores = scores.merge(extras)
+print "total students: #{all_scores.length}"
+
+# ── Ranges ─────────────────────────────────────────────────────────────────────
+
+print "Counting:"
+(1..5).each { |i| print i }
+
+print "includes 3? #{(1..5).include?(3)}"
+print "includes 6? #{(1..5).include?(6)}"

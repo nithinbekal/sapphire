@@ -1,0 +1,77 @@
+# classes.spr — class definitions, fields, methods, inheritance, super
+
+class Shape {
+  attr color = "red"
+
+  def describe() {
+    "A #{self.color} shape"
+  }
+
+  def area() {
+    0
+  }
+}
+
+class Rectangle < Shape {
+  attr width: Int
+  attr height: Int
+
+  def area() {
+    self.width * self.height
+  }
+
+  def describe() {
+    super.describe() + " (rectangle #{self.width}x#{self.height})"
+  }
+}
+
+class Circle < Shape {
+  attr radius: Int
+
+  def area() {
+    # integer approximation
+    3 * self.radius * self.radius
+  }
+
+  def describe() {
+    super.describe() + " (circle r=#{self.radius})"
+  }
+}
+
+r = Rectangle.new(width: 4, height: 5)
+print r.describe()
+print "Area: #{r.area()}"
+
+c = Circle.new(color: "blue", radius: 3)
+print c.describe()
+print "Area: #{c.area()}"
+
+# Field mutation via methods
+class Counter {
+  attr n = 0
+
+  def inc() {
+    self.n = self.n + 1
+  }
+
+  def reset() {
+    self.n = 0
+  }
+
+  def value() {
+    self.n
+  }
+}
+
+counter = Counter.new()
+counter.inc()
+counter.inc()
+counter.inc()
+print "Counter: #{counter.value()}"
+counter.reset()
+print "After reset: #{counter.value()}"
+
+# is_a? type checking
+print r.is_a?(Rectangle)
+print r.is_a?(Shape)
+print r.is_a?(Circle)
