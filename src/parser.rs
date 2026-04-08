@@ -164,7 +164,7 @@ impl Parser {
         }
         if self.check(&TokenKind::Print) {
             self.advance();
-            return Ok(Stmt::Print(self.logical()?));
+            return Ok(Stmt::Expression(Expr::Print(Box::new(self.logical()?))));
         }
         Ok(Stmt::Expression(self.logical()?))
     }
@@ -236,7 +236,12 @@ impl Parser {
             });
         }
         self.advance(); // consume '}'
-        Ok(Stmt::Class { name, superclass, fields, methods })
+        Ok(Stmt::Expression(Expr::Class {
+            name,
+            superclass,
+            fields,
+            methods,
+        }))
     }
 
     fn if_statement(&mut self) -> Result<Stmt, SapphireError> {
@@ -316,7 +321,12 @@ impl Parser {
         self.advance(); // consume ')'
         let return_type = self.parse_return_type()?;
         let body = self.block_with_rescue()?;
-        Ok(Stmt::Function { name, params, return_type, body })
+        Ok(Stmt::Expression(Expr::Function {
+            name,
+            params,
+            return_type,
+            body,
+        }))
     }
 
     fn method_def(&mut self, private: bool) -> Result<MethodDef, SapphireError> {
@@ -1029,7 +1039,12 @@ mod tests {
     fn test_print_statement() {
         let tokens = Lexer::new("print 42").scan_tokens();
         let mut stmts = Parser::new(tokens).parse().unwrap();
-        assert!(matches!(stmts.remove(0), Stmt::Print(Expr::Literal(Value::Bool(_) | Value::Int(_)))));
+        match stmts.remove(0) {
+            Stmt::Expression(Expr::Print(inner)) => {
+                assert!(matches!(*inner, Expr::Literal(Value::Int(42))));
+            }
+            other => panic!("expected print expr, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1043,7 +1058,10 @@ mod tests {
     fn test_class_def() {
         let tokens = Lexer::new("class Point { attr x; attr y }").scan_tokens();
         let mut stmts = Parser::new(tokens).parse().unwrap();
-        assert!(matches!(stmts.remove(0), Stmt::Class { name, .. } if name == "Point"));
+        assert!(matches!(
+            stmts.remove(0),
+            Stmt::Expression(Expr::Class { name, .. }) if name == "Point"
+        ));
     }
 
     #[test]

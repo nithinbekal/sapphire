@@ -55,13 +55,13 @@ impl TypeChecker {
     // First pass: record function and class signatures without checking bodies.
     fn collect_def(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Function { name, params, return_type, .. } => {
+            Stmt::Expression(Expr::Function { name, params, return_type, .. }) => {
                 self.functions.insert(name.clone(), FnSig {
                     params: params.clone(),
                     return_type: return_type.clone(),
                 });
             }
-            Stmt::Class { name, fields, methods, .. } => {
+            Stmt::Expression(Expr::Class { name, fields, methods, .. }) => {
                 let method_sigs = methods.iter().map(|m| {
                     (m.name.clone(), FnSig { params: m.params.clone(), return_type: m.return_type.clone() })
                 }).collect();
@@ -92,58 +92,6 @@ impl TypeChecker {
 
     fn check_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Function { name, params, return_type, body } => {
-                self.functions.insert(name.clone(), FnSig {
-                    params: params.clone(),
-                    return_type: return_type.clone(),
-                });
-                let saved = self.current_return_type.take();
-                self.current_return_type = return_type.clone();
-                self.push_scope();
-                for p in params {
-                    if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
-                }
-                for s in body { self.check_stmt(s); }
-                // Check implicit return: the last Stmt::Expression is the return value.
-                if let Some(rt) = return_type {
-                    if let Some(Stmt::Expression(last_expr)) = body.last() {
-                        if let Some(actual) = self.infer_type(last_expr) {
-                            if !types_compatible(&actual, rt) {
-                                self.errors.push(TypeCheckError {
-                                    message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
-                                });
-                            }
-                        }
-                    }
-                }
-                self.pop_scope();
-                self.current_return_type = saved;
-            }
-            Stmt::Class { methods, .. } => {
-                for method in methods {
-                    let saved = self.current_return_type.take();
-                    self.current_return_type = method.return_type.clone();
-                    self.push_scope();
-                    for p in &method.params {
-                        if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
-                    }
-                    for s in &method.body { self.check_stmt(s); }
-                    // Check implicit return.
-                    if let Some(rt) = &method.return_type.clone() {
-                        if let Some(Stmt::Expression(last_expr)) = method.body.last() {
-                            if let Some(actual) = self.infer_type(last_expr) {
-                                if !types_compatible(&actual, rt) {
-                                    self.errors.push(TypeCheckError {
-                                        message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    self.pop_scope();
-                    self.current_return_type = saved;
-                }
-            }
             Stmt::Return(expr) => {
                 if let Some(rt) = self.current_return_type.clone() {
                     if let Some(actual) = self.infer_type(expr) {
@@ -157,30 +105,78 @@ impl TypeChecker {
                 self.check_expr(expr);
             }
             Stmt::Expression(expr) => {
-                // Record variable types from assignments before recursing.
-                if let Expr::Assign { name, value } = expr {
-                    let ty = self.infer_type(value).or_else(|| {
-                        // x = ClassName.new(...) → x: ClassName
-                        if let Expr::Call { callee, .. } = value.as_ref() {
-                            if let Expr::Get { object, name: m } = callee.as_ref() {
-                                if m == "new" {
-                                    if let Expr::Variable(cn) = object.as_ref() {
-                                        if self.classes.contains_key(cn) {
-                                            return Some(TypeExpr::Named(cn.clone()));
-                                        }
+                match expr {
+                    Expr::Function { name, params, return_type, body } => {
+                        self.functions.insert(name.clone(), FnSig {
+                            params: params.clone(),
+                            return_type: return_type.clone(),
+                        });
+                        let saved = self.current_return_type.take();
+                        self.current_return_type = return_type.clone();
+                        self.push_scope();
+                        for p in params {
+                            if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
+                        }
+                        for s in body { self.check_stmt(s); }
+                        if let Some(rt) = return_type {
+                            if let Some(Stmt::Expression(last_expr)) = body.last() {
+                                if let Some(actual) = self.infer_type(last_expr) {
+                                    if !types_compatible(&actual, rt) {
+                                        self.errors.push(TypeCheckError {
+                                            message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
+                                        });
                                     }
                                 }
                             }
                         }
-                        None
-                    });
-                    if let Some(ty) = ty { self.set_var(name, ty); }
-                    self.check_expr(value);
-                } else {
-                    self.check_expr(expr);
+                        self.pop_scope();
+                        self.current_return_type = saved;
+                    }
+                    Expr::Class { methods, .. } => {
+                        for method in methods {
+                            let saved = self.current_return_type.take();
+                            self.current_return_type = method.return_type.clone();
+                            self.push_scope();
+                            for p in &method.params {
+                                if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
+                            }
+                            for s in &method.body { self.check_stmt(s); }
+                            if let Some(rt) = &method.return_type.clone() {
+                                if let Some(Stmt::Expression(last_expr)) = method.body.last() {
+                                    if let Some(actual) = self.infer_type(last_expr) {
+                                        if !types_compatible(&actual, rt) {
+                                            self.errors.push(TypeCheckError {
+                                                message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            self.pop_scope();
+                            self.current_return_type = saved;
+                        }
+                    }
+                    Expr::Assign { name, value } => {
+                        let ty = self.infer_type(value).or_else(|| {
+                            if let Expr::Call { callee, .. } = value.as_ref() {
+                                if let Expr::Get { object, name: m } = callee.as_ref() {
+                                    if m == "new" {
+                                        if let Expr::Variable(cn) = object.as_ref() {
+                                            if self.classes.contains_key(cn) {
+                                                return Some(TypeExpr::Named(cn.clone()));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            None
+                        });
+                        if let Some(ty) = ty { self.set_var(name, ty); }
+                        self.check_expr(value);
+                    }
+                    e => self.check_expr(e),
                 }
             }
-            Stmt::Print(expr) => self.check_expr(expr),
             Stmt::If { condition, then_branch, else_branch } => {
                 self.check_expr(condition);
                 self.push_scope();
@@ -249,6 +245,57 @@ impl TypeChecker {
             Expr::ListLit(elems) => { for e in elems { self.check_expr(e); } }
             Expr::MapLit(pairs) => { for (_, v) in pairs { self.check_expr(v); } }
             Expr::Grouping(inner) => self.check_expr(inner),
+            Expr::Print(inner) => self.check_expr(inner),
+            Expr::Class { methods, .. } => {
+                for method in methods {
+                    let saved = self.current_return_type.take();
+                    self.current_return_type = method.return_type.clone();
+                    self.push_scope();
+                    for p in &method.params {
+                        if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
+                    }
+                    for s in &method.body { self.check_stmt(s); }
+                    if let Some(rt) = &method.return_type.clone() {
+                        if let Some(Stmt::Expression(last_expr)) = method.body.last() {
+                            if let Some(actual) = self.infer_type(last_expr) {
+                                if !types_compatible(&actual, rt) {
+                                    self.errors.push(TypeCheckError {
+                                        message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    self.pop_scope();
+                    self.current_return_type = saved;
+                }
+            }
+            Expr::Function { name, params, return_type, body } => {
+                self.functions.insert(name.clone(), FnSig {
+                    params: params.clone(),
+                    return_type: return_type.clone(),
+                });
+                let saved = self.current_return_type.take();
+                self.current_return_type = return_type.clone();
+                self.push_scope();
+                for p in params {
+                    if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
+                }
+                for s in body { self.check_stmt(s); }
+                if let Some(rt) = return_type {
+                    if let Some(Stmt::Expression(last_expr)) = body.last() {
+                        if let Some(actual) = self.infer_type(last_expr) {
+                            if !types_compatible(&actual, rt) {
+                                self.errors.push(TypeCheckError {
+                                    message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
+                                });
+                            }
+                        }
+                    }
+                }
+                self.pop_scope();
+                self.current_return_type = saved;
+            }
             _ => {}
         }
     }
@@ -348,6 +395,9 @@ impl TypeChecker {
                     _ => None,
                 }
             }
+            Expr::Print(inner) => self.infer_type(inner),
+            Expr::Class { name, .. } => Some(TypeExpr::Named(name.clone())),
+            Expr::Function { .. } => Some(TypeExpr::Named("String".into())),
             Expr::Call { callee, .. } => match callee.as_ref() {
                 Expr::Variable(name) => {
                     self.functions.get(name).and_then(|s| s.return_type.clone())

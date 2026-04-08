@@ -53,7 +53,6 @@ pub struct CallArg {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Expression(Expr),
-    Print(Expr),
     If {
         condition: Expr,
         then_branch: Vec<Stmt>,
@@ -63,21 +62,9 @@ pub enum Stmt {
         condition: Expr,
         body: Vec<Stmt>,
     },
-    Function {
-        name: String,
-        params: Vec<ParamDef>,
-        return_type: Option<TypeExpr>,
-        body: Vec<Stmt>,
-    },
     Return(Expr),
     Break(Expr),
     Next(Expr),
-    Class {
-        name: String,
-        superclass: Option<String>,
-        fields: Vec<FieldDef>,
-        methods: Vec<MethodDef>,
-    },
     Raise(Expr),
     MultiAssign {
         names: Vec<String>,
@@ -151,5 +138,21 @@ pub enum Expr {
     Range {
         from: Box<Expr>,
         to: Box<Expr>,
+    },
+    /// `print expr` — evaluates `expr`, prints, value is the printed value.
+    Print(Box<Expr>),
+    /// `class Name ...` — defines a class; value is the class object.
+    Class {
+        name: String,
+        superclass: Option<String>,
+        fields: Vec<FieldDef>,
+        methods: Vec<MethodDef>,
+    },
+    /// Top-level `def name(...)` on `Object`; value is the method name string.
+    Function {
+        name: String,
+        params: Vec<ParamDef>,
+        return_type: Option<TypeExpr>,
+        body: Vec<Stmt>,
     },
 }
