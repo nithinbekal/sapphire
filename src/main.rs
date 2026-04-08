@@ -30,9 +30,9 @@ fn run_file(path: &str) {
             eprintln!("{}", e);
             std::process::exit(1);
         }
-        Ok(stmts) => {
-            for stmt in stmts {
-                if let Err(e) = interpreter::execute(stmt, env.clone()) {
+        Ok(exprs) => {
+            for expr in exprs {
+                if let Err(e) = interpreter::execute(expr, env.clone()) {
                     eprintln!("{}", e);
                     std::process::exit(1);
                 }
@@ -50,11 +50,11 @@ fn run_file_vm(path: &str) {
         }
     };
     let tokens = lexer::Lexer::new(&source).scan_tokens();
-    let stmts = match parser::Parser::new(tokens).parse() {
+    let exprs = match parser::Parser::new(tokens).parse() {
         Ok(s) => s,
         Err(e) => { eprintln!("{}", e); std::process::exit(1); }
     };
-    let func = match compiler::compile(&stmts) {
+    let func = match compiler::compile(&exprs) {
         Ok(f) => f,
         Err(e) => { eprintln!("{}", e); std::process::exit(1); }
     };
@@ -77,8 +77,8 @@ fn typecheck_file(path: &str) {
     let tokens = lexer::Lexer::new(&source).scan_tokens();
     match parser::Parser::new(tokens).parse() {
         Err(e) => { eprintln!("{}", e); std::process::exit(1); }
-        Ok(stmts) => {
-            let errors = typechecker::TypeChecker::check(&stmts);
+        Ok(exprs) => {
+            let errors = typechecker::TypeChecker::check(&exprs);
             if errors.is_empty() {
                 println!("No type errors found.");
             } else {
@@ -112,9 +112,9 @@ fn run_repl() {
         let tokens = lexer::Lexer::new(source).scan_tokens();
         match parser::Parser::new(tokens).parse() {
             Err(e) => eprintln!("{}", e),
-            Ok(stmts) => {
-                for stmt in stmts {
-                    match interpreter::execute(stmt, env.clone()) {
+            Ok(exprs) => {
+                for expr in exprs {
+                    match interpreter::execute(expr, env.clone()) {
                         Ok(Some(result)) if result != value::Value::Nil => println!("{}", result),
                         Ok(_) => {}
                         Err(e) => { eprintln!("{}", e); break; }

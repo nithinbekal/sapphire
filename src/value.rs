@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::ast::{Block, FieldDef, MethodDef, ParamDef, Stmt, TypeExpr};
+use crate::ast::{Block, Expr, FieldDef, MethodDef, ParamDef, TypeExpr};
 use crate::environment::Environment;
 
 pub type EnvRef = Rc<RefCell<Environment>>;
@@ -33,7 +33,7 @@ pub enum Value {
         receiver: Box<Value>,
         params: Vec<ParamDef>,
         return_type: Option<TypeExpr>,
-        body: Vec<Stmt>,
+        body: Vec<Expr>,
         closure: EnvRef,
         defined_in: String,
     },
