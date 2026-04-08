@@ -149,7 +149,8 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
                 merged_methods.push(method);
             }
             let class = Value::Class { name: name.clone(), superclass: superclass.clone(), fields: merged_fields, methods: merged_methods, closure: env.clone() };
-            env.borrow_mut().set(name, class);
+            env.borrow_mut().set(name.clone(), class);
+            env.borrow_mut().freeze(&name);
             Ok(None)
         }
         Stmt::Function { name, params, return_type, body } => {
@@ -310,9 +311,18 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             })
         }
         Expr::Assign { name, value } => {
+            let is_constant = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+            if is_constant && env.borrow().is_frozen(&name) {
+                return Err(SapphireError::RuntimeError {
+                    message: format!("cannot reassign constant '{}'", name),
+                });
+            }
             let result = evaluate(*value, env.clone())?;
             if !env.borrow_mut().assign(&name, result.clone()) {
-                env.borrow_mut().set(name, result.clone());
+                env.borrow_mut().set(name.clone(), result.clone());
+            }
+            if is_constant {
+                env.borrow_mut().freeze(&name);
             }
             Ok(result)
         }
@@ -1964,6 +1974,40 @@ mod tests {
         exec_env("w = Wrapper.new(items: [10, 20, 30])", env.clone());
         exec_env("sum = 0; w.each() { |x| sum = sum + x }", env.clone());
         assert_eq!(env.borrow().get("sum"), Some(Value::Int(60)));
+    }
+
+    #[test]
+    fn test_constant_assignment() {
+        let env = global_env();
+        exec_env("MAX = 100", env.clone());
+        assert_eq!(run_env("MAX", env.clone()), Value::Int(100));
+    }
+
+    #[test]
+    fn test_constant_reassignment_is_error() {
+        let env = global_env();
+        exec_env("PI = 3.14", env.clone());
+        let tokens = crate::lexer::Lexer::new("PI = 3").scan_tokens();
+        let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
+        assert!(execute(stmts.remove(0), env).is_err());
+    }
+
+    #[test]
+    fn test_constant_is_readable_in_methods() {
+        let env = global_env();
+        exec_env("MAX = 10", env.clone());
+        exec_env("def cap(n) { if n > MAX { MAX } else { n } }", env.clone());
+        assert_eq!(run_env("cap(5)", env.clone()), Value::Int(5));
+        assert_eq!(run_env("cap(20)", env.clone()), Value::Int(10));
+    }
+
+    #[test]
+    fn test_user_class_cannot_be_redefined() {
+        let env = global_env();
+        exec_env("class Dog { attr name }", env.clone());
+        let tokens = crate::lexer::Lexer::new("class Dog { attr breed }").scan_tokens();
+        let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
+        assert!(execute(stmts.remove(0), env).is_err());
     }
 
     #[test]
