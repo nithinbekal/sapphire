@@ -1,28 +1,42 @@
+# Map is a key-value collection. Keys are strings; values are arbitrary values.
+# This class adds filtering and predicate helpers on top of each and lookup.
+#
 class Map {
-  # Returns a new map containing only the pairs for which the block returns true.
+  # Returns a new map containing only pairs for which the block returns true.
+  #
   #   { name: "Alice", age: 30 }.select { |k, v| v == 30 }   # { age: 30 }
+  #
   def select() {
     result = {}
     self.each { |k, v| result[k] = v if yield(k, v) }
     result
   }
 
-  # Returns true if the block returns true for at least one key-value pair.
+  # Returns true if the block returns a truthy value for at least one pair.
+  #
   #   { a: 1, b: 2 }.any? { |k, v| v > 1 }   # true
+  #   { a: 1, b: 2 }.any? { |k, v| v > 9 }   # false
+  #
   def any?() {
     result = self.each { |k, v| break true if yield(k, v) }
     result == true
   }
 
-  # Returns true if the block returns true for every key-value pair.
+  # Returns true if the block returns true for every pair (empty maps are true).
+  #
   #   { a: 1, b: 2 }.all? { |k, v| v > 0 }   # true
+  #   { a: 1, b: 2 }.all? { |k, v| v > 1 }   # false
+  #
   def all?() {
     result = self.each { |k, v| break false if yield(k, v) == false }
     result != false
   }
 
-  # Returns true if the block returns false for every key-value pair.
+  # Returns true if the block never returns a truthy value (empty maps are true).
+  #
   #   { a: 1, b: 2 }.none? { |k, v| v > 9 }   # true
+  #   { a: 1, b: 2 }.none? { |k, v| v > 1 }   # false
+  #
   def none?() {
     result = self.each { |k, v| break true if yield(k, v) }
     result != true

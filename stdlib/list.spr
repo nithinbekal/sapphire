@@ -1,43 +1,61 @@
+# List is an ordered, mutable sequence of values.
+# This class adds higher-order helpers on top of indexing, length, and each.
+#
 class List {
-  # Returns a new list with each element transformed by the block.
+  # Returns a new list built by calling the block once per element.
+  #
   #   [1, 2, 3].map { |x| x * 2 }   # [2, 4, 6]
+  #
   def map() {
     result = []
     each { |x| result.push(yield(x)) }
     result
   }
 
-  # Returns a new list containing only the elements for which the block returns true.
+  # Returns a new list containing only elements for which the block returns true.
+  #
   #   [1, 2, 3, 4].select { |x| x > 2 }   # [3, 4]
+  #
   def select() {
     result = []
     each { |x| result.push(x) if yield(x) }
     result
   }
 
-  # Returns true if the block returns true for at least one element.
+  # Returns true if the block returns a truthy value for at least one element.
+  #
   #   [1, 2, 3].any? { |x| x > 2 }   # true
+  #   [1, 2, 3].any? { |x| x > 9 }   # false
+  #
   def any?() {
     each { |x| return true if yield(x) }
     false
   }
 
-  # Returns true if the block returns true for every element.
+  # Returns true if the block returns true for every element (empty lists are true).
+  #
   #   [1, 2, 3].all? { |x| x > 0 }   # true
+  #   [1, 2, 3].all? { |x| x > 2 }   # false
+  #
   def all?() {
     each { |x| return false if yield(x) == false }
     true
   }
 
-  # Returns true if the block returns false for every element.
+  # Returns true if the block never returns a truthy value (empty lists are true).
+  #
   #   [1, 2, 3].none? { |x| x > 9 }   # true
+  #   [1, 2, 3].none? { |x| x > 2 }   # false
+  #
   def none?() {
     each { |x| return false if yield(x) }
     true
   }
 
-  # Yields each element together with its zero-based index.
+  # Yields each element with its zero-based index.
+  #
   #   ["a", "b"].each_with_index { |item, i| print "#{i}: #{item}" }
+  #
   def each_with_index() {
     i = 0
     each { |x|
@@ -46,15 +64,21 @@ class List {
     }
   }
 
-  # Returns true if the list contains a value equal to item.
+  # Returns true if some element is == to item.
+  #
   #   [1, 2, 3].include?(2)   # true
+  #   [1, 2, 3].include?(9)   # false
+  #
   def include?(item) {
     result = each { |x| break true if x == item }
     result == true
   }
 
-  # Returns a new list of two-element lists pairing elements from self and other.
+  # Returns a new list of pairs: the i-th element of self with the i-th of other.
+  # The number of pairs is self.length; other must have at least that many elements.
+  #
   #   [1, 2, 3].zip([4, 5, 6])   # [[1, 4], [2, 5], [3, 6]]
+  #
   def zip(other) {
     result = []
     len = self.length
