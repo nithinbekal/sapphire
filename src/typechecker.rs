@@ -184,11 +184,6 @@ impl TypeChecker {
                 self.pop_scope();
             }
             Stmt::Raise(expr) => self.check_expr(expr),
-            Stmt::Begin { body, rescue_body, else_body, .. } => {
-                for s in body        { self.check_stmt(s); }
-                for s in rescue_body { self.check_stmt(s); }
-                for s in else_body   { self.check_stmt(s); }
-            }
             Stmt::MultiAssign { names, values } => {
                 for (name, expr) in names.iter().zip(values.iter()) {
                     if let Some(ty) = self.infer_type(expr) { self.set_var(name, ty); }
@@ -244,6 +239,16 @@ impl TypeChecker {
                     for s in branch { self.check_stmt(s); }
                     self.pop_scope();
                 }
+            }
+            Expr::Begin {
+                body,
+                rescue_body,
+                else_body,
+                ..
+            } => {
+                for s in body { self.check_stmt(s); }
+                for s in rescue_body { self.check_stmt(s); }
+                for s in else_body { self.check_stmt(s); }
             }
             Expr::Print(inner) => self.check_expr(inner),
             Expr::Class { methods, .. } => {
@@ -396,7 +401,7 @@ impl TypeChecker {
                 }
             }
             Expr::Print(inner) => self.infer_type(inner),
-            Expr::If { .. } => None,
+            Expr::If { .. } | Expr::Begin { .. } => None,
             Expr::Class { name, .. } => Some(TypeExpr::Named(name.clone())),
             Expr::Function { .. } => Some(TypeExpr::Named("String".into())),
             Expr::Call { callee, .. } => match callee.as_ref() {

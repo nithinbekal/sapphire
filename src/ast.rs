@@ -65,12 +65,6 @@ pub enum Stmt {
         names: Vec<String>,
         values: Vec<Expr>,
     },
-    Begin {
-        body: Vec<Stmt>,
-        rescue_var: Option<String>,
-        rescue_body: Vec<Stmt>,
-        else_body: Vec<Stmt>,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -155,5 +149,12 @@ pub enum Expr {
         params: Vec<ParamDef>,
         return_type: Option<TypeExpr>,
         body: Vec<Stmt>,
+    },
+    /// `begin … rescue … else … end` — value follows Ruby (last stmt on taken path).
+    Begin {
+        body: Vec<Stmt>,
+        rescue_var: Option<String>,
+        rescue_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
     },
 }

@@ -868,6 +868,21 @@ fn test_begin_no_error_skips_rescue() {
 }
 
 #[test]
+fn test_begin_expr_value_body() {
+    let env = Environment::new();
+    exec_env("x = begin 7 end", env.clone());
+    assert_eq!(env.borrow().get("x"), Some(Value::Int(7)));
+}
+
+#[test]
+fn test_begin_expr_else_overrides_body_value() {
+    let env = Environment::new();
+    // `else` must follow `rescue` (Ruby); else value wins on success.
+    exec_env("x = begin 1 rescue e 0 else 2 end", env.clone());
+    assert_eq!(env.borrow().get("x"), Some(Value::Int(2)));
+}
+
+#[test]
 fn test_inline_rescue_in_function() {
     let env = global_env();
     exec_env("def risky(x) { raise \"bad\" if x < 0\n x * 2\nrescue e\n 0 }", env.clone());

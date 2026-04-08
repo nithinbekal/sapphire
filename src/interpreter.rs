@@ -152,43 +152,6 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             let value = evaluate(expr, env)?;
             Err(SapphireError::Raised(value))
         }
-        Stmt::Begin { body, rescue_var, rescue_body, else_body } => {
-            let mut result = Value::Nil;
-            let mut caught: Option<Value> = None;
-            for stmt in body {
-                match execute(stmt, env.clone()) {
-                    Ok(Some(v)) => result = v,
-                    Ok(None) => {}
-                    Err(SapphireError::Raised(v)) => { caught = Some(v); break; }
-                    Err(SapphireError::RuntimeError { message }) => {
-                        caught = Some(Value::Str(message));
-                        break;
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-            if let Some(err_val) = caught {
-                if let Some(var) = rescue_var {
-                    env.borrow_mut().set(var, err_val);
-                }
-                for stmt in rescue_body {
-                    match execute(stmt, env.clone()) {
-                        Ok(Some(v)) => result = v,
-                        Ok(None) => {}
-                        Err(e) => return Err(e),
-                    }
-                }
-            } else {
-                for stmt in else_body {
-                    match execute(stmt, env.clone()) {
-                        Ok(Some(v)) => result = v,
-                        Ok(None) => {}
-                        Err(e) => return Err(e),
-                    }
-                }
-            }
-            Ok(Some(result))
-        }
         Stmt::While { condition, body } => {
             'while_loop: loop {
                 let cond = evaluate(condition.clone(), env.clone())?;
@@ -1291,6 +1254,51 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     Ok(result)
                 }
             }
+        }
+        Expr::Begin {
+            body,
+            rescue_var,
+            rescue_body,
+            else_body,
+        } => {
+            let mut result = Value::Nil;
+            let mut caught: Option<Value> = None;
+            for stmt in body {
+                match execute(stmt, env.clone()) {
+                    Ok(Some(v)) => result = v,
+                    Ok(None) => {}
+                    Err(SapphireError::Raised(v)) => {
+                        caught = Some(v);
+                        break;
+                    }
+                    Err(SapphireError::RuntimeError { message }) => {
+                        caught = Some(Value::Str(message));
+                        break;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            if let Some(err_val) = caught {
+                if let Some(var) = rescue_var {
+                    env.borrow_mut().set(var, err_val);
+                }
+                for stmt in rescue_body {
+                    match execute(stmt, env.clone()) {
+                        Ok(Some(v)) => result = v,
+                        Ok(None) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+            } else {
+                for stmt in else_body {
+                    match execute(stmt, env.clone()) {
+                        Ok(Some(v)) => result = v,
+                        Ok(None) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+            Ok(result)
         }
         Expr::Print(inner) => {
             let value = evaluate(*inner, env)?;
