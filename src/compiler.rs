@@ -320,6 +320,7 @@ impl Compiler {
                     TokenKind::Minus     => self.emit(OpCode::Sub),
                     TokenKind::Star      => self.emit(OpCode::Mul),
                     TokenKind::Slash     => self.emit(OpCode::Div),
+                    TokenKind::Percent   => self.emit(OpCode::Mod),
                     TokenKind::EqEq      => self.emit(OpCode::Equal),
                     TokenKind::BangEq    => self.emit(OpCode::NotEqual),
                     TokenKind::Less      => self.emit(OpCode::Less),

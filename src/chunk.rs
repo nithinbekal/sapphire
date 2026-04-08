@@ -39,6 +39,7 @@ pub enum OpCode {
     Sub,
     Mul,
     Div,
+    Mod,
 
     // Comparison
     Equal,
