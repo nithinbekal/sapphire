@@ -211,25 +211,6 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             }
             Ok(None)
         }
-        Stmt::If { condition, then_branch, else_branch } => {
-            let cond = evaluate(condition, env.clone())?;
-            let branch = match cond {
-                Value::Bool(true)  => Some(then_branch),
-                Value::Bool(false) => else_branch,
-                _ => return Err(SapphireError::RuntimeError {
-                    message: "if condition must be a boolean".into(),
-                }),
-            };
-            if let Some(stmts) = branch {
-                let mut result = None;
-                for stmt in stmts {
-                    result = execute(stmt, env.clone())?;
-                }
-                Ok(result)
-            } else {
-                Ok(None)
-            }
-        }
     }
 }
 
@@ -1286,6 +1267,29 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                 _ => Err(SapphireError::RuntimeError {
                     message: "range bounds must be integers".into(),
                 }),
+            }
+        }
+        Expr::If { condition, then_branch, else_branch } => {
+            let cond = evaluate(*condition, env.clone())?;
+            let branch = match cond {
+                Value::Bool(true)  => Some(then_branch),
+                Value::Bool(false) => else_branch,
+                _ => return Err(SapphireError::RuntimeError {
+                    message: "if condition must be a boolean".into(),
+                }),
+            };
+            match branch {
+                None => Ok(Value::Nil),
+                Some(stmts) => {
+                    let mut result = Value::Nil;
+                    for stmt in stmts {
+                        match execute(stmt, env.clone())? {
+                            Some(v) => result = v,
+                            None => {}
+                        }
+                    }
+                    Ok(result)
+                }
             }
         }
         Expr::Print(inner) => {

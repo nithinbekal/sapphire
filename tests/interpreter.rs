@@ -172,6 +172,15 @@ fn test_if_condition() {
 }
 
 #[test]
+fn test_if_expression_rhs() {
+    let env = Environment::new();
+    exec_env("x = if true { 1 } else { 42 }", env.clone());
+    assert_eq!(env.borrow().get("x"), Some(Value::Int(1)));
+    exec_env("x = if false { 1 } else { 42 }", env.clone());
+    assert_eq!(env.borrow().get("x"), Some(Value::Int(42)));
+}
+
+#[test]
 fn test_function_def_and_call() {
     let env = global_env();
     exec_env("def add(a, b) { a + b }", env.clone());

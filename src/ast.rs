@@ -53,11 +53,6 @@ pub struct CallArg {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Expression(Expr),
-    If {
-        condition: Expr,
-        then_branch: Vec<Stmt>,
-        else_branch: Option<Vec<Stmt>>,
-    },
     While {
         condition: Expr,
         body: Vec<Stmt>,
@@ -138,6 +133,12 @@ pub enum Expr {
     Range {
         from: Box<Expr>,
         to: Box<Expr>,
+    },
+    /// `if` / `elsif` / `else` — value is the last statement in the taken branch, or `nil`.
+    If {
+        condition: Box<Expr>,
+        then_branch: Vec<Stmt>,
+        else_branch: Option<Vec<Stmt>>,
     },
     /// `print expr` — evaluates `expr`, prints, value is the printed value.
     Print(Box<Expr>),
