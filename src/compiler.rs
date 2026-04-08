@@ -228,6 +228,48 @@ impl Compiler {
                 self.compile_begin(body, rescue_var, rescue_body, else_body)?;
             }
 
+            Stmt::MultiAssign { names, values } => {
+                if names.len() != values.len() {
+                    return Err(self.error(format!(
+                        "expected {} value(s), got {}", names.len(), values.len()
+                    )));
+                }
+                // Resolve each name as an existing local/upvalue, or pre-allocate
+                // a new nil slot.  Using Ok(slot) for locals and Err(idx) for upvalues.
+                let mut targets: Vec<Result<usize, usize>> = Vec::with_capacity(names.len());
+                let depth = self.states.len() - 1;
+                for name in names {
+                    if let Some(slot) = self.resolve_local(depth, name) {
+                        targets.push(Ok(slot));
+                    } else if let Some(idx) = self.resolve_upvalue(depth, name) {
+                        targets.push(Err(idx));
+                    } else {
+                        // New variable: push nil as its stack slot, then register.
+                        let slot = self.state().locals.len();
+                        self.emit(OpCode::Nil);
+                        self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                        targets.push(Ok(slot));
+                    }
+                }
+                // Evaluate all RHS before any assignment (enables `a, b = b, a`).
+                for val_expr in values {
+                    self.expr(val_expr)?;
+                }
+                // Assign top-of-stack first so RHS values go to the right variables.
+                for t in targets.into_iter().rev() {
+                    match t {
+                        Ok(slot) => {
+                            self.emit(OpCode::SetLocal(slot));
+                            self.emit(OpCode::Pop);
+                        }
+                        Err(idx) => {
+                            self.emit(OpCode::SetUpvalue(idx));
+                            self.emit(OpCode::Pop);
+                        }
+                    }
+                }
+            }
+
             other => {
                 return Err(self.error(format!(
                     "statement not yet supported by compiler: {:?}",
@@ -803,6 +845,18 @@ mod tests {
     #[test]
     fn multiple_variables() {
         assert_eq!(eval("a = 3\nb = 4\na + b"), VmValue::Int(7));
+    }
+
+    #[test]
+    fn multi_assign_new_vars() {
+        assert_eq!(eval("a, b = 1, 2\na"), VmValue::Int(1));
+        assert_eq!(eval("a, b = 1, 2\nb"), VmValue::Int(2));
+    }
+
+    #[test]
+    fn multi_assign_swap() {
+        assert_eq!(eval("a = 1\nb = 2\na, b = b, a\na"), VmValue::Int(2));
+        assert_eq!(eval("a = 1\nb = 2\na, b = b, a\nb"), VmValue::Int(1));
     }
 
     #[test]
