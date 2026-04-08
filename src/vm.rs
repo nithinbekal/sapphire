@@ -1240,6 +1240,19 @@ impl Vm {
                         }),
                     });
                 }
+                OpCode::Mod => {
+                    let (a, b) = self.pop2()?;
+                    self.stack.push(match (&a, &b) {
+                        (VmValue::Int(x),   VmValue::Int(y))   => VmValue::Int(x % y),
+                        (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x % y),
+                        (VmValue::Int(x),   VmValue::Float(y)) => VmValue::Float(*x as f64 % y),
+                        (VmValue::Float(x), VmValue::Int(y))   => VmValue::Float(x % *y as f64),
+                        _ => return Err(VmError::TypeError {
+                            message: format!("cannot modulo {} and {}", a, b),
+                            line,
+                        }),
+                    });
+                }
 
                 OpCode::Equal    => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a == b)); }
                 OpCode::NotEqual => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a != b)); }
