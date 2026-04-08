@@ -699,3 +699,31 @@ fn is_a_instance_hierarchy() {
         VmValue::Bool(false)
     );
 }
+
+#[test]
+fn lambda_basic_call() {
+    assert_eq!(eval("f = def(x) { x * 2 }; f.call(5)"), VmValue::Int(10));
+}
+
+#[test]
+fn lambda_no_params() {
+    assert_eq!(eval("f = def() { 42 }; f.call()"), VmValue::Int(42));
+}
+
+#[test]
+fn lambda_closure_capture() {
+    assert_eq!(eval("n = 10; f = def(x) { x + n }; f.call(3)"), VmValue::Int(13));
+}
+
+#[test]
+fn lambda_return_exits_only_lambda() {
+    let src = r#"
+def outer() {
+  f = def(x) { return x * 2 }
+  result = f.call(5)
+  result + 1
+}
+outer()
+"#;
+    assert_eq!(eval(src), VmValue::Int(11));
+}

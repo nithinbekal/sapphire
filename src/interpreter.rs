@@ -50,6 +50,7 @@ fn value_type_description(value: &Value) -> String {
         Value::List(_)                     => "List".to_string(),
         Value::Map(_)                      => "Map".to_string(),
         Value::Instance { class_name, .. } => class_name.clone(),
+        Value::Lambda { .. }               => "Lambda".to_string(),
         _                                  => "unknown".to_string(),
     }
 }
@@ -91,6 +92,14 @@ pub fn global_env() -> EnvRef {
                 .unwrap_or_else(|e| panic!("{} failed to execute: {}", label, e));
         }
     }
+    let lambda_class = Value::Class {
+        name: "Lambda".to_string(),
+        superclass: Some("Object".to_string()),
+        fields: Vec::new(),
+        methods: Vec::new(),
+        closure: env.clone(),
+    };
+    env.borrow_mut().set("Lambda".to_string(), lambda_class);
     env.borrow_mut().freeze("Object");
     env.borrow_mut().freeze("Nil");
     env.borrow_mut().freeze("Num");
@@ -100,6 +109,7 @@ pub fn global_env() -> EnvRef {
     env.borrow_mut().freeze("Bool");
     env.borrow_mut().freeze("List");
     env.borrow_mut().freeze("Map");
+    env.borrow_mut().freeze("Lambda");
     // Establish an implicit top-level 'self' (main), an instance of Object,
     // so that bare calls to top-level methods resolve via the implicit-self fallback.
     let main_obj = Value::Instance {
@@ -194,6 +204,7 @@ fn evaluate_impl(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             Some(v) => Ok(v),
             None => Ok(Value::Nil),
         },
+        Expr::Lambda { params, body } => Ok(Value::Lambda { params, body, closure: env }),
         Expr::Literal(v) => Ok(v),
         Expr::Grouping(inner) => evaluate(*inner, env),
         Expr::Variable(name) => {
@@ -295,7 +306,7 @@ fn evaluate_impl(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                             message: format!("cannot convert {} to float", obj),
                         }),
                     },
-                    "is_a?" => return Ok(Value::NativeMethod {
+                    "is_a?" | "call" => return Ok(Value::NativeMethod {
                         receiver: Box::new(obj),
                         name,
                     }),
@@ -545,6 +556,16 @@ fn evaluate_impl(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         message: format!("unknown class method '{}'", name),
                     }),
                 };
+            }
+
+            // Lambda: only `.call` is valid
+            if let Value::Lambda { .. } = &obj {
+                if name == "call" {
+                    return Ok(Value::NativeMethod { receiver: Box::new(obj), name });
+                }
+                return Err(SapphireError::RuntimeError {
+                    message: format!("undefined method '{}' on lambda", name),
+                });
             }
 
             Err(SapphireError::RuntimeError {
@@ -1087,6 +1108,29 @@ fn evaluate_impl(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                     }
                                 }
                             }
+                        }
+                        (Value::Lambda { params, body, closure }, "call") => {
+                            if params.len() != args.len() {
+                                return Err(SapphireError::RuntimeError {
+                                    message: format!("expected {} argument(s), got {}", params.len(), args.len()),
+                                });
+                            }
+                            let lambda_env = Environment::new_child(closure);
+                            let frame_id = next_frame_id();
+                            lambda_env.borrow_mut().set("__frame_id__".to_string(), Value::Int(frame_id as i64));
+                            for (param, val) in params.iter().zip(args.iter()) {
+                                lambda_env.borrow_mut().set(param.clone(), val.clone());
+                            }
+                            let mut result = Value::Nil;
+                            for expr in body {
+                                match execute(expr, lambda_env.clone()) {
+                                    Ok(Some(v)) => result = v,
+                                    Ok(None) => {}
+                                    Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => return Ok(v),
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            Ok(result)
                         }
                         _ => Err(SapphireError::RuntimeError {
                             message: "unknown native method".into(),

@@ -153,4 +153,9 @@ pub enum Expr {
         names: Vec<String>,
         values: Vec<Expr>,
     },
+    /// Anonymous `def(params) { body }` — a first-class lambda value.
+    Lambda {
+        params: Vec<String>,
+        body: Vec<Expr>,
+    },
 }

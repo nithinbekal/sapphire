@@ -1318,3 +1318,36 @@ fn test_method_return_type_rejects_wrong_type() {
     let err = run_err(r#"class Calc { def num() -> Int { "nope" } }; Calc.new().num()"#);
     assert!(matches!(err, SapphireError::TypeError { .. }));
 }
+
+#[test]
+fn test_lambda_basic_call() {
+    assert_eq!(run_all("f = def(x) { x * 2 }; f.call(5)"), Value::Int(10));
+}
+
+#[test]
+fn test_lambda_no_params() {
+    assert_eq!(run_all("f = def() { 42 }; f.call()"), Value::Int(42));
+}
+
+#[test]
+fn test_lambda_closure_capture() {
+    assert_eq!(run_all("n = 10; f = def(x) { x + n }; f.call(3)"), Value::Int(13));
+}
+
+#[test]
+fn test_lambda_return_exits_only_lambda() {
+    let src = r#"
+def outer() {
+  f = def(x) { return x * 2 }
+  result = f.call(5)
+  result + 1
+}
+outer()
+"#;
+    assert_eq!(run_all(src), Value::Int(11));
+}
+
+#[test]
+fn test_lambda_class() {
+    assert_eq!(run_all("f = def(x) { x }; f.class.name"), Value::Str("Lambda".into()));
+}

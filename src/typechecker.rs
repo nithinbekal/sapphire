@@ -110,6 +110,11 @@ impl TypeChecker {
                 for s in body { self.check_expr(s); }
                 self.pop_scope();
             }
+            Expr::Lambda { body, .. } => {
+                self.push_scope();
+                for s in body { self.check_expr(s); }
+                self.pop_scope();
+            }
             Expr::Raise(inner) => self.check_expr(inner),
             Expr::Break(inner) | Expr::Next(inner) => self.check_expr(inner),
             Expr::MultiAssign { names, values } => {
@@ -348,6 +353,7 @@ impl TypeChecker {
             | Expr::Break(_)
             | Expr::Next(_)
             | Expr::Raise(_) => None,
+            Expr::Lambda { .. } => None,
             Expr::Class { name, .. } => Some(TypeExpr::Named(name.clone())),
             Expr::Function { .. } => Some(TypeExpr::Named("String".into())),
             Expr::Call { callee, .. } => match callee.as_ref() {
