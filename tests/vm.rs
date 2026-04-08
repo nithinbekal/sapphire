@@ -10,6 +10,15 @@ fn eval(src: &str) -> VmValue {
     Vm::new(func).run().expect("vm error").expect("empty stack")
 }
 
+fn eval_with_stdlib(src: &str) -> VmValue {
+    let tokens = Lexer::new(src).scan_tokens();
+    let stmts = Parser::new(tokens).parse().expect("parse error");
+    let func = compile(&stmts).expect("compile error");
+    let mut vm = Vm::new(func);
+    vm.load_stdlib().expect("stdlib");
+    vm.run().expect("vm error").expect("empty stack")
+}
+
 #[test]
 fn int_literal() {
     assert_eq!(eval("42"), VmValue::Int(42));
@@ -621,4 +630,22 @@ fn nil_bool_methods() {
     assert_eq!(eval("false.nil?()"), VmValue::Bool(false));
     assert_eq!(eval("nil.to_s()"), VmValue::Str("".into()));
     assert_eq!(eval("true.to_s()"), VmValue::Str("true".into()));
+}
+
+#[test]
+fn is_a_instance_hierarchy() {
+    let base = "class Animal { attr name }\nclass Dog < Animal { attr breed }\nd = Dog.new(name: \"Rex\", breed: \"Lab\")\n";
+    assert_eq!(
+        eval_with_stdlib(&(base.to_string() + "d.is_a?(Dog)")),
+        VmValue::Bool(true)
+    );
+    assert_eq!(
+        eval_with_stdlib(&(base.to_string() + "d.is_a?(Animal)")),
+        VmValue::Bool(true)
+    );
+    let unrelated = "class Animal { attr name }\nclass Dog < Animal { attr breed }\nclass Cat {}\nd = Dog.new(name: \"Rex\", breed: \"Lab\")\n";
+    assert_eq!(
+        eval_with_stdlib(&(unrelated.to_string() + "d.is_a?(Cat)")),
+        VmValue::Bool(false)
+    );
 }
