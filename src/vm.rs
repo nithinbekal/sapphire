@@ -267,6 +267,7 @@ impl Vm {
         const SOURCES: &[(&str, &str)] = &[
             ("stdlib/object.spr", include_str!("../stdlib/object.spr")),
             ("stdlib/nil.spr",    include_str!("../stdlib/nil.spr")),
+            ("stdlib/num.spr",    include_str!("../stdlib/num.spr")),
             ("stdlib/int.spr",    include_str!("../stdlib/int.spr")),
             ("stdlib/float.spr",  include_str!("../stdlib/float.spr")),
             ("stdlib/string.spr", include_str!("../stdlib/string.spr")),

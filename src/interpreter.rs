@@ -15,6 +15,7 @@ use crate::value::Value;
 
 const OBJECT_STDLIB: &str = include_str!("../stdlib/object.spr");
 const NIL_STDLIB: &str = include_str!("../stdlib/nil.spr");
+const NUM_STDLIB: &str = include_str!("../stdlib/num.spr");
 const INT_STDLIB: &str = include_str!("../stdlib/int.spr");
 const FLOAT_STDLIB: &str = include_str!("../stdlib/float.spr");
 const STRING_STDLIB: &str = include_str!("../stdlib/string.spr");
@@ -28,6 +29,7 @@ fn check_type(value: &Value, te: &TypeExpr) -> bool {
         TypeExpr::Named(name) => match name.as_str() {
             "Int"    => matches!(value, Value::Int(_)),
             "Float"  => matches!(value, Value::Float(_)),
+            "Num"    => matches!(value, Value::Int(_) | Value::Float(_)),
             "String" => matches!(value, Value::Str(_)),
             "Bool"   => matches!(value, Value::Bool(_)),
             "Nil"    => matches!(value, Value::Nil),
@@ -73,6 +75,7 @@ pub fn global_env() -> EnvRef {
     for (src, label) in [
         (OBJECT_STDLIB, "stdlib/object.spr"),
         (NIL_STDLIB,    "stdlib/nil.spr"),
+        (NUM_STDLIB,    "stdlib/num.spr"),
         (INT_STDLIB,    "stdlib/int.spr"),
         (FLOAT_STDLIB,  "stdlib/float.spr"),
         (STRING_STDLIB, "stdlib/string.spr"),
@@ -90,6 +93,7 @@ pub fn global_env() -> EnvRef {
     }
     env.borrow_mut().freeze("Object");
     env.borrow_mut().freeze("Nil");
+    env.borrow_mut().freeze("Num");
     env.borrow_mut().freeze("Int");
     env.borrow_mut().freeze("Float");
     env.borrow_mut().freeze("String");
@@ -2312,6 +2316,35 @@ mod tests {
         assert_eq!(run_env("c.is_a?(B)", env.clone()), Value::Bool(true));
         assert_eq!(run_env("c.is_a?(A)", env.clone()), Value::Bool(true));
         assert_eq!(run_env("c.is_a?(Object)", env.clone()), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_num_is_a_superclass_of_int_and_float() {
+        let env = global_env();
+        assert_eq!(run_env("1.is_a?(Num)", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("1.0.is_a?(Num)", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("\"hi\".is_a?(Num)", env.clone()), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_num_methods_on_int_and_float() {
+        let env = global_env();
+        assert_eq!(run_env("0.zero?()", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("0.0.zero?()", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("3.positive?()", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("(-1.0).negative?()", env.clone()), Value::Bool(true));
+        assert_eq!(run_env("(-5).abs()", env.clone()), Value::Int(5));
+        assert_eq!(run_env("(-2.5).abs()", env.clone()), Value::Float(2.5));
+        assert_eq!(run_env("10.clamp(1, 5)", env.clone()), Value::Int(5));
+        assert_eq!(run_env("0.clamp(1, 5)", env.clone()), Value::Int(1));
+    }
+
+    #[test]
+    fn test_num_type_annotation_accepts_int_and_float() {
+        let env = global_env();
+        exec_env("def double(x: Num) { x + x }", env.clone());
+        assert_eq!(run_env("double(3)", env.clone()), Value::Int(6));
+        assert_eq!(run_env("double(1.5)", env.clone()), Value::Float(3.0));
     }
 
     #[test]
