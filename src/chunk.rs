@@ -120,6 +120,9 @@ pub enum OpCode {
     /// Method call: receiver is at stack[len - arg_count - 1].
     /// `name_idx` is a Str constant; looks up the method, pushes a new frame.
     Invoke(usize, usize),
+    /// Like Invoke but dispatches to the superclass's method.
+    /// Uses the current frame's class name to locate the superclass.
+    SuperInvoke(usize, usize),
     /// Push `self` (slot 0) — emitted for `SelfExpr` inside methods.
     GetSelf,
 
@@ -181,11 +184,12 @@ pub enum Constant {
     Float(f64),
     Str(String),
     Function(Rc<Function>),
-    /// Static descriptor for a class: its name, field names (in declaration
-    /// order), and method names (in the same order as the closures that will
-    /// be popped off the stack by `DefClass`).
+    /// Static descriptor for a class: its name, optional superclass name,
+    /// field names (in declaration order), and method names (in the same
+    /// order as the closures that will be popped off the stack by `DefClass`).
     ClassDesc {
         name:         String,
+        superclass:   Option<String>,
         field_names:  Vec<String>,
         method_names: Vec<String>,
     },
@@ -198,6 +202,7 @@ impl std::fmt::Display for Constant {
             Constant::Float(n)            => write!(f, "{}", n),
             Constant::Str(s)              => write!(f, "{:?}", s),
             Constant::Function(func)      => write!(f, "<fn {}>", func.name),
+            Constant::ClassDesc { name, superclass: Some(s), .. } => write!(f, "<class {} extends {}>", name, s),
             Constant::ClassDesc { name, .. } => write!(f, "<class {}>", name),
         }
     }
@@ -285,6 +290,7 @@ impl Chunk {
                 OpCode::GetFieldSafe(idx)       => println!("GET_FIELD_SAFE      {:4}  ({})", idx, self.constants[*idx]),
                 OpCode::SetField(idx)           => println!("SET_FIELD           {:4}  ({})", idx, self.constants[*idx]),
                 OpCode::Invoke(n, argc)         => println!("INVOKE              {:4}  argc={}", n, argc),
+                OpCode::SuperInvoke(n, argc)    => println!("SUPER_INVOKE        {:4}  argc={}", n, argc),
                 OpCode::JumpIfFalseKeep(off)    => println!("JUMP_IF_FALSE_KEEP  {:4}", off),
                 OpCode::JumpIfTrueKeep(off)     => println!("JUMP_IF_TRUE_KEEP   {:4}", off),
                 other                           => println!("{:?}", other),

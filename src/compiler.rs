@@ -205,8 +205,8 @@ impl Compiler {
                 self.emit(OpCode::Print);
             }
 
-            Stmt::Class { name, fields, methods, .. } => {
-                self.compile_class(name, fields, methods)?;
+            Stmt::Class { name, superclass, fields, methods } => {
+                self.compile_class(name, superclass.as_deref(), fields, methods)?;
             }
 
             Stmt::Raise(expr) => {
@@ -507,6 +507,18 @@ impl Compiler {
                 Ok(())
             }
 
+            Expr::Super { method, args, block: _ } => {
+                // Push self (slot 0 of the current method frame).
+                self.emit(OpCode::GetSelf);
+                let arg_count = args.len();
+                for arg in args {
+                    self.expr(&arg.value)?;
+                }
+                let name_idx = self.state_mut().chunk.add_constant(Constant::Str(method.clone()));
+                self.emit(OpCode::SuperInvoke(name_idx, arg_count));
+                Ok(())
+            }
+
             other => Err(self.error(format!(
                 "expression not yet supported by compiler: {:?}",
                 std::mem::discriminant(other)
@@ -719,9 +731,10 @@ impl Compiler {
     /// `DefClass` which collects them into a Class value stored as a local.
     fn compile_class(
         &mut self,
-        name:    &str,
-        fields:  &[crate::ast::FieldDef],
-        methods: &[MethodDef],
+        name:       &str,
+        superclass: Option<&str>,
+        fields:     &[crate::ast::FieldDef],
+        methods:    &[MethodDef],
     ) -> Result<(), CompileError> {
         let line = self.state().current_line;
 
@@ -742,7 +755,8 @@ impl Compiler {
         let field_names:  Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
         let method_names: Vec<String> = methods.iter().map(|m| m.name.clone()).collect();
         let desc_idx = self.state_mut().chunk.add_constant(Constant::ClassDesc {
-            name: name.to_string(),
+            name:       name.to_string(),
+            superclass: superclass.map(|s| s.to_string()),
             field_names,
             method_names,
         });
@@ -1133,6 +1147,43 @@ m.add(3, 4)";
 d = Dog.new(name: \"Rex\")
 d.bark()";
         assert_eq!(eval(src), VmValue::Str("Rex".into()));
+    }
+
+    #[test]
+    fn class_inheritance_method() {
+        let src = "class Animal {
+  def speak() { \"animal\" }
+}
+class Dog < Animal {
+  def fetch() { \"fetching\" }
+}
+d = Dog.new()
+d.speak()";
+        assert_eq!(eval(src), VmValue::Str("animal".into()));
+    }
+
+    #[test]
+    fn super_method_call() {
+        let src = "class Animal {
+  def speak() { \"animal\" }
+}
+class Dog < Animal {
+  def speak() { \"dog:\" + super.speak() }
+}
+Dog.new().speak()";
+        assert_eq!(eval(src), VmValue::Str("dog:animal".into()));
+    }
+
+    #[test]
+    fn super_with_args() {
+        let src = "class Base {
+  def add(x, y) { x + y }
+}
+class Child < Base {
+  def add(x, y) { super.add(x, y) + 1 }
+}
+Child.new().add(2, 3)";
+        assert_eq!(eval(src), VmValue::Int(6));
     }
 
     #[test]

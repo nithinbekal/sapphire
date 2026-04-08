@@ -53,9 +53,10 @@ pub enum VmValue {
     Range { from: i64, to: i64 },
     /// A compiled class: holds the static field list and the method table.
     Class {
-        name:    String,
-        fields:  Vec<String>,
-        methods: Rc<HashMap<String, VmMethod>>,
+        name:       String,
+        superclass: Option<String>,
+        fields:     Vec<String>,
+        methods:    Rc<HashMap<String, VmMethod>>,
     },
     /// A live instance of a class.
     Instance {
@@ -65,11 +66,14 @@ pub enum VmValue {
     },
 }
 
-/// A compiled method: a function together with any upvalues it closed over.
+/// A compiled method: a function together with any upvalues it closed over,
+/// and the name of the class that originally defined it (used by `super`).
 #[derive(Debug, Clone)]
 pub struct VmMethod {
-    pub function: Rc<Function>,
-    pub upvalues: Vec<Upvalue>,
+    pub function:   Rc<Function>,
+    pub upvalues:   Vec<Upvalue>,
+    /// Name of the class this method was defined in; empty for block closures.
+    pub defined_in: String,
 }
 
 impl PartialEq for VmValue {
@@ -194,9 +198,23 @@ struct CallFrame {
     is_block_caller: bool,
     /// Active rescue handlers within this frame (push on BeginRescue, pop on PopRescue).
     rescues: Vec<RescueInfo>,
+    /// The class that defines the method running in this frame; None for
+    /// non-method frames (plain functions, blocks).  Used by `SuperInvoke`.
+    class_name: Option<String>,
 }
 
 // ── VM ────────────────────────────────────────────────────────────────────────
+
+/// Per-class metadata stored by DefClass; used by SuperInvoke to walk
+/// the inheritance chain without keeping the Class value on the stack.
+struct ClassEntry {
+    superclass: Option<String>,
+    /// The merged (inherited + own) field list for this class.
+    fields:     Vec<String>,
+    /// This class's own methods only (not inherited), keyed by name.
+    /// SuperInvoke looks here when dispatching to a specific class level.
+    methods:    Rc<HashMap<String, VmMethod>>,
+}
 
 pub struct Vm {
     frames:        Vec<CallFrame>,
@@ -204,6 +222,9 @@ pub struct Vm {
     /// All upvalues that still point into the live stack (open upvalues),
     /// kept so we can close them when a frame exits.
     open_upvalues: Vec<Upvalue>,
+    /// Registry of every class defined so far, keyed by name.  Stores each
+    /// class's own (non-merged) methods so SuperInvoke can dispatch to them.
+    classes: HashMap<String, ClassEntry>,
 }
 
 impl Vm {
@@ -211,8 +232,9 @@ impl Vm {
         let frame = CallFrame {
             function, upvalues: vec![], ip: 0, base: 0,
             block: None, is_block_caller: false, rescues: vec![],
+            class_name: None,
         };
-        Vm { frames: vec![frame], stack: Vec::new(), open_upvalues: Vec::new() }
+        Vm { frames: vec![frame], stack: Vec::new(), open_upvalues: Vec::new(), classes: HashMap::new() }
     }
 
     pub fn run(&mut self) -> Result<Option<VmValue>, VmError> {
@@ -453,29 +475,58 @@ impl Vm {
                 // ── Class opcodes ────────────────────────────────────────────
 
                 OpCode::DefClass(desc_idx) => {
-                    let (class_name, field_names, method_names) = {
+                    let (class_name, superclass_name, own_field_names, method_names) = {
                         let consts = &self.frames.last().unwrap().function.chunk.constants;
                         match &consts[desc_idx] {
-                            Constant::ClassDesc { name, field_names, method_names } =>
-                                (name.clone(), field_names.clone(), method_names.clone()),
+                            Constant::ClassDesc { name, superclass, field_names, method_names } =>
+                                (name.clone(), superclass.clone(), field_names.clone(), method_names.clone()),
                             _ => panic!("DefClass: expected ClassDesc constant"),
                         }
                     };
                     let n = method_names.len();
                     let start = self.stack.len().checked_sub(n).ok_or(VmError::StackUnderflow)?;
                     let closures: Vec<VmValue> = self.stack.drain(start..).collect();
-                    let mut methods = HashMap::new();
-                    for (name, closure) in method_names.iter().zip(closures) {
+                    // Build this class's own methods with defined_in = this class name.
+                    let mut own_methods: HashMap<String, VmMethod> = HashMap::new();
+                    for (mname, closure) in method_names.iter().zip(closures) {
                         match closure {
-                            VmValue::Closure { function, upvalues } =>
-                                { methods.insert(name.clone(), VmMethod { function, upvalues }); }
+                            VmValue::Closure { function, upvalues } => {
+                                own_methods.insert(mname.clone(), VmMethod {
+                                    function, upvalues, defined_in: class_name.clone(),
+                                });
+                            }
                             _ => panic!("DefClass: method is not a closure"),
                         }
                     }
+                    // Merge inherited fields and methods (parent first, child overrides).
+                    let (merged_fields, merged_methods) = if let Some(ref sname) = superclass_name {
+                        let (parent_fields, parent_methods) = match self.classes.get(sname) {
+                            Some(entry) => (entry.fields.clone(), (*entry.methods).clone()),
+                            None => return Err(VmError::TypeError {
+                                message: format!("superclass '{}' not found", sname),
+                                line,
+                            }),
+                        };
+                        let mut mf = parent_fields;
+                        mf.extend(own_field_names);
+                        let mut mm = parent_methods;
+                        mm.extend(own_methods.clone());
+                        (mf, mm)
+                    } else {
+                        (own_field_names, own_methods.clone())
+                    };
+                    // Register in the class registry: store own methods (not merged)
+                    // so SuperInvoke can dispatch to the correct class level.
+                    self.classes.insert(class_name.clone(), ClassEntry {
+                        superclass: superclass_name.clone(),
+                        fields:     merged_fields.clone(),
+                        methods:    Rc::new(own_methods),
+                    });
                     self.stack.push(VmValue::Class {
-                        name:    class_name,
-                        fields:  field_names,
-                        methods: Rc::new(methods),
+                        name:       class_name,
+                        superclass: superclass_name,
+                        fields:     merged_fields,
+                        methods:    Rc::new(merged_methods),
                     });
                 }
 
@@ -485,7 +536,7 @@ impl Vm {
                         .checked_sub(1 + n_pairs * 2)
                         .ok_or(VmError::StackUnderflow)?;
                     let (class_name, field_decls, methods) = match &self.stack[base] {
-                        VmValue::Class { name, fields, methods } =>
+                        VmValue::Class { name, fields, methods, .. } =>
                             (name.clone(), fields.clone(), methods.clone()),
                         other => return Err(VmError::TypeError {
                             message: format!("'{}' is not a class", other),
@@ -611,11 +662,64 @@ impl Vm {
                             line,
                         });
                     }
+                    let class_name = Some(method.defined_in.clone());
                     self.frames.push(CallFrame {
                         function: method.function,
                         upvalues: method.upvalues,
                         ip: 0, base: recv_slot,
                         block: None, is_block_caller: false, rescues: vec![],
+                        class_name,
+                    });
+                }
+
+                OpCode::SuperInvoke(name_idx, arg_count) => {
+                    let method_name = match &self.frames.last().unwrap().function.chunk.constants[name_idx] {
+                        Constant::Str(s) => s.clone(),
+                        _ => panic!("SuperInvoke: expected Str constant"),
+                    };
+                    let current_class = self.frames.last().unwrap().class_name.clone()
+                        .ok_or_else(|| VmError::TypeError {
+                            message: "super used outside of a method".into(), line,
+                        })?;
+                    let super_name = match self.classes.get(&current_class) {
+                        Some(ClassEntry { superclass: Some(s), .. }) => s.clone(),
+                        Some(ClassEntry { superclass: None,    .. }) => return Err(VmError::TypeError {
+                            message: format!("'{}' has no superclass", current_class), line,
+                        }),
+                        None => return Err(VmError::TypeError {
+                            message: format!("class '{}' not in registry", current_class), line,
+                        }),
+                    };
+                    let method = match self.classes.get(&super_name) {
+                        Some(entry) => entry.methods.get(&method_name).cloned()
+                            .ok_or_else(|| VmError::TypeError {
+                                message: format!("superclass '{}' has no method '{}'", super_name, method_name),
+                                line,
+                            })?,
+                        None => return Err(VmError::TypeError {
+                            message: format!("superclass '{}' not in registry", super_name), line,
+                        }),
+                    };
+                    let recv_slot = self.stack.len()
+                        .checked_sub(arg_count + 1)
+                        .ok_or(VmError::StackUnderflow)?;
+                    if method.function.arity != arg_count {
+                        return Err(VmError::TypeError {
+                            message: format!(
+                                "method '{}' expects {} arg(s), got {}",
+                                method_name, method.function.arity, arg_count
+                            ),
+                            line,
+                        });
+                    }
+                    // Use super_name as the class for the new frame so chained
+                    // super calls continue up the inheritance chain correctly.
+                    self.frames.push(CallFrame {
+                        function: method.function,
+                        upvalues: method.upvalues,
+                        ip: 0, base: recv_slot,
+                        block: None, is_block_caller: false, rescues: vec![],
+                        class_name: Some(super_name),
                     });
                 }
 
@@ -632,7 +736,7 @@ impl Vm {
                     let block_val = self.pop()?;
                     let block = match block_val {
                         VmValue::Closure { function, upvalues } =>
-                            Some(VmMethod { function, upvalues }),
+                            Some(VmMethod { function, upvalues, defined_in: String::new() }),
                         VmValue::Nil => None,
                         other => return Err(VmError::TypeError {
                             message: format!("block must be a closure, got {}", other),
@@ -662,6 +766,7 @@ impl Vm {
                     self.frames.push(CallFrame {
                         function, upvalues, ip: 0, base: fn_slot,
                         block, is_block_caller: true, rescues: vec![],
+                        class_name: None,
                     });
                 }
 
@@ -670,7 +775,7 @@ impl Vm {
                     let block_val = self.pop()?;
                     let block = match block_val {
                         VmValue::Closure { function, upvalues } =>
-                            Some(VmMethod { function, upvalues }),
+                            Some(VmMethod { function, upvalues, defined_in: String::new() }),
                         VmValue::Nil => None,
                         other => return Err(VmError::TypeError {
                             message: format!("block must be a closure, got {}", other),
@@ -716,11 +821,13 @@ impl Vm {
                             line,
                         });
                     }
+                    let class_name = Some(method.defined_in.clone());
                     self.frames.push(CallFrame {
                         function: method.function,
                         upvalues: method.upvalues,
                         ip: 0, base: recv_slot,
                         block, is_block_caller: true, rescues: vec![],
+                        class_name,
                     });
                 }
 
@@ -754,6 +861,7 @@ impl Vm {
                         ip:    0,
                         base:  args_start,
                         block: None, is_block_caller: false, rescues: vec![],
+                        class_name: None,
                     });
                 }
 
@@ -872,6 +980,7 @@ impl Vm {
                     self.frames.push(CallFrame {
                         function, upvalues, ip: 0, base,
                         block: None, is_block_caller: false, rescues: vec![],
+                        class_name: None,
                     });
                 }
 
@@ -1080,6 +1189,7 @@ impl Vm {
             upvalues: block.upvalues.clone(),
             ip: 0, base,
             block: None, is_block_caller: false, rescues: vec![],
+            class_name: None,
         });
         // run_inner stops when the block's frame returns (frames.len() drops to min_depth)
         // but does NOT truncate the stack back to `base` — we must do that here.
