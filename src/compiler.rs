@@ -123,6 +123,21 @@ impl Compiler {
                 self.expr(expr)?;
                 self.emit(OpCode::Return);
             }
+            Stmt::Print(expr) => {
+                self.expr(expr)?;
+                self.emit(OpCode::Print);
+                self.emit(OpCode::Return);
+            }
+            Stmt::Class { .. } => {
+                self.stmt(last)?;
+                self.emit(OpCode::Return);
+            }
+            Stmt::Function { name, .. } => {
+                self.stmt(last)?;
+                let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                self.emit(OpCode::Constant(idx));
+                self.emit(OpCode::Return);
+            }
             other => {
                 self.stmt(other)?;
                 self.emit(OpCode::Nil);
@@ -203,6 +218,7 @@ impl Compiler {
             Stmt::Print(expr) => {
                 self.expr(expr)?;
                 self.emit(OpCode::Print);
+                self.emit(OpCode::Pop);
             }
 
             Stmt::Class { name, superclass, fields, methods } => {

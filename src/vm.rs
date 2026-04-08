@@ -1117,6 +1117,7 @@ impl Vm {
                 OpCode::Print => {
                     let val = self.pop()?;
                     println!("{}", val);
+                    self.stack.push(val);
                 }
 
                 OpCode::Call(arg_count) => {

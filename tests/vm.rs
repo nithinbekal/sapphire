@@ -509,8 +509,30 @@ fn or_returns_rhs_when_falsy() {
 }
 
 #[test]
-fn print_statement_returns_nil() {
+fn print_does_not_change_result_when_not_last_statement() {
     assert_eq!(eval("print 42\n99"), VmValue::Int(99));
+}
+
+#[test]
+fn implicit_return_last_print_passes_printed_value() {
+    assert_eq!(
+        eval("def f() { print 42 }\nf()"),
+        VmValue::Int(42)
+    );
+}
+
+#[test]
+fn implicit_return_last_def_returns_method_name() {
+    assert_eq!(
+        eval("def outer() { def inner() { 1 } }\nouter()"),
+        VmValue::Str("inner".into())
+    );
+}
+
+#[test]
+fn implicit_return_last_class_returns_class() {
+    let v = eval_with_stdlib("class ImplicitRetClass {}");
+    assert!(matches!(v, VmValue::Class { ref name, .. } if name == "ImplicitRetClass"));
 }
 
 #[test]

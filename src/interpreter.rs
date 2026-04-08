@@ -115,7 +115,7 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
         Stmt::Print(expr) => {
             let value = evaluate(expr, env)?;
             println!("{}", value);
-            Ok(None)
+            Ok(Some(value))
         }
         Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
         Stmt::Class { name, superclass, fields, methods } => {
@@ -149,9 +149,9 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
                 merged_methods.push(method);
             }
             let class = Value::Class { name: name.clone(), superclass: superclass.clone(), fields: merged_fields, methods: merged_methods, closure: env.clone() };
-            env.borrow_mut().set(name.clone(), class);
+            env.borrow_mut().set(name.clone(), class.clone());
             env.borrow_mut().freeze(&name);
-            Ok(None)
+            Ok(Some(class))
         }
         Stmt::Function { name, params, return_type, body } => {
             let method = MethodDef { name: name.clone(), params, return_type, body, private: false };
@@ -167,7 +167,7 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
                 _ => return Err(SapphireError::RuntimeError { message: "Object is not a class".into() }),
             };
             env.borrow_mut().assign("Object", updated);
-            Ok(None)
+            Ok(Some(Value::Str(name.clone())))
         }
         Stmt::Return(expr) => {
             let value = evaluate(expr, env.clone())?;
