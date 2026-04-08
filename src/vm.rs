@@ -532,6 +532,27 @@ impl Vm {
                     }
                 }
 
+                OpCode::GetFieldSafe(idx) => {
+                    let name = match &self.frames.last().unwrap().function.chunk.constants[idx] {
+                        Constant::Str(s) => s.clone(),
+                        _ => panic!("GetFieldSafe: expected Str constant"),
+                    };
+                    let obj = self.pop()?;
+                    match obj {
+                        VmValue::Nil => {
+                            self.stack.push(VmValue::Nil);
+                        }
+                        VmValue::Instance { ref fields, .. } => {
+                            let val = fields.borrow().get(&name).cloned().unwrap_or(VmValue::Nil);
+                            self.stack.push(val);
+                        }
+                        other => return Err(VmError::TypeError {
+                            message: format!("cannot get field '{}' on {}", name, other),
+                            line,
+                        }),
+                    }
+                }
+
                 OpCode::SetField(idx) => {
                     let name = match &self.frames.last().unwrap().function.chunk.constants[idx] {
                         Constant::Str(s) => s.clone(),

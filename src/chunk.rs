@@ -113,6 +113,8 @@ pub enum OpCode {
     /// Pop object, look up field `const_idx` (a Str constant) in instance
     /// fields, push the value (or Nil if absent).
     GetField(usize),
+    /// Like GetField but returns Nil (instead of erroring) when the object is Nil.
+    GetFieldSafe(usize),
     /// Stack: [object, value]; set instance field `const_idx`; push value.
     SetField(usize),
     /// Method call: receiver is at stack[len - arg_count - 1].
@@ -280,6 +282,7 @@ impl Chunk {
                 OpCode::DefClass(idx)           => println!("DEF_CLASS           {:4}  ({})", idx, self.constants[*idx]),
                 OpCode::NewInstance(n)          => println!("NEW_INSTANCE        {:4}", n),
                 OpCode::GetField(idx)           => println!("GET_FIELD           {:4}  ({})", idx, self.constants[*idx]),
+                OpCode::GetFieldSafe(idx)       => println!("GET_FIELD_SAFE      {:4}  ({})", idx, self.constants[*idx]),
                 OpCode::SetField(idx)           => println!("SET_FIELD           {:4}  ({})", idx, self.constants[*idx]),
                 OpCode::Invoke(n, argc)         => println!("INVOKE              {:4}  argc={}", n, argc),
                 OpCode::JumpIfFalseKeep(off)    => println!("JUMP_IF_FALSE_KEEP  {:4}", off),

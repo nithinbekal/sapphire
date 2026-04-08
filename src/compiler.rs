@@ -433,6 +433,13 @@ impl Compiler {
                 Ok(())
             }
 
+            Expr::SafeGet { object, name } => {
+                self.expr(object)?;
+                let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                self.emit(OpCode::GetFieldSafe(idx));
+                Ok(())
+            }
+
             Expr::Set { object, name, value } => {
                 self.expr(object)?;
                 self.expr(value)?;
@@ -1125,6 +1132,21 @@ m.add(3, 4)";
 }
 d = Dog.new(name: \"Rex\")
 d.bark()";
+        assert_eq!(eval(src), VmValue::Str("Rex".into()));
+    }
+
+    #[test]
+    fn safe_get_on_nil_returns_nil() {
+        assert_eq!(eval("x = nil\nx&.name"), VmValue::Nil);
+    }
+
+    #[test]
+    fn safe_get_on_instance_returns_field() {
+        let src = "class Dog {
+  attr name
+}
+d = Dog.new(name: \"Rex\")
+d&.name";
         assert_eq!(eval(src), VmValue::Str("Rex".into()));
     }
 
