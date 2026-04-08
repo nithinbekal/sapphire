@@ -1,0 +1,49 @@
+# error_handling.spr — raise, begin/rescue/else/end
+
+# Basic begin/rescue
+begin
+  raise "something went wrong"
+rescue e
+  print "Caught: #{e}"
+end
+
+# else runs only when no exception is raised
+begin
+  x = 10 / 2
+rescue e
+  print "division failed: #{e}"
+else
+  print "result: #{x}"
+end
+
+# Rescue a runtime error (division by zero)
+begin
+  result = 1 / 0
+rescue e
+  print "runtime error caught: #{e}"
+end
+
+# Raise inside a function with rescue at the call site
+def parse_age(s: String) -> Int {
+  age = s.to_i
+  raise "age must be positive" if age <= 0
+  age
+}
+
+begin
+  print parse_age("25")
+  print parse_age("0")
+rescue e
+  print "bad input: #{e}"
+end
+
+# Inline rescue inside a function body
+def safe_divide(a: Int, b: Int) -> Int {
+  a / b
+rescue e
+  print "cannot divide by zero, returning 0"
+  0
+}
+
+print safe_divide(10, 2)
+print safe_divide(10, 0)

@@ -1,0 +1,66 @@
+# functions.spr — definitions, type annotations, closures, blocks, yield
+
+# Basic function
+def add(a, b) {
+  a + b
+}
+print add(3, 4)
+
+# Type annotations on parameters and return type
+def clamp(value: Int, min: Int, max: Int) -> Int {
+  if value < min {
+    min
+  } elsif value > max {
+    max
+  } else {
+    value
+  }
+}
+print clamp(5, 1, 10)
+print clamp(-3, 1, 10)
+print clamp(99, 1, 10)
+
+# Early return
+def abs(n: Int) -> Int {
+  return -n if n < 0
+  n
+}
+print abs(-7)
+print abs(4)
+
+# Closures — functions capture surrounding variables
+total = 0
+def accumulate(n) {
+  total = total + n
+}
+accumulate(10)
+accumulate(5)
+accumulate(3)
+print "total: #{total}"
+
+# Blocks and yield
+def repeat(n: Int) {
+  i = 0
+  while i < n {
+    yield(i)
+    i = i + 1
+  }
+}
+repeat(3) { |i| print "step #{i}" }
+
+# yield with two arguments
+def each_pair(list) {
+  i = 0
+  while i < list.length - 1 {
+    yield(list[i], list[i + 1])
+    i = i + 2
+  }
+}
+each_pair([1, 2, 3, 4]) { |a, b| print "#{a} + #{b} = #{a + b}" }
+
+# Recursive function
+def factorial(n: Int) -> Int {
+  return 1 if n <= 1
+  n * factorial(n - 1)
+}
+print factorial(6)
