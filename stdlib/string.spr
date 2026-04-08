@@ -1,3 +1,10 @@
+# String represents UTF-8 text. Literal strings support interpolation with #{ }.
+# Additional methods are defined in the VM/runtime; this class adds protocol helpers.
+#
 class String {
+  # Returns self. Strings already print as their text content.
+  #
+  #   "hi".to_s()   # "hi"
+  #
   def to_s() { self }
 }
