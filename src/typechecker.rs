@@ -177,17 +177,6 @@ impl TypeChecker {
                     e => self.check_expr(e),
                 }
             }
-            Stmt::If { condition, then_branch, else_branch } => {
-                self.check_expr(condition);
-                self.push_scope();
-                for s in then_branch { self.check_stmt(s); }
-                self.pop_scope();
-                if let Some(branch) = else_branch {
-                    self.push_scope();
-                    for s in branch { self.check_stmt(s); }
-                    self.pop_scope();
-                }
-            }
             Stmt::While { condition, body } => {
                 self.check_expr(condition);
                 self.push_scope();
@@ -245,6 +234,17 @@ impl TypeChecker {
             Expr::ListLit(elems) => { for e in elems { self.check_expr(e); } }
             Expr::MapLit(pairs) => { for (_, v) in pairs { self.check_expr(v); } }
             Expr::Grouping(inner) => self.check_expr(inner),
+            Expr::If { condition, then_branch, else_branch } => {
+                self.check_expr(condition);
+                self.push_scope();
+                for s in then_branch { self.check_stmt(s); }
+                self.pop_scope();
+                if let Some(branch) = else_branch {
+                    self.push_scope();
+                    for s in branch { self.check_stmt(s); }
+                    self.pop_scope();
+                }
+            }
             Expr::Print(inner) => self.check_expr(inner),
             Expr::Class { methods, .. } => {
                 for method in methods {
@@ -396,6 +396,7 @@ impl TypeChecker {
                 }
             }
             Expr::Print(inner) => self.infer_type(inner),
+            Expr::If { .. } => None,
             Expr::Class { name, .. } => Some(TypeExpr::Named(name.clone())),
             Expr::Function { .. } => Some(TypeExpr::Named("String".into())),
             Expr::Call { callee, .. } => match callee.as_ref() {

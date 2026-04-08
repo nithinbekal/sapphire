@@ -106,7 +106,11 @@ impl Parser {
             self.allow_trailing_block = false;
             let condition = self.logical()?;
             self.allow_trailing_block = true;
-            return Ok(Stmt::If { condition, then_branch: vec![stmt], else_branch: None });
+            return Ok(Stmt::Expression(Expr::If {
+                condition: Box::new(condition),
+                then_branch: vec![stmt],
+                else_branch: None,
+            }));
         }
         Ok(stmt)
     }
@@ -143,7 +147,7 @@ impl Parser {
             return self.function_def();
         }
         if self.check(&TokenKind::If) {
-            return self.if_statement();
+            return Ok(Stmt::Expression(self.if_expr()?));
         }
         if self.check(&TokenKind::While) {
             return self.while_statement();
@@ -244,38 +248,46 @@ impl Parser {
         }))
     }
 
-    fn if_statement(&mut self) -> Result<Stmt, SapphireError> {
+    fn if_expr(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'if'
         self.allow_trailing_block = false;
         let condition = self.logical()?;
         self.allow_trailing_block = true;
         let then_branch = self.block()?;
         let else_branch = if self.check(&TokenKind::Elsif) {
-            Some(vec![self.elsif_chain()?])
+            Some(vec![Stmt::Expression(self.elsif_chain()?)])
         } else if self.check(&TokenKind::Else) {
             self.advance();
             Some(self.block()?)
         } else {
             None
         };
-        Ok(Stmt::If { condition, then_branch, else_branch })
+        Ok(Expr::If {
+            condition: Box::new(condition),
+            then_branch,
+            else_branch,
+        })
     }
 
-    fn elsif_chain(&mut self) -> Result<Stmt, SapphireError> {
+    fn elsif_chain(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'elsif'
         self.allow_trailing_block = false;
         let condition = self.logical()?;
         self.allow_trailing_block = true;
         let then_branch = self.block()?;
         let else_branch = if self.check(&TokenKind::Elsif) {
-            Some(vec![self.elsif_chain()?])
+            Some(vec![Stmt::Expression(self.elsif_chain()?)])
         } else if self.check(&TokenKind::Else) {
             self.advance();
             Some(self.block()?)
         } else {
             None
         };
-        Ok(Stmt::If { condition, then_branch, else_branch })
+        Ok(Expr::If {
+            condition: Box::new(condition),
+            then_branch,
+            else_branch,
+        })
     }
 
     fn function_def(&mut self) -> Result<Stmt, SapphireError> {
@@ -543,6 +555,9 @@ impl Parser {
 
     // logical: range (('&&' | '||') range)*
     fn logical(&mut self) -> Result<Expr, SapphireError> {
+        if self.check(&TokenKind::If) {
+            return self.if_expr();
+        }
         let mut left = self.range()?;
         while self.check(&TokenKind::AmpAmp) || self.check(&TokenKind::PipePipe) {
             let op = self.advance().clone();

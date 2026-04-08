@@ -139,6 +139,28 @@ impl Compiler {
         Ok(())
     }
 
+    /// Compile a branch body for `if` expressions: leave one value on the stack (no `Return`).
+    fn compile_branch(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
+        match stmts.split_last() {
+            None => {
+                self.emit(OpCode::Nil);
+            }
+            Some((last, rest)) => {
+                self.stmts(rest)?;
+                match last {
+                    Stmt::Expression(expr) => {
+                        self.expr(expr)?;
+                    }
+                    other => {
+                        self.stmt(other)?;
+                        self.emit(OpCode::Nil);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     // ── Statements ────────────────────────────────────────────────────────────
 
     fn stmt(&mut self, stmt: &Stmt) -> Result<(), CompileError> {
@@ -156,25 +178,6 @@ impl Compiler {
             Stmt::Return(expr) => {
                 self.expr(expr)?;
                 self.emit(OpCode::Return);
-            }
-
-            Stmt::If { condition, then_branch, else_branch } => {
-                self.expr(condition)?;
-                let jif = self.emit_jump(OpCode::JumpIfFalse(0));
-
-                self.stmts(then_branch)?;
-
-                match else_branch {
-                    Some(else_stmts) => {
-                        let jump = self.emit_jump(OpCode::Jump(0));
-                        self.patch_jump(jif);
-                        self.stmts(else_stmts)?;
-                        self.patch_jump(jump);
-                    }
-                    None => {
-                        self.patch_jump(jif);
-                    }
-                }
             }
 
             Stmt::While { condition, body } => {
@@ -552,6 +555,27 @@ impl Compiler {
                 self.emit(OpCode::Closure(idx));
                 // The closure value on the stack becomes this local's slot.
                 self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                Ok(())
+            }
+
+            Expr::If { condition, then_branch, else_branch } => {
+                self.expr(condition)?;
+                let jif = self.emit_jump(OpCode::JumpIfFalse(0));
+                self.compile_branch(then_branch)?;
+                match else_branch {
+                    Some(else_stmts) => {
+                        let jelse = self.emit_jump(OpCode::Jump(0));
+                        self.patch_jump(jif);
+                        self.compile_branch(else_stmts)?;
+                        self.patch_jump(jelse);
+                    }
+                    None => {
+                        let jend = self.emit_jump(OpCode::Jump(0));
+                        self.patch_jump(jif);
+                        self.emit(OpCode::Nil);
+                        self.patch_jump(jend);
+                    }
+                }
                 Ok(())
             }
 

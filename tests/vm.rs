@@ -129,6 +129,17 @@ fn if_elsif() {
 }
 
 #[test]
+fn if_expression_assigned() {
+    assert_eq!(eval("x = if true { 1 } else { 42 }\nx"), VmValue::Int(1));
+    assert_eq!(eval("x = if false { 1 } else { 42 }\nx"), VmValue::Int(42));
+}
+
+#[test]
+fn if_expression_no_else_is_nil_when_false() {
+    assert_eq!(eval("x = if false { 1 }\nx"), VmValue::Nil);
+}
+
+#[test]
 fn while_loop_counts() {
     let src = "i = 0\nwhile i < 5 { i = i + 1 }\ni";
     assert_eq!(eval(src), VmValue::Int(5));
