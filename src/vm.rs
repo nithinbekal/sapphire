@@ -720,6 +720,15 @@ impl Vm {
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
 
+                    if method_name == "is_a?" && arg_count == 1 {
+                        let recv = self.stack[recv_slot].clone();
+                        let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                        let result = invoke_is_a(&self.classes, &recv, &args, line)?;
+                        self.stack.truncate(recv_slot);
+                        self.stack.push(result);
+                        continue;
+                    }
+
                     // Try native dispatch for non-Instance types.
                     let is_instance = matches!(&self.stack[recv_slot], VmValue::Instance { .. });
                     if !is_instance {
@@ -1908,6 +1917,50 @@ fn primitive_class_name(val: &VmValue) -> Option<&'static str> {
         VmValue::Map(_)   => Some("Map"),
         _                 => None,
     }
+}
+
+fn starting_class_name_for_is_a(recv: &VmValue) -> Option<String> {
+    match recv {
+        VmValue::Instance { class_name, .. } => Some(class_name.clone()),
+        _ => primitive_class_name(recv).map(|s| s.to_string()),
+    }
+}
+
+/// True if `start` is `target` or a subclass of `target` per `classes` superclass links.
+fn vm_is_subclass(classes: &HashMap<String, ClassEntry>, mut current: String, target: &str) -> bool {
+    loop {
+        if current == target {
+            return true;
+        }
+        let Some(entry) = classes.get(&current) else {
+            return false;
+        };
+        match &entry.superclass {
+            Some(s) => current = s.clone(),
+            None => return false,
+        }
+    }
+}
+
+fn invoke_is_a(
+    classes: &HashMap<String, ClassEntry>,
+    recv: &VmValue,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    let target = match args.first() {
+        Some(VmValue::Class { name, .. }) => name.clone(),
+        _ => {
+            return Err(VmError::TypeError {
+                message: "is_a? requires a class argument".into(),
+                line,
+            });
+        }
+    };
+    let Some(start) = starting_class_name_for_is_a(recv) else {
+        return Ok(VmValue::Bool(false));
+    };
+    Ok(VmValue::Bool(vm_is_subclass(classes, start, &target)))
 }
 
 /// Simple comparison for sorting — numbers compare numerically, strings lexicographically.
