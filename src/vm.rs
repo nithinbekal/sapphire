@@ -729,6 +729,29 @@ impl Vm {
                         continue;
                     }
 
+                    // Lambda `.call(args)` — invoke the closure as a new frame.
+                    if method_name == "call" {
+                        if let VmValue::Closure { function, upvalues } = self.stack[recv_slot].clone() {
+                            if function.arity != arg_count {
+                                return Err(VmError::TypeError {
+                                    message: format!(
+                                        "lambda expects {} argument(s), got {}",
+                                        function.arity, arg_count
+                                    ),
+                                    line,
+                                });
+                            }
+                            self.frames.push(CallFrame {
+                                function,
+                                upvalues,
+                                ip: 0, base: recv_slot,
+                                block: None, is_block_caller: false, rescues: vec![],
+                                class_name: None,
+                            });
+                            continue;
+                        }
+                    }
+
                     // Try native dispatch for non-Instance types.
                     let is_instance = matches!(&self.stack[recv_slot], VmValue::Instance { .. });
                     if !is_instance {

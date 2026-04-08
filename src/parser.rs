@@ -292,10 +292,14 @@ impl Parser {
 
     fn function_def(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'def'
+        // Anonymous lambda: `def(params) { body }`
+        if self.check(&TokenKind::LeftParen) {
+            return self.lambda_def();
+        }
         let name = match self.peek().kind.clone() {
             TokenKind::Identifier(n) => { self.advance(); n }
             _ => return Err(SapphireError::ParseError {
-                message: "expected function name".into(),
+                message: "expected function name or '(' after 'def'".into(),
                 line: self.peek().line,
             }),
         };
@@ -339,6 +343,34 @@ impl Parser {
             return_type,
             body,
         })
+    }
+
+    fn lambda_def(&mut self) -> Result<Expr, SapphireError> {
+        // `(` already peeked; `def` already consumed.
+        self.advance(); // consume '('
+        let mut params = Vec::new();
+        if !self.check(&TokenKind::RightParen) {
+            loop {
+                match self.peek().kind.clone() {
+                    TokenKind::Identifier(p) => { self.advance(); params.push(p); }
+                    _ => return Err(SapphireError::ParseError {
+                        message: "expected parameter name in lambda".into(),
+                        line: self.peek().line,
+                    }),
+                }
+                if !self.check(&TokenKind::Comma) { break; }
+                self.advance();
+            }
+        }
+        if !self.check(&TokenKind::RightParen) {
+            return Err(SapphireError::ParseError {
+                message: "expected ')' after lambda parameters".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume ')'
+        let body = self.block()?;
+        Ok(Expr::Lambda { params, body })
     }
 
     fn method_def(&mut self, private: bool) -> Result<MethodDef, SapphireError> {
@@ -865,6 +897,10 @@ impl Parser {
         if self.check(&TokenKind::SelfKw) {
             self.advance();
             return Ok(Expr::SelfExpr);
+        }
+
+        if self.check(&TokenKind::Def) {
+            return self.function_def();
         }
 
         if self.check(&TokenKind::Yield) {

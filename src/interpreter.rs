@@ -194,6 +194,7 @@ fn evaluate_impl(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             Some(v) => Ok(v),
             None => Ok(Value::Nil),
         },
+        Expr::Lambda { params, body } => Ok(Value::Lambda { params, body, closure: env }),
         Expr::Literal(v) => Ok(v),
         Expr::Grouping(inner) => evaluate(*inner, env),
         Expr::Variable(name) => {
@@ -545,6 +546,16 @@ fn evaluate_impl(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                         message: format!("unknown class method '{}'", name),
                     }),
                 };
+            }
+
+            // Lambda: only `.call` is valid
+            if let Value::Lambda { .. } = &obj {
+                if name == "call" {
+                    return Ok(Value::NativeMethod { receiver: Box::new(obj), name });
+                }
+                return Err(SapphireError::RuntimeError {
+                    message: format!("undefined method '{}' on lambda", name),
+                });
             }
 
             Err(SapphireError::RuntimeError {
@@ -1087,6 +1098,29 @@ fn evaluate_impl(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                                     }
                                 }
                             }
+                        }
+                        (Value::Lambda { params, body, closure }, "call") => {
+                            if params.len() != args.len() {
+                                return Err(SapphireError::RuntimeError {
+                                    message: format!("expected {} argument(s), got {}", params.len(), args.len()),
+                                });
+                            }
+                            let lambda_env = Environment::new_child(closure);
+                            let frame_id = next_frame_id();
+                            lambda_env.borrow_mut().set("__frame_id__".to_string(), Value::Int(frame_id as i64));
+                            for (param, val) in params.iter().zip(args.iter()) {
+                                lambda_env.borrow_mut().set(param.clone(), val.clone());
+                            }
+                            let mut result = Value::Nil;
+                            for expr in body {
+                                match execute(expr, lambda_env.clone()) {
+                                    Ok(Some(v)) => result = v,
+                                    Ok(None) => {}
+                                    Err(SapphireError::NonLocalReturn(v, id)) if id == frame_id => return Ok(v),
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            Ok(result)
                         }
                         _ => Err(SapphireError::RuntimeError {
                             message: "unknown native method".into(),

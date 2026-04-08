@@ -45,6 +45,11 @@ pub enum Value {
     },
     NativeFunction(String),
     Block(Block, EnvRef),
+    Lambda {
+        params: Vec<String>,
+        body: Vec<Expr>,
+        closure: EnvRef,
+    },
     Range { from: i64, to: i64 },
 }
 
@@ -96,6 +101,7 @@ impl fmt::Display for Value {
                 write!(f, "{{{}}}", parts.join(", "))
             }
             Value::Block(..) => write!(f, "<block>"),
+            Value::Lambda { .. } => write!(f, "<lambda>"),
             Value::Range { from, to } => write!(f, "{}..{}", from, to),
             Value::Instance { class_name, fields } => {
                 let mut pairs: Vec<String> = fields

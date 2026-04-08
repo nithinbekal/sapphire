@@ -594,6 +594,22 @@ impl Compiler {
                 else_body,
             } => self.compile_begin_expr(body, rescue_var, rescue_body, else_body),
 
+            Expr::Lambda { params, body } => {
+                let line = self.state().current_line;
+                let arity = params.len();
+                self.push_fn("<lambda>", arity, line);
+                // Slot 0 = the closure itself (mirrors named-function convention).
+                self.state_mut().locals.push(LocalInfo { name: "<lambda>".to_string(), captured: false });
+                for p in params {
+                    self.state_mut().locals.push(LocalInfo { name: p.clone(), captured: false });
+                }
+                self.compile_body(body)?;
+                let func = self.pop_fn();
+                let idx = self.state_mut().chunk.add_constant(Constant::Function(func));
+                self.emit(OpCode::Closure(idx));
+                Ok(())
+            }
+
             #[allow(unreachable_patterns)]
             other => Err(self.error(format!(
                 "expression not yet supported by compiler: {:?}",
