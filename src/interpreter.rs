@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static FRAME_COUNTER: AtomicU64 = AtomicU64::new(1);
 fn next_frame_id() -> u64 { FRAME_COUNTER.fetch_add(1, Ordering::Relaxed) }
-use crate::ast::{Block, Expr, MethodDef, Stmt, StringPart, TypeExpr};
+use crate::ast::{Block, Expr, MethodDef, StringPart, TypeExpr};
 use crate::environment::Environment;
 use crate::value::EnvRef;
 use crate::error::SapphireError;
@@ -86,8 +86,8 @@ pub fn global_env() -> EnvRef {
         let tokens = crate::lexer::Lexer::new(src).scan_tokens();
         let stmts = crate::parser::Parser::new(tokens).parse()
             .unwrap_or_else(|e| panic!("{} failed to parse: {}", label, e));
-        for stmt in stmts {
-            execute(stmt, env.clone())
+        for expr in stmts {
+            execute(expr, env.clone())
                 .unwrap_or_else(|e| panic!("{} failed to execute: {}", label, e));
         }
     }
@@ -110,11 +110,10 @@ pub fn global_env() -> EnvRef {
     env
 }
 
-pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> {
-    match stmt {
-        Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
-        Stmt::Return(expr) => {
-            let value = evaluate(expr, env.clone())?;
+pub fn execute(expr: Expr, env: EnvRef) -> Result<Option<Value>, SapphireError> {
+    match expr {
+        Expr::Return(e) => {
+            let value = evaluate(*e, env.clone())?;
             let frame_id = match env.borrow().get("__frame_id__") {
                 Some(Value::Int(id)) => id as u64,
                 _ => return Err(SapphireError::RuntimeError {
@@ -123,21 +122,20 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             };
             Err(SapphireError::NonLocalReturn(value, frame_id))
         }
-        Stmt::Break(expr) => {
-            let value = evaluate(expr, env)?;
+        Expr::Break(e) => {
+            let value = evaluate(*e, env)?;
             Err(SapphireError::Break(value))
         }
-        Stmt::Next(expr) => {
-            let value = evaluate(expr, env)?;
+        Expr::Next(e) => {
+            let value = evaluate(*e, env)?;
             Err(SapphireError::Next(value))
         }
-        Stmt::MultiAssign { names, values } => {
+        Expr::MultiAssign { names, values } => {
             if names.len() != values.len() {
                 return Err(SapphireError::RuntimeError {
                     message: format!("expected {} value(s), got {}", names.len(), values.len()),
                 });
             }
-            // Evaluate all RHS first so that `a, b = b, a` swaps correctly
             let vals: Vec<Value> = values.into_iter()
                 .map(|e| evaluate(e, env.clone()))
                 .collect::<Result<_, _>>()?;
@@ -148,17 +146,17 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             }
             Ok(None)
         }
-        Stmt::Raise(expr) => {
-            let value = evaluate(expr, env)?;
+        Expr::Raise(e) => {
+            let value = evaluate(*e, env)?;
             Err(SapphireError::Raised(value))
         }
-        Stmt::While { condition, body } => {
+        Expr::While { condition, body } => {
             'while_loop: loop {
-                let cond = evaluate(condition.clone(), env.clone())?;
+                let cond = evaluate((*condition).clone(), env.clone())?;
                 match cond {
                     Value::Bool(true) => {
-                        for stmt in body.clone() {
-                            match execute(stmt, env.clone()) {
+                        for e in body.clone() {
+                            match execute(e, env.clone()) {
                                 Ok(_) => {}
                                 Err(SapphireError::Break(_)) => break 'while_loop,
                                 Err(SapphireError::Next(_)) => continue 'while_loop,
@@ -174,11 +172,28 @@ pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> 
             }
             Ok(None)
         }
+        e => Ok(Some(evaluate_impl(e, env)?)),
     }
 }
 
 pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
+    match execute(expr, env)? {
+        Some(v) => Ok(v),
+        None => Ok(Value::Nil),
+    }
+}
+
+fn evaluate_impl(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
     match expr {
+        Expr::Return(_)
+        | Expr::Break(_)
+        | Expr::Next(_)
+        | Expr::Raise(_)
+        | Expr::While { .. }
+        | Expr::MultiAssign { .. } => match execute(expr, env)? {
+            Some(v) => Ok(v),
+            None => Ok(Value::Nil),
+        },
         Expr::Literal(v) => Ok(v),
         Expr::Grouping(inner) => evaluate(*inner, env),
         Expr::Variable(name) => {

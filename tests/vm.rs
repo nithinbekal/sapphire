@@ -282,6 +282,11 @@ fn begin_expr_else_value() {
 }
 
 #[test]
+fn while_expr_in_assignment_is_nil() {
+    assert_eq!(eval("x = while false { 1 }\nx"), VmValue::Nil);
+}
+
+#[test]
 fn next_skips_rest_of_block() {
     let src = "def collect() {
   a = yield(1)

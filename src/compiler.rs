@@ -1,6 +1,6 @@
 use std::fmt;
 use std::rc::Rc;
-use crate::ast::{Block, Expr, Stmt, StringPart, MethodDef};
+use crate::ast::{Block, Expr, StringPart, MethodDef};
 use crate::chunk::{Chunk, Constant, Function, OpCode, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
@@ -70,10 +70,10 @@ impl Compiler {
     // ── Public entry points ───────────────────────────────────────────────────
 
     /// Compile a top-level program (arity 0, anonymous).
-    pub fn compile(stmts: &[Stmt]) -> Result<Rc<Function>, CompileError> {
+    pub fn compile(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
         let mut c = Compiler::new();
         c.push_fn("", 0, 0);
-        c.compile_body(stmts)?;
+        c.compile_body(exprs)?;
         Ok(c.pop_fn())
     }
 
@@ -106,10 +106,9 @@ impl Compiler {
 
     // ── Body compilation (shared between top-level and functions) ─────────────
 
-    /// Compile a list of statements, treating the last expression as an
-    /// implicit return value (Ruby-style).
-    fn compile_body(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
-        let (last, rest) = match stmts.split_last() {
+    /// Compile a list of expressions, treating the last as an implicit return value (Ruby-style).
+    fn compile_body(&mut self, exprs: &[Expr]) -> Result<(), CompileError> {
+        let (last, rest) = match exprs.split_last() {
             Some(pair) => pair,
             None => {
                 self.emit(OpCode::Nil);
@@ -119,16 +118,15 @@ impl Compiler {
         };
         self.stmts(rest)?;
         match last {
-            Stmt::Expression(expr) => {
-                if let Expr::Function { name, .. } = expr {
-                    self.expr(expr)?;
-                    let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
-                    self.emit(OpCode::Constant(idx));
-                    self.emit(OpCode::Return);
-                } else {
-                    self.expr(expr)?;
-                    self.emit(OpCode::Return);
-                }
+            Expr::Function { name, .. } => {
+                self.expr(last)?;
+                let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                self.emit(OpCode::Constant(idx));
+                self.emit(OpCode::Return);
+            }
+            e if !Self::is_stmt_form(e) => {
+                self.expr(last)?;
+                self.emit(OpCode::Return);
             }
             other => {
                 self.stmt(other)?;
@@ -139,17 +137,17 @@ impl Compiler {
         Ok(())
     }
 
-    /// Compile a branch body for `if` expressions: leave one value on the stack (no `Return`).
-    fn compile_branch(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
-        match stmts.split_last() {
+    /// Branch body for `if` / `begin`: leave one value on the stack (no `Return`).
+    fn compile_branch(&mut self, exprs: &[Expr]) -> Result<(), CompileError> {
+        match exprs.split_last() {
             None => {
                 self.emit(OpCode::Nil);
             }
             Some((last, rest)) => {
                 self.stmts(rest)?;
                 match last {
-                    Stmt::Expression(expr) => {
-                        self.expr(expr)?;
+                    e if !Self::is_stmt_form(e) => {
+                        self.expr(last)?;
                     }
                     other => {
                         self.stmt(other)?;
@@ -161,29 +159,31 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Statements ────────────────────────────────────────────────────────────
+    fn is_stmt_form(expr: &Expr) -> bool {
+        matches!(
+            expr,
+            Expr::While { .. }
+                | Expr::Return(_)
+                | Expr::Break(_)
+                | Expr::Next(_)
+                | Expr::Raise(_)
+                | Expr::MultiAssign { .. }
+        )
+    }
 
-    fn stmt(&mut self, stmt: &Stmt) -> Result<(), CompileError> {
+    // ── Statement-shaped expressions (also used from `expr()` for value position) ──
+
+    fn stmt(&mut self, stmt: &Expr) -> Result<(), CompileError> {
         match stmt {
-            Stmt::Expression(expr) => {
-                let is_new_local = self.is_new_local_assign(expr);
-                let defines_binding = matches!(expr, Expr::Function { .. } | Expr::Class { .. });
-                self.expr(expr)?;
-                // A defining assignment or `def` / `class` reserves a stack slot — don't pop it.
-                if !is_new_local && !defines_binding {
-                    self.emit(OpCode::Pop);
-                }
-            }
-
-            Stmt::Return(expr) => {
+            Expr::Return(expr) => {
                 self.expr(expr)?;
                 self.emit(OpCode::Return);
             }
 
-            Stmt::While { condition, body } => {
+            Expr::While { condition, body } => {
                 let loop_start = self.state().chunk.code.len();
 
-                self.expr(condition)?;
+                self.expr(condition.as_ref())?;
                 let exit_jump = self.emit_jump(OpCode::JumpIfFalse(0));
 
                 self.stmts(body)?;
@@ -192,22 +192,22 @@ impl Compiler {
                 self.patch_jump(exit_jump);
             }
 
-            Stmt::Raise(expr) => {
+            Expr::Raise(expr) => {
                 self.expr(expr)?;
                 self.emit(OpCode::Raise);
             }
 
-            Stmt::Break(expr) => {
+            Expr::Break(expr) => {
                 self.expr(expr)?;
                 self.emit(OpCode::Break);
             }
 
-            Stmt::Next(expr) => {
+            Expr::Next(expr) => {
                 self.expr(expr)?;
                 self.emit(OpCode::Next);
             }
 
-            Stmt::MultiAssign { names, values } => {
+            Expr::MultiAssign { names, values } => {
                 if names.len() != values.len() {
                     return Err(self.error(format!(
                         "expected {} value(s), got {}", names.len(), values.len()
@@ -249,12 +249,13 @@ impl Compiler {
                 }
             }
 
-            #[allow(unreachable_patterns)]
-            other => {
-                return Err(self.error(format!(
-                    "statement not yet supported by compiler: {:?}",
-                    std::mem::discriminant(other)
-                )));
+            e => {
+                let is_new_local = self.is_new_local_assign(e);
+                let defines_binding = matches!(e, Expr::Function { .. } | Expr::Class { .. });
+                self.expr(e)?;
+                if !is_new_local && !defines_binding {
+                    self.emit(OpCode::Pop);
+                }
             }
         }
         Ok(())
@@ -264,6 +265,17 @@ impl Compiler {
 
     fn expr(&mut self, expr: &Expr) -> Result<(), CompileError> {
         match expr {
+            Expr::Return(_)
+            | Expr::Break(_)
+            | Expr::Next(_)
+            | Expr::Raise(_) => self.stmt(expr),
+
+            Expr::While { .. } | Expr::MultiAssign { .. } => {
+                self.stmt(expr)?;
+                self.emit(OpCode::Nil);
+                Ok(())
+            }
+
             Expr::Literal(val) => self.literal(val),
 
             Expr::Grouping(inner) => self.expr(inner),
@@ -708,10 +720,10 @@ impl Compiler {
     /// value is discarded).
     fn compile_begin_expr(
         &mut self,
-        body: &[Stmt],
+        body: &[Expr],
         rescue_var: &Option<String>,
-        rescue_body: &[Stmt],
-        else_body: &[Stmt],
+        rescue_body: &[Expr],
+        else_body: &[Expr],
     ) -> Result<(), CompileError> {
         let rescue_var_slot = if let Some(name) = rescue_var {
             let slot = self.state().locals.len();
@@ -775,8 +787,8 @@ impl Compiler {
         Ok(())
     }
 
-    fn stmts(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
-        for s in stmts { self.stmt(s)?; }
+    fn stmts(&mut self, exprs: &[Expr]) -> Result<(), CompileError> {
+        for e in exprs { self.stmt(e)?; }
         Ok(())
     }
 
@@ -834,6 +846,6 @@ impl Compiler {
 }
 
 // Re-export compile as the public API.
-pub fn compile(stmts: &[Stmt]) -> Result<Rc<Function>, CompileError> {
-    Compiler::compile(stmts)
+pub fn compile(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
+    Compiler::compile(exprs)
 }

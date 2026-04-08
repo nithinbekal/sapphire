@@ -1,4 +1,4 @@
-use crate::ast::{Block, CallArg, Expr, FieldDef, MethodDef, ParamDef, Stmt, StringPart, TypeExpr};
+use crate::ast::{Block, CallArg, Expr, FieldDef, MethodDef, ParamDef, StringPart, TypeExpr};
 use crate::error::SapphireError;
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
@@ -88,17 +88,17 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Stmt>, SapphireError> {
-        let mut stmts = Vec::new();
+    pub fn parse(&mut self) -> Result<Vec<Expr>, SapphireError> {
+        let mut exprs = Vec::new();
         loop {
             self.skip_terminators();
             if self.is_at_end() { break; }
-            stmts.push(self.statement()?);
+            exprs.push(self.statement()?);
         }
-        Ok(stmts)
+        Ok(exprs)
     }
 
-    fn statement(&mut self) -> Result<Stmt, SapphireError> {
+    fn statement(&mut self) -> Result<Expr, SapphireError> {
         let stmt = self.statement_inner()?;
         // Trailing conditional: `expr if condition`
         if self.check(&TokenKind::If) {
@@ -106,19 +106,19 @@ impl Parser {
             self.allow_trailing_block = false;
             let condition = self.logical()?;
             self.allow_trailing_block = true;
-            return Ok(Stmt::Expression(Expr::If {
+            return Ok(Expr::If {
                 condition: Box::new(condition),
                 then_branch: vec![stmt],
                 else_branch: None,
-            }));
+            });
         }
         Ok(stmt)
     }
 
-    fn statement_inner(&mut self) -> Result<Stmt, SapphireError> {
+    fn statement_inner(&mut self) -> Result<Expr, SapphireError> {
         if self.check(&TokenKind::Return) {
             self.advance();
-            return Ok(Stmt::Return(self.logical()?));
+            return Ok(Expr::Return(Box::new(self.logical()?)));
         }
         if self.check(&TokenKind::Break) {
             self.advance();
@@ -128,7 +128,7 @@ impl Parser {
             } else {
                 self.logical()?
             };
-            return Ok(Stmt::Break(val));
+            return Ok(Expr::Break(Box::new(val)));
         }
         if self.check(&TokenKind::Next) {
             self.advance();
@@ -138,7 +138,7 @@ impl Parser {
             } else {
                 self.logical()?
             };
-            return Ok(Stmt::Next(val));
+            return Ok(Expr::Next(Box::new(val)));
         }
         if self.check(&TokenKind::Class) {
             return self.class_def();
@@ -147,7 +147,7 @@ impl Parser {
             return self.function_def();
         }
         if self.check(&TokenKind::If) {
-            return Ok(Stmt::Expression(self.if_expr()?));
+            return self.if_expr();
         }
         if self.check(&TokenKind::While) {
             return self.while_statement();
@@ -161,19 +161,19 @@ impl Parser {
         }
         if self.check(&TokenKind::Raise) {
             self.advance();
-            return Ok(Stmt::Raise(self.logical()?));
+            return Ok(Expr::Raise(Box::new(self.logical()?)));
         }
         if self.check(&TokenKind::Begin) {
-            return Ok(Stmt::Expression(self.begin_expr()?));
+            return self.begin_expr();
         }
         if self.check(&TokenKind::Print) {
             self.advance();
-            return Ok(Stmt::Expression(Expr::Print(Box::new(self.logical()?))));
+            return Ok(Expr::Print(Box::new(self.logical()?)));
         }
-        Ok(Stmt::Expression(self.logical()?))
+        Ok(self.logical()?)
     }
 
-    fn class_def(&mut self) -> Result<Stmt, SapphireError> {
+    fn class_def(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'class'
         let name = match self.peek().kind.clone() {
             TokenKind::Identifier(n) => { self.advance(); n }
@@ -240,12 +240,12 @@ impl Parser {
             });
         }
         self.advance(); // consume '}'
-        Ok(Stmt::Expression(Expr::Class {
+        Ok(Expr::Class {
             name,
             superclass,
             fields,
             methods,
-        }))
+        })
     }
 
     fn if_expr(&mut self) -> Result<Expr, SapphireError> {
@@ -255,7 +255,7 @@ impl Parser {
         self.allow_trailing_block = true;
         let then_branch = self.block()?;
         let else_branch = if self.check(&TokenKind::Elsif) {
-            Some(vec![Stmt::Expression(self.elsif_chain()?)])
+            Some(vec![self.elsif_chain()?])
         } else if self.check(&TokenKind::Else) {
             self.advance();
             Some(self.block()?)
@@ -276,7 +276,7 @@ impl Parser {
         self.allow_trailing_block = true;
         let then_branch = self.block()?;
         let else_branch = if self.check(&TokenKind::Elsif) {
-            Some(vec![Stmt::Expression(self.elsif_chain()?)])
+            Some(vec![self.elsif_chain()?])
         } else if self.check(&TokenKind::Else) {
             self.advance();
             Some(self.block()?)
@@ -290,7 +290,7 @@ impl Parser {
         })
     }
 
-    fn function_def(&mut self) -> Result<Stmt, SapphireError> {
+    fn function_def(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'def'
         let name = match self.peek().kind.clone() {
             TokenKind::Identifier(n) => { self.advance(); n }
@@ -333,12 +333,12 @@ impl Parser {
         self.advance(); // consume ')'
         let return_type = self.parse_return_type()?;
         let body = self.block_with_rescue()?;
-        Ok(Stmt::Expression(Expr::Function {
+        Ok(Expr::Function {
             name,
             params,
             return_type,
             body,
-        }))
+        })
     }
 
     fn method_def(&mut self, private: bool) -> Result<MethodDef, SapphireError> {
@@ -387,16 +387,19 @@ impl Parser {
         Ok(MethodDef { name, params, return_type, body, private })
     }
 
-    fn while_statement(&mut self) -> Result<Stmt, SapphireError> {
+    fn while_statement(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'while'
         self.allow_trailing_block = false;
         let condition = self.logical()?;
         self.allow_trailing_block = true;
         let body = self.block()?;
-        Ok(Stmt::While { condition, body })
+        Ok(Expr::While {
+            condition: Box::new(condition),
+            body,
+        })
     }
 
-    fn multi_assign(&mut self) -> Result<Stmt, SapphireError> {
+    fn multi_assign(&mut self) -> Result<Expr, SapphireError> {
         let mut names = Vec::new();
         loop {
             match self.peek().kind.clone() {
@@ -428,7 +431,7 @@ impl Parser {
                 break;
             }
         }
-        Ok(Stmt::MultiAssign { names, values })
+        Ok(Expr::MultiAssign { names, values })
     }
 
     fn begin_expr(&mut self) -> Result<Expr, SapphireError> {
@@ -486,7 +489,7 @@ impl Parser {
 
     // Like block(), but wraps the body in Expr::Begin if a rescue clause is present.
     // Used by function and method definitions.
-    fn block_with_rescue(&mut self) -> Result<Vec<Stmt>, SapphireError> {
+    fn block_with_rescue(&mut self) -> Result<Vec<Expr>, SapphireError> {
         if !self.check(&TokenKind::LeftBrace) {
             return Err(SapphireError::ParseError {
                 message: "expected '{'".into(),
@@ -521,12 +524,12 @@ impl Parser {
                 });
             }
             self.advance(); // consume '}'
-            Ok(vec![Stmt::Expression(Expr::Begin {
+            Ok(vec![Expr::Begin {
                 body,
                 rescue_var,
                 rescue_body,
                 else_body: Vec::new(),
-            })])
+            }])
         } else {
             if !self.check(&TokenKind::RightBrace) {
                 return Err(SapphireError::ParseError {
@@ -539,7 +542,7 @@ impl Parser {
         }
     }
 
-    fn block(&mut self) -> Result<Vec<Stmt>, SapphireError> {
+    fn block(&mut self) -> Result<Vec<Expr>, SapphireError> {
         if !self.check(&TokenKind::LeftBrace) {
             return Err(SapphireError::ParseError {
                 message: "expected '{'".into(),
@@ -570,6 +573,9 @@ impl Parser {
         }
         if self.check(&TokenKind::Begin) {
             return self.begin_expr();
+        }
+        if self.check(&TokenKind::While) {
+            return self.while_statement();
         }
         let mut left = self.range()?;
         while self.check(&TokenKind::AmpAmp) || self.check(&TokenKind::PipePipe) {
@@ -1013,16 +1019,13 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Expr, Stmt};
+    use crate::ast::Expr;
     use crate::lexer::Lexer;
 
     fn parse_expr(source: &str) -> Expr {
         let tokens = Lexer::new(source).scan_tokens();
-        let mut stmts = Parser::new(tokens).parse().unwrap();
-        match stmts.remove(0) {
-            Stmt::Expression(e) => e,
-            _ => panic!("expected expression statement"),
-        }
+        let mut exprs = Parser::new(tokens).parse().unwrap();
+        exprs.remove(0)
     }
 
     #[test]
@@ -1066,9 +1069,9 @@ mod tests {
     #[test]
     fn test_print_statement() {
         let tokens = Lexer::new("print 42").scan_tokens();
-        let mut stmts = Parser::new(tokens).parse().unwrap();
-        match stmts.remove(0) {
-            Stmt::Expression(Expr::Print(inner)) => {
+        let mut exprs = Parser::new(tokens).parse().unwrap();
+        match exprs.remove(0) {
+            Expr::Print(inner) => {
                 assert!(matches!(*inner, Expr::Literal(Value::Int(42))));
             }
             other => panic!("expected print expr, got {:?}", other),
@@ -1085,10 +1088,10 @@ mod tests {
     #[test]
     fn test_class_def() {
         let tokens = Lexer::new("class Point { attr x; attr y }").scan_tokens();
-        let mut stmts = Parser::new(tokens).parse().unwrap();
+        let mut exprs = Parser::new(tokens).parse().unwrap();
         assert!(matches!(
-            stmts.remove(0),
-            Stmt::Expression(Expr::Class { name, .. }) if name == "Point"
+            exprs.remove(0),
+            Expr::Class { name, .. } if name == "Point"
         ));
     }
 

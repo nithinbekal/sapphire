@@ -19,7 +19,7 @@ pub struct ParamDef {
 #[derive(Debug, Clone)]
 pub struct Block {
     pub params: Vec<String>,
-    pub body: Vec<Stmt>,
+    pub body: Vec<Expr>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +40,7 @@ pub struct MethodDef {
     pub name: String,
     pub params: Vec<ParamDef>,
     pub return_type: Option<TypeExpr>,
-    pub body: Vec<Stmt>,
+    pub body: Vec<Expr>,
     pub private: bool,
 }
 
@@ -48,23 +48,6 @@ pub struct MethodDef {
 pub struct CallArg {
     pub name: Option<String>,
     pub value: Expr,
-}
-
-#[derive(Debug, Clone)]
-pub enum Stmt {
-    Expression(Expr),
-    While {
-        condition: Expr,
-        body: Vec<Stmt>,
-    },
-    Return(Expr),
-    Break(Expr),
-    Next(Expr),
-    Raise(Expr),
-    MultiAssign {
-        names: Vec<String>,
-        values: Vec<Expr>,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -128,11 +111,11 @@ pub enum Expr {
         from: Box<Expr>,
         to: Box<Expr>,
     },
-    /// `if` / `elsif` / `else` — value is the last statement in the taken branch, or `nil`.
+    /// `if` / `elsif` / `else` — value is the last expression in the taken branch, or `nil`.
     If {
         condition: Box<Expr>,
-        then_branch: Vec<Stmt>,
-        else_branch: Option<Vec<Stmt>>,
+        then_branch: Vec<Expr>,
+        else_branch: Option<Vec<Expr>>,
     },
     /// `print expr` — evaluates `expr`, prints, value is the printed value.
     Print(Box<Expr>),
@@ -148,13 +131,26 @@ pub enum Expr {
         name: String,
         params: Vec<ParamDef>,
         return_type: Option<TypeExpr>,
-        body: Vec<Stmt>,
+        body: Vec<Expr>,
     },
-    /// `begin … rescue … else … end` — value follows Ruby (last stmt on taken path).
+    /// `begin … rescue … else … end` — value follows Ruby (last expression on taken path).
     Begin {
-        body: Vec<Stmt>,
+        body: Vec<Expr>,
         rescue_var: Option<String>,
-        rescue_body: Vec<Stmt>,
-        else_body: Vec<Stmt>,
+        rescue_body: Vec<Expr>,
+        else_body: Vec<Expr>,
+    },
+    /// `while cond { ... }` — value is `nil` when the loop exits normally (Ruby).
+    While {
+        condition: Box<Expr>,
+        body: Vec<Expr>,
+    },
+    Return(Box<Expr>),
+    Break(Box<Expr>),
+    Next(Box<Expr>),
+    Raise(Box<Expr>),
+    MultiAssign {
+        names: Vec<String>,
+        values: Vec<Expr>,
     },
 }
