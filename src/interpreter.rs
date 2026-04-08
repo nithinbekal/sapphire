@@ -311,7 +311,8 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
             })
         }
         Expr::Assign { name, value } => {
-            let is_constant = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+            let is_constant = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                && name.chars().all(|c| c.is_uppercase() || c.is_ascii_digit() || c == '_');
             if is_constant && env.borrow().is_frozen(&name) {
                 return Err(SapphireError::RuntimeError {
                     message: format!("cannot reassign constant '{}'", name),
@@ -1990,6 +1991,14 @@ mod tests {
         let tokens = crate::lexer::Lexer::new("PI = 3").scan_tokens();
         let mut stmts = crate::parser::Parser::new(tokens).parse().unwrap();
         assert!(execute(stmts.remove(0), env).is_err());
+    }
+
+    #[test]
+    fn test_mixed_case_is_not_a_constant() {
+        let env = global_env();
+        exec_env("Pi = 3.14", env.clone());
+        exec_env("Pi = 3", env.clone());
+        assert_eq!(run_env("Pi", env.clone()), Value::Int(3));
     }
 
     #[test]
