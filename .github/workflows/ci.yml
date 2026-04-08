@@ -8,12 +8,24 @@ on:
 
 jobs:
   test:
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
+
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo build
-      - run: examples/run_all.sh --interpreter
-      - run: examples/run_all.sh --typecheck
+      - name: Interpreter
+        run: examples/run_all.sh --interpreter
+      - name: Typechecker
+        run: examples/run_all.sh --typecheck
