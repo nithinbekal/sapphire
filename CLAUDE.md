@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Sapphire?
 
-Sapphire is an object-oriented programming language implemented as a tree-walk interpreter in Rust. It's Ruby-inspired with gradual typing. The CLI has three subcommands: `run`, `typecheck`, and `console` (REPL).
+Sapphire is an object-oriented programming language implemented as a tree-walk interpreter in Rust. It's Ruby-inspired with gradual typing. The CLI has four subcommands: `run`, `vm`, `typecheck`, and `console` (REPL).
 
 ## Build & Test Commands
 
@@ -17,16 +17,22 @@ cargo test <test_name> -- --nocapture  # run with stdout
 
 ## Architecture
 
-The interpreter follows a classic pipeline:
+Two execution pipelines share the same lexer and parser front-end:
 
-**Lexer → Parser → (TypeChecker) → Interpreter**
+**Tree-walk interpreter** (`run`): Lexer → Parser → (TypeChecker) → Interpreter
+
+**Bytecode VM** (`vm`): Lexer → Parser → Compiler → VM
 
 Key files:
-- `src/main.rs` — CLI entry point; routes to `run_file`, `typecheck_file`, or `run_repl`
+- `src/main.rs` — CLI entry point; routes to `run_file`, `run_file_vm`, `typecheck_file`, or `run_repl`
 - `src/lexer.rs` — Tokenizes source into `Token`s
+- `src/token.rs` — Token type definitions
 - `src/parser.rs` — Recursive descent parser producing an AST
 - `src/ast.rs` — AST node definitions
 - `src/interpreter.rs` — Tree-walk interpreter; `execute()` for statements, `evaluate()` for expressions
+- `src/compiler.rs` — Compiles AST to bytecode `Function`/`Chunk`
+- `src/chunk.rs` — `Chunk` (bytecode array + constants), `OpCode` enum, `Function`, `UpvalueDef`
+- `src/vm.rs` — Stack-based bytecode VM (`Vm::run`)
 - `src/typechecker.rs` — Optional static type checker (two-pass: collect defs, then check bodies)
 - `src/value.rs` — `Value` enum (the runtime representation of all values)
 - `src/environment.rs` — Lexically-scoped variable bindings (parent-child chain of hashmaps)
