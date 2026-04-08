@@ -53,7 +53,8 @@ pub enum VmValue {
     Range { from: i64, to: i64 },
     /// A compiled class: holds the static field list (with defaults) and the method table.
     Class {
-        name:       String,
+        name:                    String,
+        #[allow(dead_code)]
         superclass: Option<String>,
         fields:     Vec<(String, VmValue)>,
         methods:    Rc<HashMap<String, VmMethod>>,
@@ -155,6 +156,7 @@ pub enum VmError {
     /// `break val` inside a block — unwinds to the enclosing call-with-block.
     Break(VmValue),
     /// `next val` inside a block — skips to the next `yield`.
+    #[allow(dead_code)]
     Next(VmValue),
 }
 

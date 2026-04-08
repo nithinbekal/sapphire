@@ -261,6 +261,7 @@ impl Chunk {
     }
 
     /// Print a human-readable listing of the chunk.
+    #[allow(dead_code)]
     pub fn disassemble(&self, name: &str) {
         println!("=== {} ===", name);
         for (offset, op) in self.code.iter().enumerate() {
