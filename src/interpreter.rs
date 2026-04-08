@@ -112,63 +112,7 @@ pub fn global_env() -> EnvRef {
 
 pub fn execute(stmt: Stmt, env: EnvRef) -> Result<Option<Value>, SapphireError> {
     match stmt {
-        Stmt::Print(expr) => {
-            let value = evaluate(expr, env)?;
-            println!("{}", value);
-            Ok(None)
-        }
         Stmt::Expression(expr) => Ok(Some(evaluate(expr, env)?)),
-        Stmt::Class { name, superclass, fields, methods } => {
-            if env.borrow().is_frozen(&name) {
-                return Err(SapphireError::RuntimeError {
-                    message: format!("'{}' is reserved and cannot be redefined", name),
-                });
-            }
-            let superclass: Option<String> = if superclass.is_none() && name != "Object" {
-                Some("Object".to_string())
-            } else {
-                superclass
-            };
-            let (mut merged_fields, mut merged_methods) = match superclass {
-                Some(ref super_name) => {
-                    let super_val = env.borrow().get(super_name).ok_or_else(|| SapphireError::RuntimeError {
-                        message: format!("superclass '{}' not found", super_name),
-                    })?;
-                    match super_val {
-                        Value::Class { fields: sf, methods: sm, .. } => (sf, sm),
-                        _ => return Err(SapphireError::RuntimeError {
-                            message: format!("'{}' is not a class", super_name),
-                        }),
-                    }
-                }
-                None => (Vec::new(), Vec::new()),
-            };
-            merged_fields.extend(fields);
-            for method in methods {
-                merged_methods.retain(|m: &MethodDef| m.name != method.name);
-                merged_methods.push(method);
-            }
-            let class = Value::Class { name: name.clone(), superclass: superclass.clone(), fields: merged_fields, methods: merged_methods, closure: env.clone() };
-            env.borrow_mut().set(name.clone(), class);
-            env.borrow_mut().freeze(&name);
-            Ok(None)
-        }
-        Stmt::Function { name, params, return_type, body } => {
-            let method = MethodDef { name: name.clone(), params, return_type, body, private: false };
-            let object_val = env.borrow().get("Object").ok_or_else(|| SapphireError::RuntimeError {
-                message: "Object class not found".into(),
-            })?;
-            let updated = match object_val {
-                Value::Class { name: cn, superclass, fields, mut methods, closure } => {
-                    methods.retain(|m: &MethodDef| m.name != name);
-                    methods.push(method);
-                    Value::Class { name: cn, superclass, fields, methods, closure }
-                }
-                _ => return Err(SapphireError::RuntimeError { message: "Object is not a class".into() }),
-            };
-            env.borrow_mut().assign("Object", updated);
-            Ok(None)
-        }
         Stmt::Return(expr) => {
             let value = evaluate(expr, env.clone())?;
             let frame_id = match env.borrow().get("__frame_id__") {
@@ -1343,6 +1287,62 @@ pub fn evaluate(expr: Expr, env: EnvRef) -> Result<Value, SapphireError> {
                     message: "range bounds must be integers".into(),
                 }),
             }
+        }
+        Expr::Print(inner) => {
+            let value = evaluate(*inner, env)?;
+            println!("{}", value);
+            Ok(value)
+        }
+        Expr::Class { name, superclass, fields, methods } => {
+            if env.borrow().is_frozen(&name) {
+                return Err(SapphireError::RuntimeError {
+                    message: format!("'{}' is reserved and cannot be redefined", name),
+                });
+            }
+            let superclass: Option<String> = if superclass.is_none() && name != "Object" {
+                Some("Object".to_string())
+            } else {
+                superclass
+            };
+            let (mut merged_fields, mut merged_methods) = match superclass {
+                Some(ref super_name) => {
+                    let super_val = env.borrow().get(super_name).ok_or_else(|| SapphireError::RuntimeError {
+                        message: format!("superclass '{}' not found", super_name),
+                    })?;
+                    match super_val {
+                        Value::Class { fields: sf, methods: sm, .. } => (sf, sm),
+                        _ => return Err(SapphireError::RuntimeError {
+                            message: format!("'{}' is not a class", super_name),
+                        }),
+                    }
+                }
+                None => (Vec::new(), Vec::new()),
+            };
+            merged_fields.extend(fields);
+            for method in methods {
+                merged_methods.retain(|m: &MethodDef| m.name != method.name);
+                merged_methods.push(method);
+            }
+            let class = Value::Class { name: name.clone(), superclass: superclass.clone(), fields: merged_fields, methods: merged_methods, closure: env.clone() };
+            env.borrow_mut().set(name.clone(), class.clone());
+            env.borrow_mut().freeze(&name);
+            Ok(class)
+        }
+        Expr::Function { name, params, return_type, body } => {
+            let method = MethodDef { name: name.clone(), params, return_type, body, private: false };
+            let object_val = env.borrow().get("Object").ok_or_else(|| SapphireError::RuntimeError {
+                message: "Object class not found".into(),
+            })?;
+            let updated = match object_val {
+                Value::Class { name: cn, superclass, fields, mut methods, closure } => {
+                    methods.retain(|m: &MethodDef| m.name != name);
+                    methods.push(method);
+                    Value::Class { name: cn, superclass, fields, methods, closure }
+                }
+                _ => return Err(SapphireError::RuntimeError { message: "Object is not a class".into() }),
+            };
+            env.borrow_mut().assign("Object", updated);
+            Ok(Value::Str(name.clone()))
         }
         Expr::Super { method, args, block } => {
             let self_val = env.borrow().get("self").ok_or_else(|| SapphireError::RuntimeError {

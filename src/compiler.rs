@@ -120,8 +120,15 @@ impl Compiler {
         self.stmts(rest)?;
         match last {
             Stmt::Expression(expr) => {
-                self.expr(expr)?;
-                self.emit(OpCode::Return);
+                if let Expr::Function { name, .. } = expr {
+                    self.expr(expr)?;
+                    let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                    self.emit(OpCode::Constant(idx));
+                    self.emit(OpCode::Return);
+                } else {
+                    self.expr(expr)?;
+                    self.emit(OpCode::Return);
+                }
             }
             other => {
                 self.stmt(other)?;
@@ -138,9 +145,10 @@ impl Compiler {
         match stmt {
             Stmt::Expression(expr) => {
                 let is_new_local = self.is_new_local_assign(expr);
+                let defines_binding = matches!(expr, Expr::Function { .. } | Expr::Class { .. });
                 self.expr(expr)?;
-                // A defining assignment reserves a stack slot — don't pop it.
-                if !is_new_local {
+                // A defining assignment or `def` / `class` reserves a stack slot — don't pop it.
+                if !is_new_local && !defines_binding {
                     self.emit(OpCode::Pop);
                 }
             }
@@ -148,25 +156,6 @@ impl Compiler {
             Stmt::Return(expr) => {
                 self.expr(expr)?;
                 self.emit(OpCode::Return);
-            }
-
-            Stmt::Function { name, params, body, .. } => {
-                let line  = self.state().current_line;
-                let arity = params.len();
-
-                self.push_fn(name, arity, line);
-                // Slot 0 = the function itself — enables direct recursion by name.
-                self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
-                for p in params {
-                    self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
-                }
-                self.compile_body(body)?;
-                let func = self.pop_fn();
-
-                let idx = self.state_mut().chunk.add_constant(Constant::Function(func));
-                self.emit(OpCode::Closure(idx));
-                // The closure value on the stack becomes this local's slot.
-                self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
             }
 
             Stmt::If { condition, then_branch, else_branch } => {
@@ -198,15 +187,6 @@ impl Compiler {
                 self.emit_loop(loop_start);
 
                 self.patch_jump(exit_jump);
-            }
-
-            Stmt::Print(expr) => {
-                self.expr(expr)?;
-                self.emit(OpCode::Print);
-            }
-
-            Stmt::Class { name, superclass, fields, methods } => {
-                self.compile_class(name, superclass.as_deref(), fields, methods)?;
             }
 
             Stmt::Raise(expr) => {
@@ -541,6 +521,37 @@ impl Compiler {
                 }
                 let name_idx = self.state_mut().chunk.add_constant(Constant::Str(method.clone()));
                 self.emit(OpCode::SuperInvoke(name_idx, arg_count));
+                Ok(())
+            }
+
+            Expr::Print(inner) => {
+                self.expr(inner)?;
+                self.emit(OpCode::Print);
+                Ok(())
+            }
+
+            Expr::Class { name, superclass, fields, methods } => {
+                self.compile_class(name, superclass.as_deref(), fields, methods)?;
+                Ok(())
+            }
+
+            Expr::Function { name, params, body, .. } => {
+                let line  = self.state().current_line;
+                let arity = params.len();
+
+                self.push_fn(name, arity, line);
+                // Slot 0 = the function itself — enables direct recursion by name.
+                self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                for p in params {
+                    self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
+                }
+                self.compile_body(body)?;
+                let func = self.pop_fn();
+
+                let idx = self.state_mut().chunk.add_constant(Constant::Function(func));
+                self.emit(OpCode::Closure(idx));
+                // The closure value on the stack becomes this local's slot.
+                self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
                 Ok(())
             }
 
