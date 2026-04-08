@@ -17,10 +17,11 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.as_slice() {
         [_, cmd, path] if cmd == "run"       => run_file(path),
+        [_, cmd, path] if cmd == "vm"        => run_file_vm(path),
         [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
         [_, cmd] if cmd == "console" => run_repl(),
         _ => {
-            eprintln!("Usage: sapphire [run <file.spr> | typecheck <file.spr> | console]");
+            eprintln!("Usage: sapphire [run <file.spr> | vm <file.spr> | typecheck <file.spr> | console]");
             std::process::exit(1);
         }
     }
@@ -49,6 +50,29 @@ fn run_file(path: &str) {
                 }
             }
         }
+    }
+}
+
+fn run_file_vm(path: &str) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error reading '{}': {}", path, e);
+            std::process::exit(1);
+        }
+    };
+    let tokens = lexer::Lexer::new(&source).scan_tokens();
+    let stmts = match parser::Parser::new(tokens).parse() {
+        Ok(s) => s,
+        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+    };
+    let func = match compiler::compile(&stmts) {
+        Ok(f) => f,
+        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+    };
+    if let Err(e) = vm::Vm::new(func).run() {
+        eprintln!("{}", e);
+        std::process::exit(1);
     }
 }
 

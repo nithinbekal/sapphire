@@ -270,6 +270,7 @@ impl Compiler {
                 }
             }
 
+            #[allow(unreachable_patterns)]
             other => {
                 return Err(self.error(format!(
                     "statement not yet supported by compiler: {:?}",
@@ -519,6 +520,7 @@ impl Compiler {
                 Ok(())
             }
 
+            #[allow(unreachable_patterns)]
             other => Err(self.error(format!(
                 "expression not yet supported by compiler: {:?}",
                 std::mem::discriminant(other)
