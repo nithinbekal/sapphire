@@ -1,16 +1,4 @@
-mod ast;
-mod chunk;
-mod compiler;
-mod environment;
-mod error;
-mod interpreter;
-mod lexer;
-mod parser;
-mod token;
-mod typechecker;
-mod value;
-mod vm;
-
+use sapphire::{compiler, interpreter, lexer, parser, typechecker, value, vm};
 use std::io::{self, Write};
 
 fn main() {
