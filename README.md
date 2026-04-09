@@ -133,3 +133,12 @@ rescue e
   0
 }
 ```
+
+## Current Limitations
+
+This is an early preview. Known gaps:
+
+- **No imports** — all code must live in a single file
+- **No class methods** — only instance methods are supported
+- **No garbage collection** — reference-counted memory; cycles will leak
+- **REPL** — no command history or multiline input
