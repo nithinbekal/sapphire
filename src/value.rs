@@ -19,6 +19,7 @@ pub enum Value {
         superclass: Option<String>,
         fields: Vec<FieldDef>,
         methods: Vec<MethodDef>,
+        class_methods: Vec<MethodDef>,
         closure: EnvRef,
     },
     Constructor {

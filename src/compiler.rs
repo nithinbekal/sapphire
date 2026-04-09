@@ -844,10 +844,14 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         let line = self.state().current_line;
 
-        for method in methods {
+        let (instance_methods, class_methods): (Vec<&MethodDef>, Vec<&MethodDef>) =
+            methods.iter().partition(|m| !m.class_method);
+
+        // Emit class method closures first (DefClass pops them in order).
+        // Slot 0 = `self` (the class object), not counted in arity.
+        for method in &class_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
-            // Slot 0 = `self` (the receiver); it is NOT counted in `arity`.
             self.state_mut().locals.push(LocalInfo { name: "self".into(), captured: false });
             for p in &method.params {
                 self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
@@ -858,7 +862,21 @@ impl Compiler {
             self.emit(OpCode::Closure(fi));
         }
 
-        let field_names:    Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+        // Emit instance method closures.
+        for method in &instance_methods {
+            let arity = method.params.len();
+            self.push_fn(&method.name, arity, line);
+            self.state_mut().locals.push(LocalInfo { name: "self".into(), captured: false });
+            for p in &method.params {
+                self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
+            }
+            self.compile_body(&method.body)?;
+            let func = self.pop_fn();
+            let fi = self.state_mut().chunk.add_constant(Constant::Function(func));
+            self.emit(OpCode::Closure(fi));
+        }
+
+        let field_names:        Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
         let field_defaults: Vec<Option<Constant>> = fields.iter().map(|f| {
             match &f.default {
                 Some(Expr::Literal(Value::Int(n)))   => Some(Constant::Int(*n)),
@@ -867,8 +885,9 @@ impl Compiler {
                 _ => None,
             }
         }).collect();
-        let method_names:    Vec<String> = methods.iter().map(|m| m.name.clone()).collect();
-        let private_methods: Vec<String> = methods.iter().filter(|m| m.private).map(|m| m.name.clone()).collect();
+        let method_names:       Vec<String> = instance_methods.iter().map(|m| m.name.clone()).collect();
+        let private_methods:    Vec<String> = instance_methods.iter().filter(|m| m.private).map(|m| m.name.clone()).collect();
+        let class_method_names: Vec<String> = class_methods.iter().map(|m| m.name.clone()).collect();
         let desc_idx = self.state_mut().chunk.add_constant(Constant::ClassDesc {
             name:       name.to_string(),
             superclass: superclass.map(|s| s.to_string()),
@@ -876,6 +895,7 @@ impl Compiler {
             field_defaults,
             method_names,
             private_methods,
+            class_method_names,
         });
         self.emit(OpCode::DefClass(desc_idx));
         // Store the class value in a local slot named after the class.
