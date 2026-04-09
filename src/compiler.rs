@@ -751,14 +751,38 @@ impl Compiler {
             usize::MAX
         };
 
+        // Track locals before body so we can pad the rescue path later.
+        let locals_before_body = self.state().locals.len();
+
+        // Check BEFORE compiling body: is_new_local_assign checks whether the name is already
+        // registered — after body compilation it would be, giving a false negative.
+        let body_creates_new_local_result = body.last().map_or(false, |e| self.is_new_local_assign(e));
+
         let begin_idx = self.emit_begin_rescue(rescue_var_slot);
 
         self.compile_branch(body)?;
+
+        let new_body_locals = self.state().locals.len() - locals_before_body;
+
+        // If body ends with a new-local assign, TOS IS the local's stack slot (no SetLocal
+        // was emitted — the push IS the slot). Push a copy so the begin expression's result
+        // is a fresh value sitting above all the local slots.
+        if body_creates_new_local_result {
+            let slot = self.state().locals.len() - 1;
+            self.emit(OpCode::GetLocal(slot));
+        }
 
         self.emit(OpCode::PopRescue);
         let jump_over_rescue = self.emit_jump(OpCode::Jump(0));
 
         self.patch_rescue(begin_idx);
+
+        // On the rescue path the stack is truncated back to pre-body height, losing any
+        // slots that were allocated for body locals. Emit Nils to restore those slots so the
+        // compiler's locals list stays in sync with the runtime stack layout.
+        for _ in 0..new_body_locals {
+            self.emit(OpCode::Nil);
+        }
 
         self.compile_branch(rescue_body)?;
 
