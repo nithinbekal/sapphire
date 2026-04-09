@@ -15,16 +15,6 @@ cargo test <test_name>               # run a specific test
 cargo test <test_name> -- --nocapture  # run with stdout
 ```
 
-## Examples
-
-Run all examples across all backends:
-```bash
-./examples/run_all.sh                 # run all examples (interpreter, VM, typecheck)
-./examples/run_all.sh --interpreter   # only interpreter
-./examples/run_all.sh --vm            # only VM
-./examples/run_all.sh --typecheck     # only typechecker
-```
-
 ## Architecture
 
 Two execution pipelines share the same lexer and parser front-end:
