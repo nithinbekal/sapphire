@@ -1,7 +1,0 @@
-begin
-  x = 5
-rescue e
-  print "error"
-end
-
-print x
