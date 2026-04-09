@@ -1,0 +1,4 @@
+begin
+  x = 5
+end
+print x

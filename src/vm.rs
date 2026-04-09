@@ -1063,32 +1063,7 @@ impl Vm {
 
                 OpCode::Raise => {
                     let val = self.pop()?;
-                    // Walk up the frame stack looking for a rescue handler.
-                    loop {
-                        if let Some(frame) = self.frames.last_mut() {
-                            if let Some(info) = frame.rescues.pop() {
-                                // Restore the stack to its height at BeginRescue time,
-                                // then store the exception in the rescue variable (if any).
-                                self.stack.truncate(info.stack_height);
-                                if info.rescue_var_slot != usize::MAX {
-                                    let slot = self.frames.last().unwrap().base + info.rescue_var_slot;
-                                    while self.stack.len() <= slot {
-                                        self.stack.push(VmValue::Nil);
-                                    }
-                                    self.stack[slot] = val.clone();
-                                }
-                                self.frames.last_mut().unwrap().ip = info.handler_ip;
-                                break;
-                            }
-                            // No rescue in this frame; unwind it.
-                            let base = frame.base;
-                            self.close_upvalues_above(base);
-                            self.frames.pop();
-                            self.stack.truncate(base);
-                        } else {
-                            return Err(VmError::Raised(val));
-                        }
-                    }
+                    self.raise_value(val)?;
                 }
 
                 OpCode::Break => {
@@ -1252,6 +1227,11 @@ impl Vm {
                 }
                 OpCode::Div => {
                     let (a, b) = self.pop2()?;
+                    let is_zero = matches!(&b, VmValue::Int(0)) || matches!(&b, VmValue::Float(f) if *f == 0.0);
+                    if is_zero {
+                        self.raise_value(VmValue::Str("division by zero".into()))?;
+                        continue;
+                    }
                     self.stack.push(match (&a, &b) {
                         (VmValue::Int(x),   VmValue::Int(y))   => VmValue::Int(x / y),
                         (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x / y),
@@ -1265,6 +1245,11 @@ impl Vm {
                 }
                 OpCode::Mod => {
                     let (a, b) = self.pop2()?;
+                    let is_zero = matches!(&b, VmValue::Int(0)) || matches!(&b, VmValue::Float(f) if *f == 0.0);
+                    if is_zero {
+                        self.raise_value(VmValue::Str("division by zero".into()))?;
+                        continue;
+                    }
                     self.stack.push(match (&a, &b) {
                         (VmValue::Int(x),   VmValue::Int(y))   => VmValue::Int(x % y),
                         (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x % y),
@@ -1635,6 +1620,31 @@ impl Vm {
     }
 
     // ── Stack helpers ─────────────────────────────────────────────────────────
+
+    fn raise_value(&mut self, val: VmValue) -> Result<(), VmError> {
+        loop {
+            if let Some(frame) = self.frames.last_mut() {
+                if let Some(info) = frame.rescues.pop() {
+                    self.stack.truncate(info.stack_height);
+                    if info.rescue_var_slot != usize::MAX {
+                        let slot = self.frames.last().unwrap().base + info.rescue_var_slot;
+                        while self.stack.len() <= slot {
+                            self.stack.push(VmValue::Nil);
+                        }
+                        self.stack[slot] = val;
+                    }
+                    self.frames.last_mut().unwrap().ip = info.handler_ip;
+                    return Ok(());
+                }
+                let base = frame.base;
+                self.close_upvalues_above(base);
+                self.frames.pop();
+                self.stack.truncate(base);
+            } else {
+                return Err(VmError::Raised(val));
+            }
+        }
+    }
 
     fn pop(&mut self) -> Result<VmValue, VmError> {
         self.stack.pop().ok_or(VmError::StackUnderflow)
