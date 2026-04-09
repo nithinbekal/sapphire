@@ -194,6 +194,7 @@ pub enum Constant {
         field_names:     Vec<String>,
         field_defaults:  Vec<Option<Constant>>,
         method_names:    Vec<String>,
+        private_methods: Vec<String>,
     },
 }
 

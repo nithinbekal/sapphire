@@ -1,7 +1,7 @@
 use sapphire::compiler::compile;
 use sapphire::lexer::Lexer;
 use sapphire::parser::Parser;
-use sapphire::vm::{Vm, VmValue};
+use sapphire::vm::{Vm, VmError, VmValue};
 
 fn eval(src: &str) -> VmValue {
     let tokens = Lexer::new(src).scan_tokens();
@@ -17,6 +17,13 @@ fn eval_with_stdlib(src: &str) -> VmValue {
     let mut vm = Vm::new(func);
     vm.load_stdlib().expect("stdlib");
     vm.run().expect("vm error").expect("empty stack")
+}
+
+fn eval_err(src: &str) -> VmError {
+    let tokens = Lexer::new(src).scan_tokens();
+    let stmts = Parser::new(tokens).parse().expect("parse error");
+    let func = compile(&stmts).expect("compile error");
+    Vm::new(func).run().expect_err("expected vm error")
 }
 
 #[test]
@@ -726,4 +733,24 @@ def outer() {
 outer()
 "#;
     assert_eq!(eval(src), VmValue::Int(11));
+}
+
+#[test]
+fn private_method_callable_from_within_class() {
+    let src = r#"class Foo {
+  defp secret() { 42 }
+  def get() { self.secret() }
+}
+Foo.new().get()"#;
+    assert_eq!(eval(src), VmValue::Int(42));
+}
+
+#[test]
+fn private_method_rejected_from_outside_class() {
+    let src = r#"class Foo {
+  defp secret() { 42 }
+}
+Foo.new().secret()"#;
+    let err = eval_err(src);
+    assert!(matches!(err, VmError::TypeError { ref message, .. } if message.contains("private")));
 }

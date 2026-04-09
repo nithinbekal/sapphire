@@ -867,13 +867,15 @@ impl Compiler {
                 _ => None,
             }
         }).collect();
-        let method_names: Vec<String> = methods.iter().map(|m| m.name.clone()).collect();
+        let method_names:    Vec<String> = methods.iter().map(|m| m.name.clone()).collect();
+        let private_methods: Vec<String> = methods.iter().filter(|m| m.private).map(|m| m.name.clone()).collect();
         let desc_idx = self.state_mut().chunk.add_constant(Constant::ClassDesc {
             name:       name.to_string(),
             superclass: superclass.map(|s| s.to_string()),
             field_names,
             field_defaults,
             method_names,
+            private_methods,
         });
         self.emit(OpCode::DefClass(desc_idx));
         // Store the class value in a local slot named after the class.

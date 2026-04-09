@@ -75,6 +75,7 @@ pub struct VmMethod {
     pub upvalues:   Vec<Upvalue>,
     /// Name of the class this method was defined in; empty for block closures.
     pub defined_in: String,
+    pub private:    bool,
 }
 
 impl PartialEq for VmValue {
@@ -522,15 +523,15 @@ impl Vm {
                 // ── Class opcodes ────────────────────────────────────────────
 
                 OpCode::DefClass(desc_idx) => {
-                    let (class_name, superclass_name, own_fields, method_names) = {
+                    let (class_name, superclass_name, own_fields, method_names, private_methods) = {
                         let consts = &self.frames.last().unwrap().function.chunk.constants;
                         match &consts[desc_idx] {
-                            Constant::ClassDesc { name, superclass, field_names, field_defaults, method_names } => {
+                            Constant::ClassDesc { name, superclass, field_names, field_defaults, method_names, private_methods } => {
                                 let own_fields: Vec<(String, VmValue)> = field_names.iter()
                                     .zip(field_defaults.iter())
                                     .map(|(n, d)| (n.clone(), d.as_ref().map(VmValue::from).unwrap_or(VmValue::Nil)))
                                     .collect();
-                                (name.clone(), superclass.clone(), own_fields, method_names.clone())
+                                (name.clone(), superclass.clone(), own_fields, method_names.clone(), private_methods.clone())
                             }
                             _ => panic!("DefClass: expected ClassDesc constant"),
                         }
@@ -543,8 +544,9 @@ impl Vm {
                     for (mname, closure) in method_names.iter().zip(closures) {
                         match closure {
                             VmValue::Closure { function, upvalues } => {
+                                let private = private_methods.contains(mname);
                                 own_methods.insert(mname.clone(), VmMethod {
-                                    function, upvalues, defined_in: class_name.clone(),
+                                    function, upvalues, defined_in: class_name.clone(), private,
                                 });
                             }
                             _ => panic!("DefClass: method is not a closure"),
@@ -773,6 +775,15 @@ impl Vm {
                             .and_then(|entry| entry.methods.get(&method_name).cloned());
                         match method {
                             Some(m) => {
+                                if m.private {
+                                    let caller_class = self.frames.last().and_then(|f| f.class_name.as_deref()).unwrap_or("");
+                                    if caller_class != m.defined_in {
+                                        return Err(VmError::TypeError {
+                                            message: format!("private method '{}' called from outside class", method_name),
+                                            line,
+                                        });
+                                    }
+                                }
                                 if m.function.arity != arg_count {
                                     return Err(VmError::TypeError {
                                         message: format!(
@@ -811,6 +822,15 @@ impl Vm {
                         }
                         _ => unreachable!(),
                     };
+                    if method.private {
+                        let caller_class = self.frames.last().and_then(|f| f.class_name.as_deref()).unwrap_or("");
+                        if caller_class != method.defined_in {
+                            return Err(VmError::TypeError {
+                                message: format!("private method '{}' called from outside class", method_name),
+                                line,
+                            });
+                        }
+                    }
                     if method.function.arity != arg_count {
                         return Err(VmError::TypeError {
                             message: format!(
@@ -894,7 +914,7 @@ impl Vm {
                     let block_val = self.pop()?;
                     let block = match block_val {
                         VmValue::Closure { function, upvalues } =>
-                            Some(VmMethod { function, upvalues, defined_in: String::new() }),
+                            Some(VmMethod { function, upvalues, defined_in: String::new(), private: false }),
                         VmValue::Nil => None,
                         other => return Err(VmError::TypeError {
                             message: format!("block must be a closure, got {}", other),
@@ -933,7 +953,7 @@ impl Vm {
                     let block_val = self.pop()?;
                     let block = match block_val {
                         VmValue::Closure { function, upvalues } =>
-                            Some(VmMethod { function, upvalues, defined_in: String::new() }),
+                            Some(VmMethod { function, upvalues, defined_in: String::new(), private: false }),
                         VmValue::Nil => None,
                         other => return Err(VmError::TypeError {
                             message: format!("block must be a closure, got {}", other),
@@ -1004,6 +1024,15 @@ impl Vm {
                                 })?,
                         _ => unreachable!(),
                     };
+                    if method.private {
+                        let caller_class = self.frames.last().and_then(|f| f.class_name.as_deref()).unwrap_or("");
+                        if caller_class != method.defined_in {
+                            return Err(VmError::TypeError {
+                                message: format!("private method '{}' called from outside class", method_name),
+                                line,
+                            });
+                        }
+                    }
                     if method.function.arity != arg_count {
                         return Err(VmError::TypeError {
                             message: format!(
