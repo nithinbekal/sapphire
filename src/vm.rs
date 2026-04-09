@@ -1187,43 +1187,20 @@ impl Vm {
 
                 OpCode::Add => {
                     let (a, b) = self.pop2()?;
-                    self.stack.push(match (&a, &b) {
-                        (VmValue::Int(x),   VmValue::Int(y))   => VmValue::Int(x + y),
-                        (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x + y),
-                        (VmValue::Int(x),   VmValue::Float(y)) => VmValue::Float(*x as f64 + y),
-                        (VmValue::Float(x), VmValue::Int(y))   => VmValue::Float(x + *y as f64),
-                        (VmValue::Str(x),   VmValue::Str(y))   => VmValue::Str(format!("{}{}", x, y)),
-                        _ => return Err(VmError::TypeError {
-                            message: format!("cannot add {} and {}", a, b),
-                            line,
-                        }),
-                    });
+                    let result = if let (VmValue::Str(x), VmValue::Str(y)) = (&a, &b) {
+                        VmValue::Str(format!("{}{}", x, y))
+                    } else {
+                        numeric_binop(&a, &b, line, "add", |x, y| x + y, |x, y| x + y)?
+                    };
+                    self.stack.push(result);
                 }
                 OpCode::Sub => {
                     let (a, b) = self.pop2()?;
-                    self.stack.push(match (&a, &b) {
-                        (VmValue::Int(x),   VmValue::Int(y))   => VmValue::Int(x - y),
-                        (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x - y),
-                        (VmValue::Int(x),   VmValue::Float(y)) => VmValue::Float(*x as f64 - y),
-                        (VmValue::Float(x), VmValue::Int(y))   => VmValue::Float(x - *y as f64),
-                        _ => return Err(VmError::TypeError {
-                            message: format!("cannot subtract {} and {}", a, b),
-                            line,
-                        }),
-                    });
+                    self.stack.push(numeric_binop(&a, &b, line, "subtract", |x, y| x - y, |x, y| x - y)?);
                 }
                 OpCode::Mul => {
                     let (a, b) = self.pop2()?;
-                    self.stack.push(match (&a, &b) {
-                        (VmValue::Int(x),   VmValue::Int(y))   => VmValue::Int(x * y),
-                        (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x * y),
-                        (VmValue::Int(x),   VmValue::Float(y)) => VmValue::Float(*x as f64 * y),
-                        (VmValue::Float(x), VmValue::Int(y))   => VmValue::Float(x * *y as f64),
-                        _ => return Err(VmError::TypeError {
-                            message: format!("cannot multiply {} and {}", a, b),
-                            line,
-                        }),
-                    });
+                    self.stack.push(numeric_binop(&a, &b, line, "multiply", |x, y| x * y, |x, y| x * y)?);
                 }
                 OpCode::Div => {
                     let (a, b) = self.pop2()?;
@@ -1232,16 +1209,7 @@ impl Vm {
                         self.raise_value(VmValue::Str("division by zero".into()))?;
                         continue;
                     }
-                    self.stack.push(match (&a, &b) {
-                        (VmValue::Int(x),   VmValue::Int(y))   => VmValue::Int(x / y),
-                        (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x / y),
-                        (VmValue::Int(x),   VmValue::Float(y)) => VmValue::Float(*x as f64 / y),
-                        (VmValue::Float(x), VmValue::Int(y))   => VmValue::Float(x / *y as f64),
-                        _ => return Err(VmError::TypeError {
-                            message: format!("cannot divide {} and {}", a, b),
-                            line,
-                        }),
-                    });
+                    self.stack.push(numeric_binop(&a, &b, line, "divide", |x, y| x / y, |x, y| x / y)?);
                 }
                 OpCode::Mod => {
                     let (a, b) = self.pop2()?;
@@ -1250,16 +1218,7 @@ impl Vm {
                         self.raise_value(VmValue::Str("division by zero".into()))?;
                         continue;
                     }
-                    self.stack.push(match (&a, &b) {
-                        (VmValue::Int(x),   VmValue::Int(y))   => VmValue::Int(x % y),
-                        (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x % y),
-                        (VmValue::Int(x),   VmValue::Float(y)) => VmValue::Float(*x as f64 % y),
-                        (VmValue::Float(x), VmValue::Int(y))   => VmValue::Float(x % *y as f64),
-                        _ => return Err(VmError::TypeError {
-                            message: format!("cannot modulo {} and {}", a, b),
-                            line,
-                        }),
-                    });
+                    self.stack.push(numeric_binop(&a, &b, line, "modulo", |x, y| x % y, |x, y| x % y)?);
                 }
 
                 OpCode::Equal    => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a == b)); }
@@ -2025,6 +1984,26 @@ fn vm_value_partial_cmp(a: &VmValue, b: &VmValue) -> std::cmp::Ordering {
 
 fn is_falsy(v: &VmValue) -> bool {
     matches!(v, VmValue::Nil | VmValue::Bool(false))
+}
+
+fn numeric_binop(
+    a: &VmValue,
+    b: &VmValue,
+    line: u32,
+    verb: &str,
+    int_op: impl Fn(i64, i64) -> i64,
+    float_op: impl Fn(f64, f64) -> f64,
+) -> Result<VmValue, VmError> {
+    match (a, b) {
+        (VmValue::Int(x),   VmValue::Int(y))   => Ok(VmValue::Int(int_op(*x, *y))),
+        (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(float_op(*x, *y))),
+        (VmValue::Int(x),   VmValue::Float(y)) => Ok(VmValue::Float(float_op(*x as f64, *y))),
+        (VmValue::Float(x), VmValue::Int(y))   => Ok(VmValue::Float(float_op(*x, *y as f64))),
+        _ => Err(VmError::TypeError {
+            message: format!("cannot {} {} and {}", verb, a, b),
+            line,
+        }),
+    }
 }
 
 fn numeric_cmp(
