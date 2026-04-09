@@ -226,9 +226,40 @@ impl Parser {
             } else if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
                 let private = self.check(&TokenKind::Defp);
                 methods.push(self.method_def(private)?);
+            } else if self.check(&TokenKind::SelfKw) {
+                self.advance(); // consume `self`
+                if !self.check(&TokenKind::LeftBrace) {
+                    return Err(SapphireError::ParseError {
+                        message: "expected '{' after 'self' in class body".into(),
+                        line: self.peek().line,
+                    });
+                }
+                self.advance(); // consume '{'
+                loop {
+                    self.skip_terminators();
+                    if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
+                    if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
+                        let private = self.check(&TokenKind::Defp);
+                        let mut m = self.method_def(private)?;
+                        m.class_method = true;
+                        methods.push(m);
+                    } else {
+                        return Err(SapphireError::ParseError {
+                            message: "expected 'def' or 'defp' inside 'self' block".into(),
+                            line: self.peek().line,
+                        });
+                    }
+                }
+                if !self.check(&TokenKind::RightBrace) {
+                    return Err(SapphireError::ParseError {
+                        message: "expected '}' to close 'self' block".into(),
+                        line: self.peek().line,
+                    });
+                }
+                self.advance(); // consume '}'
             } else {
                 return Err(SapphireError::ParseError {
-                    message: "expected 'attr', 'def', or 'defp' in class body".into(),
+                    message: "expected 'attr', 'def', 'defp', or 'self' in class body".into(),
                     line: self.peek().line,
                 });
             }
@@ -416,7 +447,7 @@ impl Parser {
         self.advance(); // consume ')'
         let return_type = self.parse_return_type()?;
         let body = self.block_with_rescue()?;
-        Ok(MethodDef { name, params, return_type, body, private })
+        Ok(MethodDef { name, params, return_type, body, private, class_method: false })
     }
 
     fn while_statement(&mut self) -> Result<Expr, SapphireError> {

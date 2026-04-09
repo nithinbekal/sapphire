@@ -53,11 +53,12 @@ pub enum VmValue {
     Range { from: i64, to: i64 },
     /// A compiled class: holds the static field list (with defaults) and the method table.
     Class {
-        name:                    String,
+        name:          String,
         #[allow(dead_code)]
-        superclass: Option<String>,
-        fields:     Vec<(String, VmValue)>,
-        methods:    Rc<HashMap<String, VmMethod>>,
+        superclass:    Option<String>,
+        fields:        Vec<(String, VmValue)>,
+        methods:       Rc<HashMap<String, VmMethod>>,
+        class_methods: Rc<HashMap<String, VmMethod>>,
     },
     /// A live instance of a class.
     Instance {
@@ -217,12 +218,13 @@ struct CallFrame {
 /// * `SuperInvoke` looks up `classes[super_name].methods` and gets the
 ///   correct merged map for that ancestor level.
 struct ClassEntry {
-    superclass: Option<String>,
+    superclass:    Option<String>,
     /// The merged (inherited + own) field list with default values.
-    fields:     Vec<(String, VmValue)>,
-    /// Merged (inherited + own) methods.  Used for both primitive dispatch and
-    /// `SuperInvoke` (which looks in the *parent's* merged map).
-    methods:    Rc<HashMap<String, VmMethod>>,
+    fields:        Vec<(String, VmValue)>,
+    /// Merged (inherited + own) instance methods.
+    methods:       Rc<HashMap<String, VmMethod>>,
+    /// Merged (inherited + own) class methods.
+    class_methods: Rc<HashMap<String, VmMethod>>,
 }
 
 pub struct Vm {
@@ -523,37 +525,53 @@ impl Vm {
                 // ── Class opcodes ────────────────────────────────────────────
 
                 OpCode::DefClass(desc_idx) => {
-                    let (class_name, superclass_name, own_fields, method_names, private_methods) = {
+                    let (class_name, superclass_name, own_fields, class_method_names, method_names, private_methods) = {
                         let consts = &self.frames.last().unwrap().function.chunk.constants;
                         match &consts[desc_idx] {
-                            Constant::ClassDesc { name, superclass, field_names, field_defaults, method_names, private_methods } => {
+                            Constant::ClassDesc { name, superclass, field_names, field_defaults, method_names, private_methods, class_method_names } => {
                                 let own_fields: Vec<(String, VmValue)> = field_names.iter()
                                     .zip(field_defaults.iter())
                                     .map(|(n, d)| (n.clone(), d.as_ref().map(VmValue::from).unwrap_or(VmValue::Nil)))
                                     .collect();
-                                (name.clone(), superclass.clone(), own_fields, method_names.clone(), private_methods.clone())
+                                (name.clone(), superclass.clone(), own_fields, class_method_names.clone(), method_names.clone(), private_methods.clone())
                             }
                             _ => panic!("DefClass: expected ClassDesc constant"),
                         }
                     };
-                    let n = method_names.len();
-                    let start = self.stack.len().checked_sub(n).ok_or(VmError::StackUnderflow)?;
-                    let closures: Vec<VmValue> = self.stack.drain(start..).collect();
-                    // Build this class's own methods with defined_in = this class name.
+                    // Drain class method closures first (emitted first by compiler).
+                    let n_class = class_method_names.len();
+                    let class_start = self.stack.len()
+                        .checked_sub(n_class + method_names.len())
+                        .ok_or(VmError::StackUnderflow)?;
+                    let all_closures: Vec<VmValue> = self.stack.drain(class_start..).collect();
+                    let (class_closures, instance_closures) = all_closures.split_at(n_class);
+
+                    let mut own_class_methods: HashMap<String, VmMethod> = HashMap::new();
+                    for (mname, closure) in class_method_names.iter().zip(class_closures) {
+                        match closure {
+                            VmValue::Closure { function, upvalues } => {
+                                own_class_methods.insert(mname.clone(), VmMethod {
+                                    function: function.clone(), upvalues: upvalues.clone(),
+                                    defined_in: class_name.clone(), private: false,
+                                });
+                            }
+                            _ => panic!("DefClass: class method is not a closure"),
+                        }
+                    }
                     let mut own_methods: HashMap<String, VmMethod> = HashMap::new();
-                    for (mname, closure) in method_names.iter().zip(closures) {
+                    for (mname, closure) in method_names.iter().zip(instance_closures) {
                         match closure {
                             VmValue::Closure { function, upvalues } => {
                                 let private = private_methods.contains(mname);
                                 own_methods.insert(mname.clone(), VmMethod {
-                                    function, upvalues, defined_in: class_name.clone(), private,
+                                    function: function.clone(), upvalues: upvalues.clone(),
+                                    defined_in: class_name.clone(), private,
                                 });
                             }
                             _ => panic!("DefClass: method is not a closure"),
                         }
                     }
-                    // If no explicit superclass and Object is loaded, inherit from it
-                    // (mirrors the interpreter's implicit-Object rule).
+                    // If no explicit superclass and Object is loaded, inherit from it.
                     let effective_super = superclass_name.clone().or_else(|| {
                         if class_name != "Object" && self.classes.contains_key("Object") {
                             Some("Object".to_string())
@@ -561,10 +579,10 @@ impl Vm {
                             None
                         }
                     });
-                    // Merge inherited fields and methods (parent first, child overrides).
-                    let (merged_fields, merged_methods) = if let Some(ref sname) = effective_super {
-                        let (parent_fields, parent_methods) = match self.classes.get(sname) {
-                            Some(entry) => (entry.fields.clone(), (*entry.methods).clone()),
+                    // Merge inherited fields, instance methods, and class methods.
+                    let (merged_fields, merged_methods, merged_class_methods) = if let Some(ref sname) = effective_super {
+                        let (parent_fields, parent_methods, parent_class_methods) = match self.classes.get(sname) {
+                            Some(entry) => (entry.fields.clone(), (*entry.methods).clone(), (*entry.class_methods).clone()),
                             None => return Err(VmError::TypeError {
                                 message: format!("superclass '{}' not found", sname),
                                 line,
@@ -574,23 +592,26 @@ impl Vm {
                         mf.extend(own_fields);
                         let mut mm = parent_methods;
                         mm.extend(own_methods);
-                        (mf, mm)
+                        let mut mc = parent_class_methods;
+                        mc.extend(own_class_methods);
+                        (mf, mm, mc)
                     } else {
-                        (own_fields, own_methods)
+                        (own_fields, own_methods, own_class_methods)
                     };
-                    // Register with merged methods so both primitive dispatch and
-                    // SuperInvoke can find inherited methods without extra lookups.
-                    let merged_rc = Rc::new(merged_methods);
+                    let merged_rc         = Rc::new(merged_methods);
+                    let merged_class_rc   = Rc::new(merged_class_methods);
                     self.classes.insert(class_name.clone(), ClassEntry {
-                        superclass: effective_super.clone(),
-                        fields:     merged_fields.clone(),
-                        methods:    merged_rc.clone(),
+                        superclass:    effective_super.clone(),
+                        fields:        merged_fields.clone(),
+                        methods:       merged_rc.clone(),
+                        class_methods: merged_class_rc.clone(),
                     });
                     self.stack.push(VmValue::Class {
-                        name:       class_name,
-                        superclass: effective_super,
-                        fields:     merged_fields,
-                        methods:    merged_rc,
+                        name:          class_name,
+                        superclass:    effective_super,
+                        fields:        merged_fields,
+                        methods:       merged_rc,
+                        class_methods: merged_class_rc,
                     });
                 }
 
@@ -752,6 +773,32 @@ impl Vm {
                             });
                             continue;
                         }
+                    }
+
+                    // Class method dispatch: receiver is a Class value.
+                    if let VmValue::Class { ref class_methods, .. } = self.stack[recv_slot].clone() {
+                        let method = class_methods.get(&method_name).cloned()
+                            .ok_or_else(|| VmError::TypeError {
+                                message: format!("unknown class method '{}'", method_name),
+                                line,
+                            })?;
+                        if method.function.arity != arg_count {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "class method '{}' expects {} arg(s), got {}",
+                                    method_name, method.function.arity, arg_count
+                                ),
+                                line,
+                            });
+                        }
+                        self.frames.push(CallFrame {
+                            function:  method.function,
+                            upvalues:  method.upvalues,
+                            ip: 0, base: recv_slot,
+                            block: None, is_block_caller: false, rescues: vec![],
+                            class_name: Some(method.defined_in),
+                        });
+                        continue;
                     }
 
                     // Try native dispatch for non-Instance types.

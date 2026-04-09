@@ -189,12 +189,13 @@ pub enum Constant {
     /// field names (in declaration order), and method names (in the same
     /// order as the closures that will be popped off the stack by `DefClass`).
     ClassDesc {
-        name:            String,
-        superclass:      Option<String>,
-        field_names:     Vec<String>,
-        field_defaults:  Vec<Option<Constant>>,
-        method_names:    Vec<String>,
-        private_methods: Vec<String>,
+        name:               String,
+        superclass:         Option<String>,
+        field_names:        Vec<String>,
+        field_defaults:     Vec<Option<Constant>>,
+        method_names:       Vec<String>,
+        private_methods:    Vec<String>,
+        class_method_names: Vec<String>,
     },
 }
 

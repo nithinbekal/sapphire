@@ -42,6 +42,7 @@ pub struct MethodDef {
     pub return_type: Option<TypeExpr>,
     pub body: Vec<Expr>,
     pub private: bool,
+    pub class_method: bool,
 }
 
 #[derive(Debug, Clone)]

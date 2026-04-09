@@ -754,3 +754,67 @@ Foo.new().secret()"#;
     let err = eval_err(src);
     assert!(matches!(err, VmError::TypeError { ref message, .. } if message.contains("private")));
 }
+
+#[test]
+fn class_method_basic() {
+    let src = r#"class Greeter {
+  self {
+    def hello() { "hello" }
+  }
+}
+Greeter.hello()"#;
+    assert_eq!(eval(src), VmValue::Str("hello".into()));
+}
+
+#[test]
+fn class_method_with_args_self_block() {
+    let src = r#"class Math {
+  self {
+    def add(a, b) { a + b }
+  }
+}
+Math.add(3, 4)"#;
+    assert_eq!(eval(src), VmValue::Int(7));
+}
+
+#[test]
+fn class_method_factory() {
+    let src = r#"class Point {
+  attr x
+  attr y
+  self {
+    def origin() { self.new(x: 0, y: 0) }
+  }
+}
+p = Point.origin()
+p.x"#;
+    assert_eq!(eval(src), VmValue::Int(0));
+}
+
+#[test]
+fn class_method_inherited_by_subclass() {
+    let src = r#"class Animal {
+  self {
+    def kind() { "animal" }
+  }
+}
+class Dog < Animal {}
+Dog.kind()"#;
+    assert_eq!(eval(src), VmValue::Str("animal".into()));
+}
+
+#[test]
+fn class_method_overridden_in_subclass() {
+    let src = r#"class Animal {
+  self {
+    def kind() { "animal" }
+  }
+}
+class Dog < Animal {
+  self {
+    def kind() { "dog" }
+  }
+}
+Dog.kind()"#;
+    assert_eq!(eval(src), VmValue::Str("dog".into()));
+}

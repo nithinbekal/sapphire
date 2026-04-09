@@ -6,7 +6,7 @@ Sapphire is an object-oriented scripting language with a Ruby-inspired feel: cle
 
 ```
 sapphire run hello.spr   # run a script file
-sapphire                 # start the interactive REPL
+sapphire console         # start the interactive REPL
 ```
 
 File extension: `.spr`
@@ -764,6 +764,49 @@ acc.deposit(100)
 print acc.balance   # 100
 
 acc.validate(50)    # error: private method
+```
+
+### Class methods
+
+Use a `self { ... }` block inside the class body to define methods that are called on the class itself rather than on instances. These are useful for factory methods and other class-level behaviour.
+
+```
+class Point {
+  attr x
+  attr y
+
+  self {
+    def origin() {
+      self.new(x: 0, y: 0)
+    }
+
+    def from_pair(a, b) {
+      self.new(x: a, y: b)
+    }
+  }
+}
+
+p = Point.origin()
+print p.x   # 0
+
+q = Point.from_pair(3, 4)
+print q.x   # 3
+```
+
+Inside a class method body, `self` refers to the class object. Use `self.new(...)` to create instances.
+
+Class methods are inherited by subclasses:
+
+```
+class Animal {
+  self {
+    def kingdom() { "Animalia" }
+  }
+}
+
+class Dog < Animal {}
+
+Dog.kingdom()   # "Animalia"
 ```
 
 ---

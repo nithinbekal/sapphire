@@ -1,6 +1,13 @@
 # Changelog
 
-## v0.1.0 (unreleased)
+## Unreleased
+
+**Classes**
+- Class methods via `self { ... }` blocks — methods callable on the class itself, inherited by subclasses
+
+---
+
+## v0.1.0
 
 First public preview of the Sapphire language.
 
