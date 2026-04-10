@@ -10,7 +10,13 @@ fn main() {
         [_, cmd] if cmd == "console" => run_repl(),
         [_, cmd] if cmd == "version" => println!("{}", env!("CARGO_PKG_VERSION")),
         _ => {
-            eprintln!("Usage: sapphire [run <file.spr> | vm <file.spr> | typecheck <file.spr> | console | version]");
+            eprintln!("Usage: sapphire <command>\n");
+            eprintln!("Commands:");
+            eprintln!("  run <file.spr>       Run a file using the tree-walk interpreter");
+            eprintln!("  vm <file.spr>        Run a file using the experimental bytecode VM");
+            eprintln!("  typecheck <file.spr> Type-check a file");
+            eprintln!("  console              Start the REPL");
+            eprintln!("  version              Print the version");
             std::process::exit(1);
         }
     }
