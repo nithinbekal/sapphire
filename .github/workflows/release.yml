@@ -57,8 +57,13 @@ jobs:
         with:
           merge-multiple: true
 
+      - name: Generate checksums
+        run: sha256sum sapphire-* > checksums.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: sapphire-*
+          files: |
+            sapphire-*
+            checksums.txt
           generate_release_notes: true
