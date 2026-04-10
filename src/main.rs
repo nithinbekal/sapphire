@@ -8,7 +8,7 @@ fn main() {
         [_, cmd, path] if cmd == "vm"        => run_file_vm(path),
         [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
         [_, cmd] if cmd == "console" => run_repl(),
-        [_, cmd] if cmd == "version" => println!("{}", env!("CARGO_PKG_VERSION")),
+        [_, cmd] if cmd == "version" => println!("sapphire {}", env!("CARGO_PKG_VERSION")),
         _ => {
             eprintln!("Usage: sapphire <command>\n");
             eprintln!("Commands:");
