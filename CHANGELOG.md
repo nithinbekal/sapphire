@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+## v0.1.1
 
 **Classes**
 - Class methods via `self { ... }` blocks — methods callable on the class itself, inherited by subclasses
+
+**CLI**
+- `sapphire version` command — prints the language name and version (e.g. `Sapphire 0.1.1`)
+- More detailed usage output
 
 ---
 
