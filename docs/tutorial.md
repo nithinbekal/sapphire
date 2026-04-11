@@ -46,57 +46,6 @@ Sapphire has six built-in value types:
 
 ---
 
-## Arithmetic
-
-```ruby
-1 + 2       # 3
-10 - 3      # 7
-4 * 5       # 20
-10 / 3      # 3  (integer division)
-10 % 3      # 1  (modulo)
--x          # negation
-```
-
-Operator precedence follows the usual rules. Use parentheses to override.
-
-```ruby
-(1 + 2) * 3   # 9
-```
-
----
-
-## Comparisons
-
-```ruby
-x == 10
-x != 5
-x < 10
-x > 0
-x <= 10
-x >= 1
-```
-
-These return `true` or `false`.
-
----
-
-## Logical operators
-
-```ruby
-x > 0 && x < 100   # both must be true
-x == 0 || x == 1   # at least one must be true
-!flag               # negation
-```
-
-`&&` and `||` short-circuit: the right side is not evaluated if the result is already determined.
-
-```ruby
-name = nil
-label = name || "unknown"   # "unknown"
-```
-
----
-
 ## Strings
 
 String literals use double quotes.
