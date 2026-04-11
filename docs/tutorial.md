@@ -13,126 +13,35 @@ File extension: `.spr`
 
 ---
 
-## Variables
+## The basics
 
-Variables are assigned with `=`. No declaration keyword is needed.
+Variables are assigned with `=`. No declaration keyword is needed. String literals use double quotes, and you can embed any expression inside `#{}`:
 
 ```ruby
-x = 10
 name = "Alice"
-flag = true
+age = 30
+pi = 3.14
+
+print "Hello, #{name}!"           # Hello, Alice!
+print "Next year: #{age + 1}"     # Next year: 31
+print "Pi is about #{pi}"         # Pi is about 3.14
 ```
 
-Variable names can contain letters, digits, and underscores, and may end with `?`.
-
-```ruby
-empty? = false
-```
-
----
-
-## Types
+Comments begin with `#` and run to the end of the line. The `print` built-in accepts any value and writes it to standard output.
 
 Sapphire has six built-in value types:
 
 | Type   | Examples                          |
 |--------|-----------------------------------|
 | Int    | `0`, `42`, `-7`                   |
+| Float  | `3.14`, `-0.5`                    |
 | Bool   | `true`, `false`                   |
 | Str    | `"hello"`                         |
 | List   | `[1, 2, 3]`                       |
 | Map    | `{ name: "Alice", age: 30 }`      |
 | Nil    | `nil`                             |
 
----
-
-## Strings
-
-String literals use double quotes.
-
-```ruby
-greeting = "hello"
-```
-
-### Escape sequences
-
-```ruby
-"hello\nworld"   # newline
-"tab\there"      # tab
-"quote: \""      # literal quote
-"backslash: \\"  # literal backslash
-```
-
-### Concatenation
-
-```ruby
-"hello" + " " + "world"   # "hello world"
-```
-
-### Interpolation
-
-Embed any expression inside `#{}`:
-
-```ruby
-name = "Alice"
-age = 30
-print "Hello #{name}, you are #{age} years old!"
-# Hello Alice, you are 30 years old!
-```
-
-Any value is automatically converted to a string in interpolation.
-
-```ruby
-nums = [1, 2, 3]
-print "List: #{nums}"   # List: [1, 2, 3]
-```
-
-### String methods
-
-```ruby
-"hello".length          # 5
-"hello".upcase          # "HELLO"
-"HELLO".downcase        # "hello"
-"  hi  ".strip          # "hi"
-"hello".empty?          # false
-"".empty?               # true
-
-"hello".include?("ell")       # true
-"hello".starts_with?("hel")   # true
-"hello".ends_with?("llo")     # true
-
-"a,b,c".split(",")      # ["a", "b", "c"]
-"hello".chars           # ["h", "e", "l", "l", "o"]
-```
-
-### Type conversions
-
-```ruby
-42.to_s       # "42"
-"123".to_i    # 123
-true.to_s     # "true"
-```
-
----
-
-## Comments
-
-Comments begin with `#` and run to the end of the line.
-
-```ruby
-# This is a comment
-x = 10   # inline comment
-```
-
----
-
-## Print
-
-```ruby
-print "Hello, world!"
-print x
-print x + 1
-```
+Variable names contain letters, digits, and underscores. The `?` suffix is reserved for method names — not variables.
 
 ---
 
@@ -141,162 +50,117 @@ print x + 1
 ### if / elsif / else
 
 ```ruby
-if x > 0 {
-  print "positive"
+score = 72
+
+if score >= 90 {
+  print "A"
+} elsif score >= 80 {
+  print "B"
+} elsif score >= 70 {
+  print "C"
 } else {
-  print "non-positive"
+  print "below C"
 }
+# C
 ```
 
-`else` is optional.
+A trailing `if` is a concise way to guard a single statement:
 
 ```ruby
-if flag {
-  print "yes"
-}
+print "passing" if score >= 60
 ```
 
-A single-statement body can be written on one line:
+### while, break, and next
 
 ```ruby
-if x < 0 { print "negative" }
-```
-
-Use `elsif` for multi-branch conditionals:
-
-```ruby
-if x > 100 {
-  print "large"
-} elsif x > 10 {
-  print "medium"
-} elsif x > 0 {
-  print "small"
-} else {
-  print "non-positive"
-}
-```
-
-### while
-
-```ruby
-i = 0
-while i < 5 {
-  print i
-  i = i + 1
-}
-```
-
-### break
-
-`break` exits the enclosing loop or block iteration immediately. When used with a value, that value is returned from the iterator.
-
-```ruby
-i = 0
-while true {
-  i = i + 1
-  break if i == 3
-}
-print i   # 3
-```
-
-```ruby
-result = [1, 2, 3, 4, 5].each { |x|
-  break "found it" if x == 3
-}
-print result   # found it
-```
-
-### next
-
-`next` skips the rest of the current iteration and moves to the next one.
-
-```ruby
-i = 0
+i = 1
 sum = 0
-while i < 5 {
-  i = i + 1
-  next if i == 3
+
+while i <= 10 {
+  next if i % 2 == 0   # skip even numbers
   sum = sum + i
+  break if sum > 15    # stop once we've accumulated enough
+  i = i + 1
 }
-print sum   # 12  (1+2+4+5, skipped 3)
+
+print sum   # 16  (1+3+5+7)
 ```
 
-Inside a `map` block, `next val` sets the value for that element instead of computing the rest of the block:
-
-```ruby
-result = [1, 2, 3, 4].map { |x|
-  next 0 if x == 2
-  x * 10
-}
-print result   # [10, 0, 30, 40]
-```
+`next` skips to the next iteration; `break` exits the loop entirely.
 
 ### Ranges
 
-A range literal `from..to` represents an inclusive sequence of integers.
-
-```ruby
-r = 1..10
-```
-
-Use `.each` to iterate, or `.include?` to test membership:
+A range literal `from..to` represents an inclusive sequence of integers. Use `.each` to iterate or `.include?` to test membership:
 
 ```ruby
 (1..5).each { |i| print i }
-# 1
-# 2
-# 3
-# 4
-# 5
+# 1  2  3  4  5
 
-(1..10).include?(7)    # true
-(1..10).include?(11)   # false
-```
-
----
-
-## Multiple assignment
-
-Assign to several variables at once by listing them on the left:
-
-```ruby
-a, b = 1, 2
-print a   # 1
-print b   # 2
-```
-
-This is the idiomatic way to swap two values:
-
-```ruby
-a, b = b, a
+(1..100).include?(42)   # true
 ```
 
 ---
 
 ## Functions
 
-Define functions with `def`. The last evaluated expression is the implicit return value. `return` is optional, but useful for early exits.
+Define functions with `def`. The last evaluated expression is the implicit return value — no explicit `return` needed except for early exits.
 
 ```ruby
-def add(a, b) {
-  a + b
+def greet(name) {
+  "Hello, #{name}!"
 }
 
-print add(3, 4)   # 7
+print greet("world")   # Hello, world!
 ```
 
-### Explicit return
+### Gradual typing
+
+Type annotations on parameters and return values are optional. When present, they are enforced at runtime — that's gradual typing. Add them where you want safety; leave them off when flexibility matters more.
 
 ```ruby
-def abs(n) {
-  if n < 0 { return -n }
+# Without annotations — works for any value
+def double(x) {
+  x * 2
+}
+
+# With annotations — enforced at runtime
+def double(x: Int) -> Int {
+  x * 2
+}
+
+print double(5)     # 10
+print double(2.5)   # runtime error: expected Int
+```
+
+Annotate as much or as little as you like. A common pattern is to annotate public functions at module boundaries and leave internal helpers unannotated.
+
+### Early return
+
+`return` is useful for exiting a function before reaching the end:
+
+```ruby
+def abs(n: Int) -> Int {
+  return -n if n < 0
   n
 }
 ```
 
+### Predicates
+
+By convention, functions that return a boolean end with `?`:
+
+```ruby
+def even?(n: Int) -> Bool {
+  n % 2 == 0
+}
+
+print even?(4)   # true
+print even?(7)   # false
+```
+
 ### Closures
 
-Functions close over the variables in scope where they are defined.
+Functions close over variables in scope where they are defined:
 
 ```ruby
 def make_adder(n) {
@@ -308,330 +172,124 @@ def make_adder(n) {
 
 add5 = make_adder(5)
 print add5(3)   # 8
+print add5(10)  # 15
 ```
 
-### Predicates
+### yield
 
-Function names (and variables) may end with `?` to signal a boolean result.
+`yield` calls the block passed to the current method, letting you write your own iterators:
 
 ```ruby
-def zero?(x) {
-  x == 0
+def repeat(n: Int) {
+  i = 0
+  while i < n {
+    yield(i)
+    i = i + 1
+  }
 }
 
-print zero?(0)   # true
-print zero?(1)   # false
+repeat(3) { |i| print "step #{i}" }
+# step 0
+# step 1
+# step 2
 ```
 
 ---
 
-## Lists
+## Collections
 
-List literals use square brackets.
+### Lists
 
-```ruby
-nums = [1, 2, 3, 4, 5]
-empty = []
-mixed = [1, "hello", true]
-```
-
-### Index access
-
-Zero-based. Negative indices count from the end.
+List literals use square brackets. Indexing is zero-based; negative indices count from the end.
 
 ```ruby
-nums[0]    # 1
-nums[-1]   # 5
+nums = [3, 1, 4, 1, 5, 9, 2, 6]
+
+print nums[0]    # 3
+print nums[-1]   # 6
+print nums.length   # 8
+
+nums.push(7)     # append
+nums.pop()       # remove and return last
 ```
 
-### Index assignment
+The core iteration methods let you work with lists without manual loops:
 
 ```ruby
-nums[0] = 99
+nums = [3, 1, 4, 1, 5, 9, 2, 6]
+
+doubled  = nums.map    { |n| n * 2 }
+big      = nums.select { |n| n > 4 }
+total    = nums.reduce(0) { |acc, n| acc + n }
+
+print doubled   # [6, 2, 8, 2, 10, 18, 4, 12]
+print big       # [5, 9, 6]
+print total     # 31
+
+print nums.any? { |n| n > 8 }   # true   (9 is)
+print nums.all? { |n| n > 0 }   # true
+print nums.none? { |n| n > 99 } # true
 ```
 
-### Built-in methods
-
-```ruby
-nums.length   # 5
-nums.first    # 1
-nums.last     # 5
-nums.push(6)  # appends 6
-nums.pop()    # removes and returns the last element
-```
-
----
-
-## Blocks
-
-Blocks are anonymous chunks of code passed to a method call. They use `{ |param| body }` syntax.
-
-```ruby
-nums = [1, 2, 3, 4, 5]
-
-nums.each { |n| print n }
-```
-
-When a block takes a single argument and you don't need to name it, use `it`:
-
-```ruby
-nums.each { print it }
-nums.map { it * 2 }   # [2, 4, 6, 8, 10]
-```
-
-`it` is only available when the block has no explicit `|params|`.
-
-### map
-
-Returns a new list with each element transformed.
-
-```ruby
-doubled = nums.map { |n| n * 2 }
-print doubled   # [2, 4, 6, 8, 10]
-```
-
-### select
-
-Returns a new list with only the elements for which the block returns `true`.
-
-```ruby
-evens = nums.select { |n| n % 2 == 0 }
-print evens   # [2, 4]
-```
-
-### reduce
-
-Folds a list into a single value. Pass an initial accumulator, or omit it to use the first element.
-
-```ruby
-sum = nums.reduce(0) { |acc, n| acc + n }
-print sum   # 15
-
-product = nums.reduce { |acc, n| acc * n }
-print product   # 120
-```
-
-### any? / all? / none?
-
-```ruby
-nums = [1, 2, 3, 4, 5]
-
-nums.any? { |n| n > 4 }    # true
-nums.all? { |n| n > 0 }    # true
-nums.none? { |n| n > 9 }   # true
-```
-
-### Blocks can mutate outer variables
+Blocks can also read and write outer variables:
 
 ```ruby
 sum = 0
 nums.each { |n| sum = sum + n }
-print sum   # 15
+print sum   # 31
 ```
 
----
-
-## Integer iteration
-
-`.downto` iterates from an integer down to another, inclusive.
-
-```ruby
-3.downto(1) { |i| print i }
-# 3
-# 2
-# 1
-```
-
-For counting up, use a range:
-
-```ruby
-(1..5).each { |i| print i }
-```
-
----
-
-## Maps
+### Maps
 
 Map literals use `{ key: value }` syntax. Keys are always strings.
 
 ```ruby
 person = { name: "Alice", age: 30 }
-```
 
-### Access and mutation
+print person["name"]   # Alice
 
-```ruby
-person["name"]          # "Alice"
 person["city"] = "Dublin"
-```
 
-### Built-in methods
+print person.keys      # ["name", "age", "city"]
+print person.length    # 3
 
-```ruby
-person.length           # 3
-person.keys             # ["age", "city", "name"]
-person.values           # [30, "Dublin", "Alice"]
-person.has_key?("name") # true
-```
-
-### Iterating
-
-```ruby
 person.each { |k, v| print "#{k}: #{v}" }
-```
-
----
-
-## nil
-
-`nil` represents the absence of a value.
-
-```ruby
-x = nil
-print x   # nil
-```
-
-### nil?
-
-```ruby
-x = nil
-print x.nil?    # true
-
-y = 42
-print y.nil?    # false
-```
-
-### Safe navigation (&.)
-
-Use `&.` to call a method on a value that might be `nil`. If the receiver is `nil`, the whole expression evaluates to `nil` instead of raising an error.
-
-```ruby
-user = nil
-print user&.name   # nil
-
-user = User.new(name: "Bob")
-print user&.name   # Bob
-```
-
----
-
-## Trailing conditionals
-
-A statement can be conditionally executed by appending `if condition` at the end.
-
-```ruby
-print "negative" if x < 0
-return nil if name.nil?
-x = x * 2 if x > 0
-```
-
----
-
-## User input
-
-`read_line()` reads a line from standard input and returns it as a string.
-
-```ruby
-print "What is your name?"
-name = read_line()
-print "Hello, #{name}!"
-```
-
-To use the input as a number, convert it with `to_i`:
-
-```ruby
-print "Enter a number:"
-n = read_line().to_i
-print n * 2
-```
-
----
-
-## Error handling
-
-Use `raise` to signal an error. Pass a string message or any object.
-
-```ruby
-raise "something went wrong"
-```
-
-### begin / rescue / end
-
-Wrap code in a `begin` block and catch errors with `rescue`. The rescue clause optionally binds the error to a variable.
-
-```ruby
-begin
-  x = 10 / 0
-rescue e
-  print "caught: #{e}"
-end
-```
-
-The `else` clause runs only when no error occurred:
-
-```ruby
-begin
-  result = 10 / 2
-rescue e
-  print "error"
-else
-  print "result: #{result}"   # result: 5
-end
-```
-
-### Inline rescue in functions and methods
-
-A `rescue` clause can be placed directly inside a `def` body, avoiding the need for a `begin...end` wrapper:
-
-```ruby
-def safe_div(a, b) {
-  a / b
-rescue e
-  0
-}
-
-print safe_div(10, 2)    # 5
-print safe_div(10, 0)    # 0
-```
-
-### Raising objects
-
-You can raise any object, not just strings:
-
-```ruby
-class AppError {
-  attr message
-}
-
-begin
-  raise AppError.new(message: "not found")
-rescue e
-  print e.message   # not found
-end
 ```
 
 ---
 
 ## Classes
 
+### Fields and methods
+
 Define a class with `class`. Use `attr` to declare fields. Instantiate with `ClassName.new(field: value, ...)`.
+
+Inside a method body, fields and other methods are accessible by their bare name. `self.` is only required when *writing* to a field.
 
 ```ruby
 class Point {
-  attr x
-  attr y
+  attr x: Int
+  attr y: Int
+
+  def distance_sq() -> Int {
+    x * x + y * y
+  }
+
+  def to_s() -> Str {
+    "(#{x}, #{y})"
+  }
 }
 
 p = Point.new(x: 3, y: 4)
-print p.x   # 3
-print p.y   # 4
+print p.to_s()            # (3, 4)
+print p.distance_sq()     # 25
 ```
 
-### Default field values
+Fields can have default values:
 
 ```ruby
 class Circle {
-  attr radius
+  attr radius: Int
   attr color = "red"
 }
 
@@ -639,38 +297,13 @@ c = Circle.new(radius: 5)
 print c.color   # red
 ```
 
-### Methods
-
-Define methods with `def` inside the class body. Fields and other methods are accessible by name — no `self.` prefix needed for reads.
-
-```ruby
-class Point {
-  attr x
-  attr y
-
-  def distance_from_origin() {
-    dx = x * x
-    dy = y * y
-    dx + dy   # returns dx^2 + dy^2 (no sqrt yet)
-  }
-
-  def to_s() {
-    "(#{x}, #{y})"
-  }
-}
-
-p = Point.new(x: 3, y: 4)
-print p.distance_from_origin()   # 25
-print p.to_s()                   # (3, 4)
-```
-
 ### Mutating fields
 
-Reading a field uses the bare name. Writing to a field requires `self.field =`.
+Reading uses the bare field name; writing requires `self.field =`:
 
 ```ruby
 class Counter {
-  attr count
+  attr count = 0
 
   def increment() {
     self.count = count + 1
@@ -692,17 +325,17 @@ print c.count   # 0
 
 ### Private methods
 
-Use `defp` to declare a private method. Private methods can be called from within the class (including subclasses) but not from outside.
+`defp` declares a private method — callable from within the class but not from outside:
 
 ```ruby
 class BankAccount {
-  attr balance
+  attr balance = 0
 
-  def deposit(amount) {
+  def deposit(amount: Int) {
     self.balance = balance + validate(amount)
   }
 
-  defp validate(amount) {
+  defp validate(amount: Int) -> Int {
     raise "amount must be positive" if amount <= 0
     amount
   }
@@ -717,56 +350,31 @@ acc.validate(50)    # error: private method
 
 ### Class methods
 
-Use a `self { ... }` block inside the class body to define methods that are called on the class itself rather than on instances. These are useful for factory methods and other class-level behaviour.
+A `self { ... }` block inside the class body defines methods called on the class itself. Use them for factory methods and class-level behaviour:
 
 ```ruby
 class Point {
-  attr x
-  attr y
+  attr x: Int
+  attr y: Int
 
   self {
     def origin() {
       self.new(x: 0, y: 0)
-    }
-
-    def from_pair(a, b) {
-      self.new(x: a, y: b)
     }
   }
 }
 
 p = Point.origin()
 print p.x   # 0
-
-q = Point.from_pair(3, 4)
-print q.x   # 3
 ```
 
-Inside a class method body, `self` refers to the class object. Use `self.new(...)` to create instances.
+### Inheritance
 
-Class methods are inherited by subclasses:
+Use `class Child < Parent` to inherit from a parent class. Subclasses inherit all fields and methods, and can override methods:
 
 ```ruby
 class Animal {
-  self {
-    def kingdom() { "Animalia" }
-  }
-}
-
-class Dog < Animal {}
-
-Dog.kingdom()   # "Animalia"
-```
-
----
-
-## Inheritance
-
-Use `class Child < Parent` to inherit from a parent class. The subclass gets all of the parent's fields, and can override methods.
-
-```ruby
-class Animal {
-  attr name
+  attr name: Str
 
   def speak() {
     print "..."
@@ -792,49 +400,27 @@ class Cat < Animal {
 d = Dog.new(name: "Rex")
 c = Cat.new(name: "Whiskers")
 
-d.speak()    # Woof!
-d.greet()    # I am Rex  (inherited from Animal)
-c.speak()    # Meow!
+d.speak()   # Woof!
+d.greet()   # I am Rex  (inherited from Animal)
+c.speak()   # Meow!
 ```
 
-### Adding new fields in a subclass
-
-```ruby
-class Vehicle {
-  attr make
-  attr model
-}
-
-class ElectricVehicle < Vehicle {
-  attr range_km
-
-  def describe() {
-    print "#{make} #{model}, range: #{range_km}km"
-  }
-}
-
-ev = ElectricVehicle.new(make: "Tesla", model: "Model 3", range_km: 500)
-ev.describe()   # Tesla Model 3, range: 500km
-```
-
-### super
-
-Use `super.method_name(args)` inside a method to call the same or a different method from the parent class. `self` is passed through automatically.
+Use `super.method_name(args)` to call the parent's version of a method:
 
 ```ruby
 class Animal {
-  attr name
+  attr name: Str
 
-  def describe() {
+  def describe() -> Str {
     name
   }
 }
 
 class Dog < Animal {
-  attr breed
+  attr breed: Str
 
-  def describe() {
-    super.describe() + " (" + breed + ")"
+  def describe() -> Str {
+    super.describe() + " (#{breed})"
   }
 }
 
@@ -842,129 +428,150 @@ d = Dog.new(name: "Rex", breed: "Lab")
 print d.describe()   # Rex (Lab)
 ```
 
-`super` always operates on the same `self` instance, so field changes in the subclass are visible to the superclass method and vice versa.
-
-### Object — the root class
-
-Every class implicitly inherits from `Object`. This gives all instances two built-in methods:
-
-`is_a?(ClassName)` — returns `true` if the object is an instance of that class or any of its superclasses:
+Every class implicitly inherits from `Object`. `is_a?(ClassName)` checks the class hierarchy:
 
 ```ruby
-class Animal { attr name }
-class Dog < Animal {}
-
-d = Dog.new(name: "Rex")
+d = Dog.new(name: "Rex", breed: "Lab")
 d.is_a?(Dog)      # true
 d.is_a?(Animal)   # true
-d.is_a?(Object)   # true (always)
+d.is_a?(Object)   # true
 d.is_a?(Cat)      # false
 ```
 
 ---
 
-## yield
+## Error handling
 
-`yield` calls the block that was passed to the current method. This lets you write iterators and higher-order methods in Sapphire itself.
+Use `raise` to signal an error. Handle errors with a `begin / rescue / end` block:
 
 ```ruby
-def call_twice() {
-  yield(1)
-  yield(2)
+def parse_age(s: Str) -> Int {
+  age = s.to_i
+  raise "age must be positive" if age <= 0
+  age
 }
 
-call_twice() { |n| print n }
-# 1
-# 2
+begin
+  print parse_age("25")   # 25
+  print parse_age("0")    # raises
+rescue e
+  print "bad input: #{e}"
+end
 ```
 
-`yield(args)` passes arguments to the block and returns the block's value.
+The `else` clause runs only when no error occurred:
 
 ```ruby
-def transform(x) {
-  yield(x)
-}
-
-result = transform(5) { |n| n * 10 }
-print result   # 50
+begin
+  result = 10 / 2
+rescue e
+  print "error: #{e}"
+else
+  print "result: #{result}"   # result: 5
+end
 ```
 
-### Writing iterators in Sapphire
+A `rescue` clause inside a `def` body avoids the `begin / end` wrapper entirely:
 
 ```ruby
-def my_each(list) {
-  len = list.length
-  i = 0
-  while i < len {
-    yield(list[i])
-    i = i + 1
-  }
+def safe_divide(a: Int, b: Int) -> Int {
+  a / b
+rescue e
+  print "cannot divide by zero"
+  0
 }
 
-sum = 0
-my_each([1, 2, 3]) { |x| sum = sum + x }
-print sum   # 6
+print safe_divide(10, 2)   # 5
+print safe_divide(10, 0)   # 0
 ```
 
-`yield` works inside methods too:
+You can raise any object, not just strings:
 
 ```ruby
-class NumberList {
-  attr items
-
-  def each() {
-    len = items.length
-    i = 0
-    while i < len {
-      yield(items[i])
-      i = i + 1
-    }
-  }
+class AppError {
+  attr message: Str
 }
 
-nums = NumberList.new(items: [10, 20, 30])
-total = 0
-nums.each() { |x| total = total + x }
-print total   # 60
+begin
+  raise AppError.new(message: "not found")
+rescue e
+  print e.message   # not found
+end
 ```
 
 ---
 
 ## Putting it together
 
-Here is a small program that uses most of the language:
+Here is a small program that uses classes, inheritance, type annotations, blocks, and error handling. It models geometric shapes and computes statistics over a collection of them.
 
 ```ruby
-class TodoList {
-  attr items
-
-  def add(item) {
-    items.push(item)
+class Shape {
+  def area() -> Float {
+    raise "area() not implemented"
   }
 
-  def count() {
-    items.reduce(0) { |acc, item| acc + 1 }
-  }
-
-  def print_all() {
-    i = 0
-    items.each { |item|
-      i = i + 1
-      print "#{i}. #{item}"
-    }
+  def describe() -> Str {
+    "Shape with area #{self.area()}"
   }
 }
 
-list = TodoList.new(items: [])
-list.add("Buy groceries")
-list.add("Write tests")
-list.add("Ship it")
+class Rectangle < Shape {
+  attr width: Float
+  attr height: Float
 
-list.print_all()
-# 1. Buy groceries
-# 2. Write tests
-# 3. Ship it
+  def area() -> Float {
+    width * height
+  }
 
-print "Total: #{list.count()}"
-# Total: 3
+  def describe() -> Str {
+    "Rectangle #{width}x#{height}, area=#{self.area()}"
+  }
+}
+
+class Circle < Shape {
+  attr radius: Float
+
+  def area() -> Float {
+    3.14159 * radius * radius
+  }
+
+  def describe() -> Str {
+    "Circle r=#{radius}, area=#{self.area()}"
+  }
+}
+
+def summarise(shapes) {
+  shapes.each { |s| print s.describe() }
+
+  total = shapes.reduce(0.0) { |acc, s| acc + s.area() }
+  largest = shapes.reduce(shapes[0]) { |best, s|
+    if s.area() > best.area() { s } else { best }
+  }
+
+  print "Total area:   #{total}"
+  print "Largest:      #{largest.describe()}"
+}
+
+shapes = [
+  Rectangle.new(width: 4.0, height: 5.0),
+  Circle.new(radius: 3.0),
+  Rectangle.new(width: 2.0, height: 8.0),
+]
+
+begin
+  summarise(shapes)
+rescue e
+  print "Error: #{e}"
+end
+```
+
+Output:
+
+```
+Rectangle 4.0x5.0, area=20.0
+Circle r=3.0, area=28.27431
+Rectangle 2.0x8.0, area=16.0
+Total area:   64.27431
+Largest:      Circle r=3.0, area=28.27431
 ```
