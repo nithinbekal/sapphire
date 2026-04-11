@@ -4,7 +4,7 @@ Sapphire is an object-oriented scripting language with a Ruby-inspired feel: cle
 
 ## Running Sapphire
 
-```
+```sh
 sapphire run hello.spr   # run a script file
 sapphire console         # start the interactive REPL
 ```
@@ -17,7 +17,7 @@ File extension: `.spr`
 
 Variables are assigned with `=`. No declaration keyword is needed.
 
-```
+```ruby
 x = 10
 name = "Alice"
 flag = true
@@ -25,7 +25,7 @@ flag = true
 
 Variable names can contain letters, digits, and underscores, and may end with `?`.
 
-```
+```ruby
 empty? = false
 ```
 
@@ -48,7 +48,7 @@ Sapphire has six built-in value types:
 
 ## Arithmetic
 
-```
+```ruby
 1 + 2       # 3
 10 - 3      # 7
 4 * 5       # 20
@@ -59,7 +59,7 @@ Sapphire has six built-in value types:
 
 Operator precedence follows the usual rules. Use parentheses to override.
 
-```
+```ruby
 (1 + 2) * 3   # 9
 ```
 
@@ -67,7 +67,7 @@ Operator precedence follows the usual rules. Use parentheses to override.
 
 ## Comparisons
 
-```
+```ruby
 x == 10
 x != 5
 x < 10
@@ -82,7 +82,7 @@ These return `true` or `false`.
 
 ## Logical operators
 
-```
+```ruby
 x > 0 && x < 100   # both must be true
 x == 0 || x == 1   # at least one must be true
 !flag               # negation
@@ -90,7 +90,7 @@ x == 0 || x == 1   # at least one must be true
 
 `&&` and `||` short-circuit: the right side is not evaluated if the result is already determined.
 
-```
+```ruby
 name = nil
 label = name || "unknown"   # "unknown"
 ```
@@ -101,13 +101,13 @@ label = name || "unknown"   # "unknown"
 
 String literals use double quotes.
 
-```
+```ruby
 greeting = "hello"
 ```
 
 ### Escape sequences
 
-```
+```ruby
 "hello\nworld"   # newline
 "tab\there"      # tab
 "quote: \""      # literal quote
@@ -116,7 +116,7 @@ greeting = "hello"
 
 ### Concatenation
 
-```
+```ruby
 "hello" + " " + "world"   # "hello world"
 ```
 
@@ -124,7 +124,7 @@ greeting = "hello"
 
 Embed any expression inside `#{}`:
 
-```
+```ruby
 name = "Alice"
 age = 30
 print "Hello #{name}, you are #{age} years old!"
@@ -133,14 +133,14 @@ print "Hello #{name}, you are #{age} years old!"
 
 Any value is automatically converted to a string in interpolation.
 
-```
+```ruby
 nums = [1, 2, 3]
 print "List: #{nums}"   # List: [1, 2, 3]
 ```
 
 ### String methods
 
-```
+```ruby
 "hello".length          # 5
 "hello".upcase          # "HELLO"
 "HELLO".downcase        # "hello"
@@ -158,7 +158,7 @@ print "List: #{nums}"   # List: [1, 2, 3]
 
 ### Type conversions
 
-```
+```ruby
 42.to_s       # "42"
 "123".to_i    # 123
 true.to_s     # "true"
@@ -170,7 +170,7 @@ true.to_s     # "true"
 
 Comments begin with `#` and run to the end of the line.
 
-```
+```ruby
 # This is a comment
 x = 10   # inline comment
 ```
@@ -179,7 +179,7 @@ x = 10   # inline comment
 
 ## Print
 
-```
+```ruby
 print "Hello, world!"
 print x
 print x + 1
@@ -191,7 +191,7 @@ print x + 1
 
 ### if / elsif / else
 
-```
+```ruby
 if x > 0 {
   print "positive"
 } else {
@@ -201,7 +201,7 @@ if x > 0 {
 
 `else` is optional.
 
-```
+```ruby
 if flag {
   print "yes"
 }
@@ -209,13 +209,13 @@ if flag {
 
 A single-statement body can be written on one line:
 
-```
+```ruby
 if x < 0 { print "negative" }
 ```
 
 Use `elsif` for multi-branch conditionals:
 
-```
+```ruby
 if x > 100 {
   print "large"
 } elsif x > 10 {
@@ -229,7 +229,7 @@ if x > 100 {
 
 ### while
 
-```
+```ruby
 i = 0
 while i < 5 {
   print i
@@ -241,7 +241,7 @@ while i < 5 {
 
 `break` exits the enclosing loop or block iteration immediately. When used with a value, that value is returned from the iterator.
 
-```
+```ruby
 i = 0
 while true {
   i = i + 1
@@ -250,7 +250,7 @@ while true {
 print i   # 3
 ```
 
-```
+```ruby
 result = [1, 2, 3, 4, 5].each { |x|
   break "found it" if x == 3
 }
@@ -261,7 +261,7 @@ print result   # found it
 
 `next` skips the rest of the current iteration and moves to the next one.
 
-```
+```ruby
 i = 0
 sum = 0
 while i < 5 {
@@ -274,7 +274,7 @@ print sum   # 12  (1+2+4+5, skipped 3)
 
 Inside a `map` block, `next val` sets the value for that element instead of computing the rest of the block:
 
-```
+```ruby
 result = [1, 2, 3, 4].map { |x|
   next 0 if x == 2
   x * 10
@@ -286,13 +286,13 @@ print result   # [10, 0, 30, 40]
 
 A range literal `from..to` represents an inclusive sequence of integers.
 
-```
+```ruby
 r = 1..10
 ```
 
 Use `.each` to iterate, or `.include?` to test membership:
 
-```
+```ruby
 (1..5).each { |i| print i }
 # 1
 # 2
@@ -310,7 +310,7 @@ Use `.each` to iterate, or `.include?` to test membership:
 
 Assign to several variables at once by listing them on the left:
 
-```
+```ruby
 a, b = 1, 2
 print a   # 1
 print b   # 2
@@ -318,7 +318,7 @@ print b   # 2
 
 This is the idiomatic way to swap two values:
 
-```
+```ruby
 a, b = b, a
 ```
 
@@ -328,7 +328,7 @@ a, b = b, a
 
 Define functions with `def`. The last evaluated expression is the implicit return value. `return` is optional, but useful for early exits.
 
-```
+```ruby
 def add(a, b) {
   a + b
 }
@@ -338,7 +338,7 @@ print add(3, 4)   # 7
 
 ### Explicit return
 
-```
+```ruby
 def abs(n) {
   if n < 0 { return -n }
   n
@@ -349,7 +349,7 @@ def abs(n) {
 
 Functions close over the variables in scope where they are defined.
 
-```
+```ruby
 def make_adder(n) {
   def adder(x) {
     x + n
@@ -365,7 +365,7 @@ print add5(3)   # 8
 
 Function names (and variables) may end with `?` to signal a boolean result.
 
-```
+```ruby
 def zero?(x) {
   x == 0
 }
@@ -380,7 +380,7 @@ print zero?(1)   # false
 
 List literals use square brackets.
 
-```
+```ruby
 nums = [1, 2, 3, 4, 5]
 empty = []
 mixed = [1, "hello", true]
@@ -390,20 +390,20 @@ mixed = [1, "hello", true]
 
 Zero-based. Negative indices count from the end.
 
-```
+```ruby
 nums[0]    # 1
 nums[-1]   # 5
 ```
 
 ### Index assignment
 
-```
+```ruby
 nums[0] = 99
 ```
 
 ### Built-in methods
 
-```
+```ruby
 nums.length   # 5
 nums.first    # 1
 nums.last     # 5
@@ -417,7 +417,7 @@ nums.pop()    # removes and returns the last element
 
 Blocks are anonymous chunks of code passed to a method call. They use `{ |param| body }` syntax.
 
-```
+```ruby
 nums = [1, 2, 3, 4, 5]
 
 nums.each { |n| print n }
@@ -425,7 +425,7 @@ nums.each { |n| print n }
 
 When a block takes a single argument and you don't need to name it, use `it`:
 
-```
+```ruby
 nums.each { print it }
 nums.map { it * 2 }   # [2, 4, 6, 8, 10]
 ```
@@ -436,7 +436,7 @@ nums.map { it * 2 }   # [2, 4, 6, 8, 10]
 
 Returns a new list with each element transformed.
 
-```
+```ruby
 doubled = nums.map { |n| n * 2 }
 print doubled   # [2, 4, 6, 8, 10]
 ```
@@ -445,7 +445,7 @@ print doubled   # [2, 4, 6, 8, 10]
 
 Returns a new list with only the elements for which the block returns `true`.
 
-```
+```ruby
 evens = nums.select { |n| n % 2 == 0 }
 print evens   # [2, 4]
 ```
@@ -454,7 +454,7 @@ print evens   # [2, 4]
 
 Folds a list into a single value. Pass an initial accumulator, or omit it to use the first element.
 
-```
+```ruby
 sum = nums.reduce(0) { |acc, n| acc + n }
 print sum   # 15
 
@@ -464,7 +464,7 @@ print product   # 120
 
 ### any? / all? / none?
 
-```
+```ruby
 nums = [1, 2, 3, 4, 5]
 
 nums.any? { |n| n > 4 }    # true
@@ -474,7 +474,7 @@ nums.none? { |n| n > 9 }   # true
 
 ### Blocks can mutate outer variables
 
-```
+```ruby
 sum = 0
 nums.each { |n| sum = sum + n }
 print sum   # 15
@@ -486,7 +486,7 @@ print sum   # 15
 
 `.downto` iterates from an integer down to another, inclusive.
 
-```
+```ruby
 3.downto(1) { |i| print i }
 # 3
 # 2
@@ -495,7 +495,7 @@ print sum   # 15
 
 For counting up, use a range:
 
-```
+```ruby
 (1..5).each { |i| print i }
 ```
 
@@ -505,20 +505,20 @@ For counting up, use a range:
 
 Map literals use `{ key: value }` syntax. Keys are always strings.
 
-```
+```ruby
 person = { name: "Alice", age: 30 }
 ```
 
 ### Access and mutation
 
-```
+```ruby
 person["name"]          # "Alice"
 person["city"] = "Dublin"
 ```
 
 ### Built-in methods
 
-```
+```ruby
 person.length           # 3
 person.keys             # ["age", "city", "name"]
 person.values           # [30, "Dublin", "Alice"]
@@ -527,7 +527,7 @@ person.has_key?("name") # true
 
 ### Iterating
 
-```
+```ruby
 person.each { |k, v| print "#{k}: #{v}" }
 ```
 
@@ -537,14 +537,14 @@ person.each { |k, v| print "#{k}: #{v}" }
 
 `nil` represents the absence of a value.
 
-```
+```ruby
 x = nil
 print x   # nil
 ```
 
 ### nil?
 
-```
+```ruby
 x = nil
 print x.nil?    # true
 
@@ -556,7 +556,7 @@ print y.nil?    # false
 
 Use `&.` to call a method on a value that might be `nil`. If the receiver is `nil`, the whole expression evaluates to `nil` instead of raising an error.
 
-```
+```ruby
 user = nil
 print user&.name   # nil
 
@@ -570,7 +570,7 @@ print user&.name   # Bob
 
 A statement can be conditionally executed by appending `if condition` at the end.
 
-```
+```ruby
 print "negative" if x < 0
 return nil if name.nil?
 x = x * 2 if x > 0
@@ -582,7 +582,7 @@ x = x * 2 if x > 0
 
 `read_line()` reads a line from standard input and returns it as a string.
 
-```
+```ruby
 print "What is your name?"
 name = read_line()
 print "Hello, #{name}!"
@@ -590,7 +590,7 @@ print "Hello, #{name}!"
 
 To use the input as a number, convert it with `to_i`:
 
-```
+```ruby
 print "Enter a number:"
 n = read_line().to_i
 print n * 2
@@ -602,7 +602,7 @@ print n * 2
 
 Use `raise` to signal an error. Pass a string message or any object.
 
-```
+```ruby
 raise "something went wrong"
 ```
 
@@ -610,7 +610,7 @@ raise "something went wrong"
 
 Wrap code in a `begin` block and catch errors with `rescue`. The rescue clause optionally binds the error to a variable.
 
-```
+```ruby
 begin
   x = 10 / 0
 rescue e
@@ -620,7 +620,7 @@ end
 
 The `else` clause runs only when no error occurred:
 
-```
+```ruby
 begin
   result = 10 / 2
 rescue e
@@ -634,7 +634,7 @@ end
 
 A `rescue` clause can be placed directly inside a `def` body, avoiding the need for a `begin...end` wrapper:
 
-```
+```ruby
 def safe_div(a, b) {
   a / b
 rescue e
@@ -649,7 +649,7 @@ print safe_div(10, 0)    # 0
 
 You can raise any object, not just strings:
 
-```
+```ruby
 class AppError {
   attr message
 }
@@ -667,7 +667,7 @@ end
 
 Define a class with `class`. Use `attr` to declare fields. Instantiate with `ClassName.new(field: value, ...)`.
 
-```
+```ruby
 class Point {
   attr x
   attr y
@@ -680,7 +680,7 @@ print p.y   # 4
 
 ### Default field values
 
-```
+```ruby
 class Circle {
   attr radius
   attr color = "red"
@@ -694,7 +694,7 @@ print c.color   # red
 
 Define methods with `def` inside the class body. Fields and other methods are accessible by name — no `self.` prefix needed for reads.
 
-```
+```ruby
 class Point {
   attr x
   attr y
@@ -719,7 +719,7 @@ print p.to_s()                   # (3, 4)
 
 Reading a field uses the bare name. Writing to a field requires `self.field =`.
 
-```
+```ruby
 class Counter {
   attr count
 
@@ -745,7 +745,7 @@ print c.count   # 0
 
 Use `defp` to declare a private method. Private methods can be called from within the class (including subclasses) but not from outside.
 
-```
+```ruby
 class BankAccount {
   attr balance
 
@@ -770,7 +770,7 @@ acc.validate(50)    # error: private method
 
 Use a `self { ... }` block inside the class body to define methods that are called on the class itself rather than on instances. These are useful for factory methods and other class-level behaviour.
 
-```
+```ruby
 class Point {
   attr x
   attr y
@@ -797,7 +797,7 @@ Inside a class method body, `self` refers to the class object. Use `self.new(...
 
 Class methods are inherited by subclasses:
 
-```
+```ruby
 class Animal {
   self {
     def kingdom() { "Animalia" }
@@ -815,7 +815,7 @@ Dog.kingdom()   # "Animalia"
 
 Use `class Child < Parent` to inherit from a parent class. The subclass gets all of the parent's fields, and can override methods.
 
-```
+```ruby
 class Animal {
   attr name
 
@@ -850,7 +850,7 @@ c.speak()    # Meow!
 
 ### Adding new fields in a subclass
 
-```
+```ruby
 class Vehicle {
   attr make
   attr model
@@ -872,7 +872,7 @@ ev.describe()   # Tesla Model 3, range: 500km
 
 Use `super.method_name(args)` inside a method to call the same or a different method from the parent class. `self` is passed through automatically.
 
-```
+```ruby
 class Animal {
   attr name
 
@@ -901,7 +901,7 @@ Every class implicitly inherits from `Object`. This gives all instances two buil
 
 `is_a?(ClassName)` — returns `true` if the object is an instance of that class or any of its superclasses:
 
-```
+```ruby
 class Animal { attr name }
 class Dog < Animal {}
 
@@ -918,7 +918,7 @@ d.is_a?(Cat)      # false
 
 `yield` calls the block that was passed to the current method. This lets you write iterators and higher-order methods in Sapphire itself.
 
-```
+```ruby
 def call_twice() {
   yield(1)
   yield(2)
@@ -931,7 +931,7 @@ call_twice() { |n| print n }
 
 `yield(args)` passes arguments to the block and returns the block's value.
 
-```
+```ruby
 def transform(x) {
   yield(x)
 }
@@ -942,7 +942,7 @@ print result   # 50
 
 ### Writing iterators in Sapphire
 
-```
+```ruby
 def my_each(list) {
   len = list.length
   i = 0
@@ -959,7 +959,7 @@ print sum   # 6
 
 `yield` works inside methods too:
 
-```
+```ruby
 class NumberList {
   attr items
 
@@ -985,7 +985,7 @@ print total   # 60
 
 Here is a small program that uses most of the language:
 
-```
+```ruby
 class TodoList {
   attr items
 
