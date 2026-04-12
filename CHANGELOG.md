@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.1
+
+**Bug fixes**
+- `Float#to_s` now preserves the trailing `.0` for whole-number floats (`1.0.to_s()` returns `"1.0"` instead of `"1"`)
+- `Float#zero?` now returns `true` for `0.0` (previously always returned `false` due to an integer comparison)
+
+---
+
 ## v0.2.0
 
 **VM**
