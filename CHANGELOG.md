@@ -14,6 +14,7 @@ Method chaining after a block now works, both on one line and across lines:
 # Now works — previously: parse error: unexpected token 'Dot'
 [1, 2, 3].map { |n| n * 2 }.each { |n| print n }
 
+# Also works now
 [1, 2, 3]
   .map { |n| n * 2 }
   .each { |n| print n }
