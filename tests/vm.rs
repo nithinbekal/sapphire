@@ -1518,6 +1518,23 @@ fn chain_multiline_map_then_select() {
     assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
 }
 
+// ── Float#to_s ────────────────────────────────────────────────────────────────
+
+#[test]
+fn float_to_s_whole_number() {
+    assert_eq!(eval("1.0.to_s()"), VmValue::Str("1.0".into()));
+}
+
+#[test]
+fn float_to_s_whole_number_negative() {
+    assert_eq!(eval("(-3.0).to_s()"), VmValue::Str("-3.0".into()));
+}
+
+#[test]
+fn float_to_s_fractional() {
+    assert_eq!(eval("3.14.to_s()"), VmValue::Str("3.14".into()));
+}
+
 // ── Float#zero? ───────────────────────────────────────────────────────────────
 
 #[test]
