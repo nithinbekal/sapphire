@@ -167,6 +167,14 @@ pub enum OpCode {
     /// Pop TOS, print it with a newline, push Nil.
     Print,
 
+    // Global variables (used by the REPL to persist state across calls)
+    /// Push the value of a global variable onto the stack.
+    /// `idx` is an index into the constants table pointing to a `Constant::Str` name.
+    GetGlobal(usize),
+    /// Store TOS into a global variable (peek — does not pop).
+    /// `idx` is an index into the constants table pointing to a `Constant::Str` name.
+    SetGlobal(usize),
+
     // Stack manipulation
     Pop,
     Return,
@@ -298,6 +306,8 @@ impl Chunk {
                 OpCode::SuperInvoke(n, argc)    => println!("SUPER_INVOKE        {:4}  argc={}", n, argc),
                 OpCode::JumpIfFalseKeep(off)    => println!("JUMP_IF_FALSE_KEEP  {:4}", off),
                 OpCode::JumpIfTrueKeep(off)     => println!("JUMP_IF_TRUE_KEEP   {:4}", off),
+                OpCode::GetGlobal(idx)          => println!("GET_GLOBAL          {:4}  ({})", idx, self.constants[*idx]),
+                OpCode::SetGlobal(idx)          => println!("SET_GLOBAL          {:4}  ({})", idx, self.constants[*idx]),
                 other                           => println!("{:?}", other),
             }
         }
