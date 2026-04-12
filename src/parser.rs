@@ -88,6 +88,20 @@ impl Parser {
         }
     }
 
+    // Returns true if the next non-newline token is a '.', used to allow method
+    // chaining across lines after a block: `.map { |n| n * 2 }\n  .each { ... }`.
+    fn next_non_newline_is_dot(&self) -> bool {
+        let mut i = self.current;
+        while i < self.tokens.len() {
+            match &self.tokens[i].kind {
+                TokenKind::Newline | TokenKind::Semicolon => i += 1,
+                TokenKind::Dot => return true,
+                _ => return false,
+            }
+        }
+        false
+    }
+
     pub fn parse(&mut self) -> Result<Vec<Expr>, SapphireError> {
         let mut exprs = Vec::new();
         loop {
@@ -720,6 +734,10 @@ impl Parser {
     fn call(&mut self) -> Result<Expr, SapphireError> {
         let mut expr = self.primary()?;
         loop {
+            // Allow method chaining across newlines: `.map { |n| n * 2 }\n  .each { ... }`
+            if self.check(&TokenKind::Newline) && self.next_non_newline_is_dot() {
+                self.skip_terminators();
+            }
             if self.check(&TokenKind::LeftParen) {
                 expr = self.finish_call(expr)?;
             } else if self.check(&TokenKind::Dot) {
@@ -743,7 +761,7 @@ impl Parser {
                     let block = self.parse_block()?;
                     let get = Expr::Get { object: Box::new(expr), name };
                     expr = Expr::Call { callee: Box::new(get), args: Vec::new(), block };
-                    break;
+                    continue;
                 }
                 expr = Expr::Get { object: Box::new(expr), name };
             } else if self.check(&TokenKind::AmpDot) {
