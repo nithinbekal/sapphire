@@ -672,10 +672,6 @@ impl Compiler {
                 self.emit(OpCode::Constant(idx));
                 Ok(())
             }
-            other => Err(self.error(format!(
-                "literal not yet supported by compiler: {:?}",
-                std::mem::discriminant(other)
-            ))),
         }
     }
 

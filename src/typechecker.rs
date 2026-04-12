@@ -314,7 +314,6 @@ impl TypeChecker {
                 Value::Str(_)   => Some(TypeExpr::Named("String".into())),
                 Value::Bool(_)  => Some(TypeExpr::Named("Bool".into())),
                 Value::Nil      => Some(TypeExpr::Named("Nil".into())),
-                _ => None,
             },
             Expr::Variable(name) => self.get_var(name),
             Expr::Grouping(inner) => self.infer_type(inner),

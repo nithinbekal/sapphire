@@ -1,19 +1,17 @@
-use sapphire::{compiler, interpreter, lexer, parser, typechecker, vm};
+use sapphire::{compiler, lexer, parser, typechecker, vm};
 use std::io::{self, Write};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.as_slice() {
         [_, cmd, path] if cmd == "run"       => run_file(path),
-        [_, cmd, path] if cmd == "vm"        => run_file_vm(path),
         [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
         [_, cmd] if cmd == "console" => run_repl(),
         [_, cmd] if cmd == "version" => println!("sapphire {}", env!("CARGO_PKG_VERSION")),
         _ => {
             eprintln!("Usage: sapphire <command>\n");
             eprintln!("Commands:");
-            eprintln!("  run <file.spr>       Run a file using the tree-walk interpreter");
-            eprintln!("  vm <file.spr>        Run a file using the experimental bytecode VM");
+            eprintln!("  run <file.spr>       Run a Sapphire file");
             eprintln!("  typecheck <file.spr> Type-check a file");
             eprintln!("  console              Start the REPL");
             eprintln!("  version              Print the version");
@@ -25,36 +23,7 @@ fn main() {
 fn run_file(path: &str) {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
-        Err(e) => {
-            eprintln!("error reading '{}': {}", path, e);
-            std::process::exit(1);
-        }
-    };
-    let env = interpreter::global_env();
-    let tokens = lexer::Lexer::new(&source).scan_tokens();
-    match parser::Parser::new(tokens).parse() {
-        Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(1);
-        }
-        Ok(exprs) => {
-            for expr in exprs {
-                if let Err(e) = interpreter::execute(expr, env.clone()) {
-                    eprintln!("{}", e);
-                    std::process::exit(1);
-                }
-            }
-        }
-    }
-}
-
-fn run_file_vm(path: &str) {
-    let source = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error reading '{}': {}", path, e);
-            std::process::exit(1);
-        }
+        Err(e) => { eprintln!("error reading '{}': {}", path, e); std::process::exit(1); }
     };
     let tokens = lexer::Lexer::new(&source).scan_tokens();
     let exprs = match parser::Parser::new(tokens).parse() {
