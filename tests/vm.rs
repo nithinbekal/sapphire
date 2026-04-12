@@ -1518,4 +1518,19 @@ fn chain_multiline_map_then_select() {
     assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
 }
 
+// ── Float#zero? ───────────────────────────────────────────────────────────────
 
+#[test]
+fn float_zero_true() {
+    assert_eq!(eval_with_stdlib("0.0.zero?()"), VmValue::Bool(true));
+}
+
+#[test]
+fn float_zero_false() {
+    assert_eq!(eval_with_stdlib("1.5.zero?()"), VmValue::Bool(false));
+}
+
+#[test]
+fn float_zero_negative_zero() {
+    assert_eq!(eval_with_stdlib("(-0.0).zero?()"), VmValue::Bool(true));
+}
