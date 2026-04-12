@@ -1230,6 +1230,39 @@ fn elsif_chain() {
     assert_eq!(eval(src), VmValue::Int(5));
 }
 
+#[test]
+fn elsif_on_next_line() {
+    // elsif on a new line after the closing '}'
+    let src = "x = 2\nif x == 1 { 10 }\nelsif x == 2 { 20 }\nelse { 30 }";
+    assert_eq!(eval(src), VmValue::Int(20));
+}
+
+#[test]
+fn elsif_multiline_hits_first_branch() {
+    let src = "x = 1\nif x == 1 { 10 }\nelsif x == 2 { 20 }\nelse { 30 }";
+    assert_eq!(eval(src), VmValue::Int(10));
+}
+
+#[test]
+fn elsif_multiline_hits_else() {
+    let src = "x = 99\nif x == 1 { 10 }\nelsif x == 2 { 20 }\nelse { 30 }";
+    assert_eq!(eval(src), VmValue::Int(30));
+}
+
+#[test]
+fn elsif_multiline_chained() {
+    // multiple elsif clauses each on their own line
+    let src = "x = 3\nif x == 1 { 10 }\nelsif x == 2 { 20 }\nelsif x == 3 { 30 }\nelse { 99 }";
+    assert_eq!(eval(src), VmValue::Int(30));
+}
+
+#[test]
+fn else_on_next_line() {
+    // else on a new line (no elsif), just to be sure
+    let src = "x = 5\nif x == 1 { 10 }\nelse { 99 }";
+    assert_eq!(eval(src), VmValue::Int(99));
+}
+
 // ---- defp inherited ----
 
 #[test]
