@@ -1,4 +1,4 @@
-use sapphire::{compiler, interpreter, lexer, parser, typechecker, value, vm};
+use sapphire::{compiler, interpreter, lexer, parser, typechecker, vm};
 use std::io::{self, Write};
 
 fn main() {
@@ -99,7 +99,11 @@ fn typecheck_file(path: &str) {
 fn run_repl() {
     println!("Sapphire 0.1.0 — Ctrl+D to quit");
 
-    let env = interpreter::global_env();
+    let mut vm = vm::Vm::new_repl();
+    if let Err(e) = vm.load_stdlib() {
+        eprintln!("stdlib error: {}", e);
+        std::process::exit(1);
+    }
 
     loop {
         print!("> ");
@@ -117,17 +121,18 @@ fn run_repl() {
         }
 
         let tokens = lexer::Lexer::new(source).scan_tokens();
-        match parser::Parser::new(tokens).parse() {
+        let exprs = match parser::Parser::new(tokens).parse() {
+            Err(e) => { eprintln!("{}", e); continue; }
+            Ok(e) => e,
+        };
+        let func = match compiler::compile_repl(&exprs) {
+            Err(e) => { eprintln!("{}", e); continue; }
+            Ok(f) => f,
+        };
+        match vm.eval(func) {
+            Ok(Some(result)) if result.to_string() != "nil" => println!("{}", result),
+            Ok(_) => {}
             Err(e) => eprintln!("{}", e),
-            Ok(exprs) => {
-                for expr in exprs {
-                    match interpreter::execute(expr, env.clone()) {
-                        Ok(Some(result)) if result != value::Value::Nil => println!("{}", result),
-                        Ok(_) => {}
-                        Err(e) => { eprintln!("{}", e); break; }
-                    }
-                }
-            }
         }
     }
 }

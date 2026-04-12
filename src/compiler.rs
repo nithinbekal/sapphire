@@ -59,12 +59,19 @@ impl FunctionState {
 /// A stack of `FunctionState`s, one per nesting level.  The top of the stack
 /// is the function currently being compiled.
 struct Compiler {
-    states: Vec<FunctionState>,
+    states:      Vec<FunctionState>,
+    /// When true (REPL mode), top-level variable assignments and definitions
+    /// are stored as globals rather than stack slots.
+    global_mode: bool,
 }
 
 impl Compiler {
     fn new() -> Self {
-        Compiler { states: Vec::new() }
+        Compiler { states: Vec::new(), global_mode: false }
+    }
+
+    fn new_repl() -> Self {
+        Compiler { states: Vec::new(), global_mode: true }
     }
 
     // ── Public entry points ───────────────────────────────────────────────────
@@ -72,6 +79,15 @@ impl Compiler {
     /// Compile a top-level program (arity 0, anonymous).
     pub fn compile(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
         let mut c = Compiler::new();
+        c.push_fn("", 0, 0);
+        c.compile_body(exprs)?;
+        Ok(c.pop_fn())
+    }
+
+    /// Compile a REPL snippet: top-level variables go to globals instead of
+    /// stack slots, so they persist across successive `eval()` calls.
+    pub fn compile_repl(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
+        let mut c = Compiler::new_repl();
         c.push_fn("", 0, 0);
         c.compile_body(exprs)?;
         Ok(c.pop_fn())
@@ -251,7 +267,10 @@ impl Compiler {
 
             e => {
                 let is_new_local = self.is_new_local_assign(e);
-                let defines_binding = matches!(e, Expr::Function { .. } | Expr::Class { .. });
+                // In global mode, function/class defs emit SetGlobal (peek) instead of
+                // leaving the value as a new local slot, so we must Pop afterwards.
+                let defines_binding = !self.global_mode
+                    && matches!(e, Expr::Function { .. } | Expr::Class { .. });
                 self.expr(e)?;
                 if !is_new_local && !defines_binding {
                     self.emit(OpCode::Pop);
@@ -338,6 +357,9 @@ impl Compiler {
                     self.emit(OpCode::GetLocal(slot));
                 } else if let Some(idx) = self.resolve_upvalue(depth, name) {
                     self.emit(OpCode::GetUpvalue(idx));
+                } else if self.global_mode {
+                    let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                    self.emit(OpCode::GetGlobal(idx));
                 } else {
                     return Err(self.error(format!("undefined variable '{}'", name)));
                 }
@@ -351,6 +373,10 @@ impl Compiler {
                     self.emit(OpCode::SetLocal(slot));
                 } else if let Some(idx) = self.resolve_upvalue(depth, name) {
                     self.emit(OpCode::SetUpvalue(idx));
+                } else if self.global_mode && depth == 0 {
+                    // REPL top-level: persist as a global (peek semantics — TOS stays).
+                    let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                    self.emit(OpCode::SetGlobal(idx));
                 } else {
                     // First use of this name: allocate a new stack slot.
                     self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
@@ -562,8 +588,15 @@ impl Compiler {
 
                 let idx = self.state_mut().chunk.add_constant(Constant::Function(func));
                 self.emit(OpCode::Closure(idx));
-                // The closure value on the stack becomes this local's slot.
-                self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+
+                if self.global_mode && self.states.len() == 1 {
+                    // REPL top-level: store in globals, don't allocate a stack slot.
+                    let ni = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                    self.emit(OpCode::SetGlobal(ni));
+                } else {
+                    // The closure value on the stack becomes this local's slot.
+                    self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                }
                 Ok(())
             }
 
@@ -693,6 +726,11 @@ impl Compiler {
     /// True when `expr` is an assignment to a name that is neither an existing
     /// local nor an upvalue — i.e. it will create a new stack slot.
     fn is_new_local_assign(&self, expr: &Expr) -> bool {
+        if self.global_mode {
+            // In global mode top-level assigns go to globals (SetGlobal uses peek
+            // semantics), so the value stays on the stack and stmt must Pop it.
+            return false;
+        }
         if let Expr::Assign { name, .. } = expr {
             let depth = self.states.len() - 1;
             self.resolve_local(depth, name).is_none()
@@ -898,8 +936,15 @@ impl Compiler {
             class_method_names,
         });
         self.emit(OpCode::DefClass(desc_idx));
-        // Store the class value in a local slot named after the class.
-        self.state_mut().locals.push(LocalInfo { name: name.to_string(), captured: false });
+
+        if self.global_mode && self.states.len() == 1 {
+            // REPL top-level: store in globals, don't allocate a stack slot.
+            let ni = self.state_mut().chunk.add_constant(Constant::Str(name.to_string()));
+            self.emit(OpCode::SetGlobal(ni));
+        } else {
+            // Store the class value in a local slot named after the class.
+            self.state_mut().locals.push(LocalInfo { name: name.to_string(), captured: false });
+        }
         Ok(())
     }
 
@@ -911,4 +956,8 @@ impl Compiler {
 // Re-export compile as the public API.
 pub fn compile(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
     Compiler::compile(exprs)
+}
+
+pub fn compile_repl(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
+    Compiler::compile_repl(exprs)
 }

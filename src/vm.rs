@@ -236,6 +236,8 @@ pub struct Vm {
     /// Registry of every class defined so far, keyed by name.  Stores each
     /// class's own (non-merged) methods so SuperInvoke can dispatch to them.
     classes: HashMap<String, ClassEntry>,
+    /// Global variable store used by the REPL to persist values across calls.
+    pub globals: HashMap<String, VmValue>,
 }
 
 impl Vm {
@@ -245,7 +247,29 @@ impl Vm {
             block: None, is_block_caller: false, rescues: vec![],
             class_name: None,
         };
-        Vm { frames: vec![frame], stack: Vec::new(), open_upvalues: Vec::new(), classes: HashMap::new() }
+        Vm { frames: vec![frame], stack: Vec::new(), open_upvalues: Vec::new(), classes: HashMap::new(), globals: HashMap::new() }
+    }
+
+    /// Create an empty VM with no initial frame, for use in the REPL.
+    /// Call `load_stdlib()` before evaluating any user code.
+    pub fn new_repl() -> Self {
+        Vm { frames: vec![], stack: Vec::new(), open_upvalues: Vec::new(), classes: HashMap::new(), globals: HashMap::new() }
+    }
+
+    /// Evaluate a compiled function in the current VM context and return its result.
+    /// Used by the REPL to run each input snippet while preserving global state.
+    pub fn eval(&mut self, func: Rc<Function>) -> Result<Option<VmValue>, VmError> {
+        let min_depth = self.frames.len();
+        let base = self.stack.len();
+        self.stack.push(VmValue::Function(func.clone()));
+        self.frames.push(CallFrame {
+            function: func, upvalues: vec![], ip: 0, base,
+            block: None, is_block_caller: false, rescues: vec![],
+            class_name: None,
+        });
+        let result = self.run_inner(min_depth);
+        self.stack.truncate(base);
+        result
     }
 
     pub fn run(&mut self) -> Result<Option<VmValue>, VmError> {
@@ -1192,6 +1216,27 @@ impl Vm {
                     let val = self.pop()?;
                     println!("{}", val);
                     self.stack.push(val);
+                }
+
+                OpCode::GetGlobal(idx) => {
+                    let name = match &self.frames.last().unwrap().function.chunk.constants[idx] {
+                        Constant::Str(s) => s.clone(),
+                        _ => return Err(VmError::TypeError { message: "GetGlobal: expected string constant".to_string(), line }),
+                    };
+                    let val = self.globals.get(&name).cloned().ok_or_else(|| VmError::TypeError {
+                        message: format!("undefined variable '{}'", name),
+                        line,
+                    })?;
+                    self.stack.push(val);
+                }
+
+                OpCode::SetGlobal(idx) => {
+                    let name = match &self.frames.last().unwrap().function.chunk.constants[idx] {
+                        Constant::Str(s) => s.clone(),
+                        _ => return Err(VmError::TypeError { message: "SetGlobal: expected string constant".to_string(), line }),
+                    };
+                    let val = self.stack.last().ok_or(VmError::StackUnderflow)?.clone();
+                    self.globals.insert(name, val);
                 }
 
                 OpCode::Call(arg_count) => {
