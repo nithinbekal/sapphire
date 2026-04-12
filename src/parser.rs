@@ -299,6 +299,7 @@ impl Parser {
         let condition = self.logical()?;
         self.allow_trailing_block = true;
         let then_branch = self.block()?;
+        self.skip_terminators(); // allow elsif/else on the next line
         let else_branch = if self.check(&TokenKind::Elsif) {
             Some(vec![self.elsif_chain()?])
         } else if self.check(&TokenKind::Else) {
@@ -320,6 +321,7 @@ impl Parser {
         let condition = self.logical()?;
         self.allow_trailing_block = true;
         let then_branch = self.block()?;
+        self.skip_terminators(); // allow elsif/else on the next line
         let else_branch = if self.check(&TokenKind::Elsif) {
             Some(vec![self.elsif_chain()?])
         } else if self.check(&TokenKind::Else) {
