@@ -53,6 +53,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -60,10 +62,14 @@ jobs:
       - name: Generate checksums
         run: sha256sum sapphire-* > checksums.txt
 
+      - name: Extract changelog section
+        run: |
+          awk "/^## ${GITHUB_REF_NAME}/{found=1; next} found && /^## /{exit} found" CHANGELOG.md > release_notes.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             sapphire-*
             checksums.txt
-          generate_release_notes: true
+          body_path: release_notes.txt
