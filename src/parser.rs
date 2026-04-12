@@ -137,7 +137,8 @@ impl Parser {
         if self.check(&TokenKind::Break) {
             self.advance();
             let val = if self.check(&TokenKind::Newline) || self.check(&TokenKind::Semicolon)
-                || self.check(&TokenKind::If) || self.is_at_end() {
+                || self.check(&TokenKind::If) || self.check(&TokenKind::RightBrace)
+                || self.is_at_end() {
                 Expr::Literal(Value::Nil)
             } else {
                 self.logical()?
@@ -147,7 +148,8 @@ impl Parser {
         if self.check(&TokenKind::Next) {
             self.advance();
             let val = if self.check(&TokenKind::Newline) || self.check(&TokenKind::Semicolon)
-                || self.check(&TokenKind::If) || self.is_at_end() {
+                || self.check(&TokenKind::If) || self.check(&TokenKind::RightBrace)
+                || self.is_at_end() {
                 Expr::Literal(Value::Nil)
             } else {
                 self.logical()?

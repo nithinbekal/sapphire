@@ -32,6 +32,14 @@ struct UpvalueInfo {
     index:    usize,
 }
 
+/// Tracks the context needed to compile `break`/`next` inside a while loop.
+struct LoopCtx {
+    /// Instruction index of the loop condition check (target for `next`).
+    start:       usize,
+    /// Indices of `Jump(0)` placeholders emitted for `break` — patched after the loop.
+    break_jumps: Vec<usize>,
+}
+
 struct FunctionState {
     chunk:        Chunk,
     current_line: u32,
@@ -39,6 +47,8 @@ struct FunctionState {
     upvalue_defs: Vec<UpvalueInfo>,
     name:         String,
     arity:        usize,
+    /// Stack of active while-loop contexts, innermost last.
+    loop_stack:   Vec<LoopCtx>,
 }
 
 impl FunctionState {
@@ -50,6 +60,7 @@ impl FunctionState {
             upvalue_defs: Vec::new(),
             name:         name.to_string(),
             arity,
+            loop_stack:   Vec::new(),
         }
     }
 }
@@ -197,15 +208,26 @@ impl Compiler {
             }
 
             Expr::While { condition, body } => {
+                // Pre-declare any variables that are first introduced in the body so
+                // that subsequent iterations reuse the same stack slot (SetLocal) rather
+                // than pushing a new slot each time.
+                self.hoist_while_locals(body);
+
                 let loop_start = self.state().chunk.code.len();
 
                 self.expr(condition.as_ref())?;
                 let exit_jump = self.emit_jump(OpCode::JumpIfFalse(0));
 
+                self.state_mut().loop_stack.push(LoopCtx { start: loop_start, break_jumps: vec![] });
                 self.stmts(body)?;
-                self.emit_loop(loop_start);
+                let ctx = self.state_mut().loop_stack.pop().unwrap();
 
+                self.emit_loop(loop_start);
                 self.patch_jump(exit_jump);
+
+                for jump_idx in ctx.break_jumps {
+                    self.patch_jump(jump_idx);
+                }
             }
 
             Expr::Raise(expr) => {
@@ -215,12 +237,26 @@ impl Compiler {
 
             Expr::Break(expr) => {
                 self.expr(expr)?;
-                self.emit(OpCode::Break);
+                if self.state().loop_stack.is_empty() {
+                    self.emit(OpCode::Break);
+                } else {
+                    // Inside a while loop: discard the value, jump to after the loop.
+                    self.emit(OpCode::Pop);
+                    let jump_idx = self.emit_jump(OpCode::Jump(0));
+                    self.state_mut().loop_stack.last_mut().unwrap().break_jumps.push(jump_idx);
+                }
             }
 
             Expr::Next(expr) => {
                 self.expr(expr)?;
-                self.emit(OpCode::Next);
+                if self.state().loop_stack.is_empty() {
+                    self.emit(OpCode::Next);
+                } else {
+                    // Inside a while loop: discard the value, jump back to condition.
+                    self.emit(OpCode::Pop);
+                    let start = self.state().loop_stack.last().unwrap().start;
+                    self.emit_loop(start);
+                }
             }
 
             Expr::MultiAssign { names, values } => {
@@ -733,6 +769,40 @@ impl Compiler {
                 && !self.would_be_upvalue(depth, name)
         } else {
             false
+        }
+    }
+
+    /// Pre-declare variables that are first introduced at the top level of a while
+    /// body, emitting `Nil` for each so they occupy a fixed stack slot before the
+    /// loop's condition is checked.  This prevents subsequent iterations from
+    /// pushing a new stack slot instead of updating the existing one.
+    fn hoist_while_locals(&mut self, body: &[Expr]) {
+        if self.global_mode {
+            return; // globals use SetGlobal, not stack slots
+        }
+        let depth = self.states.len() - 1;
+        for stmt in body {
+            match stmt {
+                Expr::Assign { name, .. } => {
+                    if self.resolve_local(depth, name).is_none()
+                        && !self.would_be_upvalue(depth, name)
+                    {
+                        self.emit(OpCode::Nil);
+                        self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                    }
+                }
+                Expr::MultiAssign { names, .. } => {
+                    for name in names {
+                        if self.resolve_local(depth, name).is_none()
+                            && !self.would_be_upvalue(depth, name)
+                        {
+                            self.emit(OpCode::Nil);
+                            self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
