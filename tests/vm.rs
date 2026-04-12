@@ -818,3 +818,621 @@ class Dog < Animal {
 Dog.kind()"#;
     assert_eq!(eval(src), VmValue::Str("dog".into()));
 }
+
+// ---- Arithmetic ----
+
+#[test]
+fn modulo() {
+    assert_eq!(eval("10 % 3"), VmValue::Int(1));
+    assert_eq!(eval("9 % 3"), VmValue::Int(0));
+}
+
+#[test]
+fn int_division_stays_int() {
+    assert_eq!(eval("7 / 2"), VmValue::Int(3));
+}
+
+#[test]
+fn division_by_zero() {
+    let err = eval_err("1 / 0");
+    assert!(matches!(err, VmError::Raised(..)));
+}
+
+// ---- String equality ----
+
+#[test]
+fn string_equality() {
+    assert_eq!(eval(r#""a" == "a""#), VmValue::Bool(true));
+    assert_eq!(eval(r#""a" == "b""#), VmValue::Bool(false));
+}
+
+// ---- String escapes ----
+
+#[test]
+fn string_escape_newline() {
+    assert_eq!(eval(r#""\n""#), VmValue::Str("\n".into()));
+}
+
+#[test]
+fn string_escape_tab() {
+    assert_eq!(eval(r#""\t""#), VmValue::Str("\t".into()));
+}
+
+#[test]
+fn string_escape_backslash() {
+    assert_eq!(eval(r#""\\""#), VmValue::Str("\\".into()));
+}
+
+#[test]
+fn string_escape_quote() {
+    assert_eq!(eval(r#""\"""#), VmValue::Str("\"".into()));
+}
+
+#[test]
+fn string_escape_in_interpolation() {
+    assert_eq!(eval(r#""a\nb""#), VmValue::Str("a\nb".into()));
+}
+
+// ---- Float ----
+
+#[test]
+fn float_arithmetic() {
+    assert_eq!(eval("1.5 + 2.5"), VmValue::Float(4.0));
+    assert_eq!(eval("3.0 - 1.5"), VmValue::Float(1.5));
+    assert_eq!(eval("2.0 * 3.0"), VmValue::Float(6.0));
+    assert_eq!(eval("7.0 / 2.0"), VmValue::Float(3.5));
+}
+
+#[test]
+fn float_mixed_arithmetic() {
+    assert_eq!(eval("1 + 0.5"), VmValue::Float(1.5));
+    assert_eq!(eval("0.5 + 1"), VmValue::Float(1.5));
+    assert_eq!(eval("3 * 1.5"), VmValue::Float(4.5));
+    assert_eq!(eval("7 / 2.0"), VmValue::Float(3.5));
+}
+
+#[test]
+fn float_comparison() {
+    assert_eq!(eval("1.5 < 2.0"), VmValue::Bool(true));
+    assert_eq!(eval("2.0 > 1.5"), VmValue::Bool(true));
+    assert_eq!(eval("1.0 == 1.0"), VmValue::Bool(true));
+}
+
+#[test]
+fn float_negation() {
+    assert_eq!(eval("-3.14"), VmValue::Float(-3.14));
+}
+
+#[test]
+fn float_to_i() {
+    assert_eq!(eval("3.9.to_i()"), VmValue::Int(3));
+    assert_eq!(eval("(-3.9).to_i()"), VmValue::Int(-3));
+}
+
+#[test]
+fn int_to_f() {
+    assert_eq!(eval("3.to_f()"), VmValue::Float(3.0));
+}
+
+#[test]
+fn float_to_s() {
+    assert_eq!(eval("3.14.to_s()"), VmValue::Str("3.14".into()));
+}
+
+// ---- Constants ----
+
+#[test]
+fn constant_assignment() {
+    assert_eq!(eval("MAX = 100\nMAX"), VmValue::Int(100));
+}
+
+#[test]
+fn mixed_case_is_not_a_constant() {
+    assert_eq!(eval("Pi = 3\nPi = 4\nPi"), VmValue::Int(4));
+}
+
+#[test]
+fn constant_readable_in_functions() {
+    let src = "MAX = 10\ndef cap(n) { if n > MAX { MAX } else { n } }\ncap(20)";
+    assert_eq!(eval(src), VmValue::Int(10));
+}
+
+// ---- Implicit `it` in blocks ----
+
+#[test]
+fn it_each() {
+    let src = "sum = 0\n[1, 2, 3].each() { |it| sum = sum + it }\nsum";
+    assert_eq!(eval(src), VmValue::Int(6));
+}
+
+#[test]
+fn it_map() {
+    let src = "result = [1, 2, 3].map() { |it| it * 2 }\nresult[1]";
+    assert_eq!(eval(src), VmValue::Int(4));
+}
+
+#[test]
+fn while_condition_method_call_no_block_greed() {
+    let src = "list = [1, 2, 3]\ni = 0\nsum = 0\nlen = list.size()\nwhile i < len { sum = sum + list[i]\ni = i + 1 }\nsum";
+    assert_eq!(eval(src), VmValue::Int(6));
+}
+
+// ---- Each next ----
+
+#[test]
+fn each_next() {
+    let src = "sum = 0\n[1, 2, 3, 4, 5].each() { |x| if x == 3 { next nil }\nsum = sum + x }\nsum";
+    assert_eq!(eval(src), VmValue::Int(12));
+}
+
+// ---- List advanced methods ----
+
+#[test]
+fn list_select() {
+    let src = "result = [1, 2, 3, 4].select() { |x| x > 2 }\nresult.size()";
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
+}
+
+#[test]
+fn list_reduce_with_initial() {
+    let src = "[1, 2, 3, 4, 5].reduce(0) { |acc, n| acc + n }";
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(15));
+}
+
+#[test]
+fn list_reduce_without_initial() {
+    let src = "[1, 2, 3, 4, 5].reduce() { |acc, n| acc * n }";
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(120));
+}
+
+#[test]
+fn list_sort_full() {
+    let src = "result = [3, 1, 4, 1, 5, 9, 2].sort()\nresult[0]";
+    assert_eq!(eval(src), VmValue::Int(1));
+    let src2 = "result = [3, 1, 4, 1, 5, 9, 2].sort()\nresult[6]";
+    assert_eq!(eval(src2), VmValue::Int(9));
+}
+
+#[test]
+fn list_sort_strings() {
+    let src = r#"result = ["banana", "apple", "cherry"].sort()
+result[0]"#;
+    assert_eq!(eval(src), VmValue::Str("apple".into()));
+    let src2 = r#"result = ["banana", "apple", "cherry"].sort()
+result[2]"#;
+    assert_eq!(eval(src2), VmValue::Str("cherry".into()));
+}
+
+#[test]
+fn list_flatten() {
+    let src = "result = [[1, 2], [3, [4, 5]]].flatten()\nresult.size()";
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(5));
+    let src2 = "result = [[1, 2], [3, [4, 5]]].flatten()\nresult[3]";
+    assert_eq!(eval_with_stdlib(src2), VmValue::Int(4));
+}
+
+#[test]
+fn list_uniq() {
+    let src = "result = [1, 2, 2, 3, 1].uniq()\nresult.size()";
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(3));
+}
+
+#[test]
+fn list_each_with_index() {
+    let src = r#"pairs = []
+["a", "b", "c"].each_with_index() { |item, i| pairs.push(i) }
+pairs[2]"#;
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
+}
+
+#[test]
+fn list_zip() {
+    let src = "result = [1, 2, 3].zip([4, 5, 6])\nresult.size()";
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(3));
+    let src2 = "result = [1, 2, 3].zip([4, 5, 6])\nresult[0][0]";
+    assert_eq!(eval_with_stdlib(src2), VmValue::Int(1));
+    let src3 = "result = [1, 2, 3].zip([4, 5, 6])\nresult[0][1]";
+    assert_eq!(eval_with_stdlib(src3), VmValue::Int(4));
+}
+
+// ---- Map advanced methods ----
+
+#[test]
+fn map_merge() {
+    let src = r#"a = { x: 1 }
+b = { y: 2 }
+c = a.merge(b)
+c.size()"#;
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
+    let src2 = r#"a = { x: 1 }
+b = { y: 2 }
+c = a.merge(b)
+c["x"]"#;
+    assert_eq!(eval_with_stdlib(src2), VmValue::Int(1));
+}
+
+#[test]
+fn map_select() {
+    let src = r#"m = { a: 1, b: 2, c: 3 }
+result = m.select() { |k, v| v > 1 }
+result.size()"#;
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
+    let src2 = r#"m = { a: 1, b: 2, c: 3 }
+result = m.select() { |k, v| v > 1 }
+result.has_key?("a")"#;
+    assert_eq!(eval_with_stdlib(src2), VmValue::Bool(false));
+}
+
+// ---- Range ----
+
+#[test]
+fn range_include() {
+    // VM ranges are exclusive upper bound
+    assert_eq!(eval_with_stdlib("(1..10).include?(5)"), VmValue::Bool(true));
+    assert_eq!(eval_with_stdlib("(1..10).include?(1)"), VmValue::Bool(true));
+    assert_eq!(eval_with_stdlib("(1..10).include?(10)"), VmValue::Bool(false));
+    assert_eq!(eval_with_stdlib("(1..10).include?(11)"), VmValue::Bool(false));
+}
+
+#[test]
+fn range_to_s() {
+    assert_eq!(eval("(1..5).to_s()"), VmValue::Str("1..5".into()));
+}
+
+// ---- Yield ----
+
+#[test]
+fn yield_multiple_args() {
+    let src = "def call_block(a, b) { yield(a, b) }\ncall_block(3, 4) { |x, y| x + y }";
+    assert_eq!(eval(src), VmValue::Int(7));
+}
+
+#[test]
+fn yield_in_loop() {
+    let src = "def my_each(list) {
+  len = list.size()
+  i = 0
+  while i < len { yield(list[i])\ni = i + 1 }
+}
+sum = 0
+my_each([1, 2, 3]) { |x| sum = sum + x }
+sum";
+    assert_eq!(eval(src), VmValue::Int(6));
+}
+
+#[test]
+fn yield_in_method() {
+    let src = "class Wrapper {
+  attr items
+  def each() {
+    len = self.items.size()
+    i = 0
+    while i < len { yield(self.items[i])\ni = i + 1 }
+  }
+}
+w = Wrapper.new(items: [10, 20, 30])
+sum = 0
+w.each() { |x| sum = sum + x }
+sum";
+    assert_eq!(eval(src), VmValue::Int(60));
+}
+
+// ---- Class features ----
+
+#[test]
+fn class_default_field() {
+    let src = r#"class Point { attr x
+attr y
+attr label = "origin" }
+p = Point.new(x: 1, y: 2)
+p.label"#;
+    assert_eq!(eval(src), VmValue::Str("origin".into()));
+}
+
+#[test]
+fn inheritance_fields() {
+    let src = r#"class Animal { attr name }
+class Dog < Animal { attr breed }
+d = Dog.new(name: "Rex", breed: "Lab")
+d.name"#;
+    assert_eq!(eval(src), VmValue::Str("Rex".into()));
+    let src2 = r#"class Animal { attr name }
+class Dog < Animal { attr breed }
+d = Dog.new(name: "Rex", breed: "Lab")
+d.breed"#;
+    assert_eq!(eval(src2), VmValue::Str("Lab".into()));
+}
+
+#[test]
+fn inheritance_override() {
+    let src = r#"class Animal { def speak() { "..." } }
+class Dog < Animal { def speak() { "woof" } }
+Dog.new().speak()"#;
+    assert_eq!(eval(src), VmValue::Str("woof".into()));
+}
+
+#[test]
+fn field_mutation() {
+    let src = r#"class Counter { attr n
+  def inc() { self.n = self.n + 1 }
+}
+c = Counter.new(n: 0)
+c.inc()
+c.n"#;
+    assert_eq!(eval(src), VmValue::Int(1));
+}
+
+#[test]
+fn super_with_field_override() {
+    let src = r#"class Animal { attr name
+  def describe() { self.name }
+}
+class Dog < Animal { attr breed
+  def describe() { super.describe() + " (" + self.breed + ")" }
+}
+d = Dog.new(name: "Rex", breed: "Lab")
+d.describe()"#;
+    assert_eq!(eval(src), VmValue::Str("Rex (Lab)".into()));
+}
+
+#[test]
+fn super_still_works_with_implicit_object() {
+    let src = r#"class Animal { attr name
+  def speak() { "..." }
+}
+class Dog < Animal { def speak() { super.speak() } }
+Dog.new(name: "Rex").speak()"#;
+    assert_eq!(eval(src), VmValue::Str("...".into()));
+}
+
+#[test]
+fn implicit_self_local_shadows_field() {
+    let src = r#"class Box { attr x
+  def doubled() { x = 99
+x }
+}
+b = Box.new(x: 10)
+b.doubled()"#;
+    assert_eq!(eval(src), VmValue::Int(99));
+    let src2 = r#"class Box { attr x
+  def doubled() { x = 99
+x }
+}
+b = Box.new(x: 10)
+b.doubled()
+b.x"#;
+    assert_eq!(eval(src2), VmValue::Int(10));
+}
+
+// ---- elsif chains ----
+
+#[test]
+fn elsif_first_branch() {
+    let src = "x = 20\nresult = 0\nif x > 10 { result = 1 } elsif x > 3 { result = 2 } else { result = 3 }\nresult";
+    assert_eq!(eval(src), VmValue::Int(1));
+}
+
+#[test]
+fn elsif_second_branch() {
+    let src = "x = 5\nresult = 0\nif x > 10 { result = 1 } elsif x > 3 { result = 2 } else { result = 3 }\nresult";
+    assert_eq!(eval(src), VmValue::Int(2));
+}
+
+#[test]
+fn elsif_else_branch() {
+    let src = "x = 1\nresult = 0\nif x > 10 { result = 1 } elsif x > 3 { result = 2 } else { result = 3 }\nresult";
+    assert_eq!(eval(src), VmValue::Int(3));
+}
+
+#[test]
+fn elsif_chain() {
+    let src = "x = 5\nresult = 0\nif x == 1 { result = 1 } elsif x == 2 { result = 2 } elsif x == 5 { result = 5 } else { result = 99 }\nresult";
+    assert_eq!(eval(src), VmValue::Int(5));
+}
+
+// ---- defp inherited ----
+
+#[test]
+fn defp_inherited_callable_from_subclass() {
+    let src = r#"class A {
+  defp helper() { 99 }
+  def run() { helper() }
+}
+class B < A {}
+B.new().run()"#;
+    assert_eq!(eval(src), VmValue::Int(99));
+}
+
+// ---- chars ----
+
+#[test]
+fn string_chars() {
+    let src = r#"result = "hi".chars()
+result.size()"#;
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
+    let src2 = r#"result = "hi".chars()
+result[0]"#;
+    assert_eq!(eval_with_stdlib(src2), VmValue::Str("h".into()));
+}
+
+// ---- Multi-assign three ----
+
+#[test]
+fn multi_assign_three() {
+    let src = "x, y, z = 10, 20, 30\ny";
+    assert_eq!(eval(src), VmValue::Int(20));
+    let src2 = "x, y, z = 10, 20, 30\nz";
+    assert_eq!(eval(src2), VmValue::Int(30));
+}
+
+// ---- Error handling ----
+
+#[test]
+fn raise_unhandled() {
+    let err = eval_err(r#"raise "oops""#);
+    assert!(matches!(err, VmError::Raised(..)));
+}
+
+#[test]
+fn begin_rescue_catches_runtime_error() {
+    let src = "x = 0\nbegin\nx = 1 / 0\nrescue e\nx = 99\nend\nx";
+    assert_eq!(eval(src), VmValue::Int(99));
+}
+
+#[test]
+fn begin_else_skipped_on_error() {
+    let src = r#"x = 0
+begin
+  raise "err"
+rescue e
+  x = 99
+else
+  x = 2
+end
+x"#;
+    assert_eq!(eval(src), VmValue::Int(99));
+}
+
+#[test]
+fn begin_no_error_skips_rescue() {
+    let src = "x = 0\nbegin\nx = 42\nrescue e\nx = 1\nend\nx";
+    assert_eq!(eval(src), VmValue::Int(42));
+}
+
+#[test]
+fn inline_rescue_in_function() {
+    let src = r#"def risky(x) {
+  if x < 0 { raise "bad" }
+  x * 2
+rescue e
+  0
+}
+risky(5)"#;
+    assert_eq!(eval(src), VmValue::Int(10));
+    let src2 = r#"def risky(x) {
+  if x < 0 { raise "bad" }
+  x * 2
+rescue e
+  0
+}
+risky(-1)"#;
+    assert_eq!(eval(src2), VmValue::Int(0));
+}
+
+#[test]
+fn inline_rescue_binds_error() {
+    let src = r#"def boom() {
+  raise "oops"
+  1
+rescue e
+  e
+}
+boom()"#;
+    assert_eq!(eval(src), VmValue::Str("oops".into()));
+}
+
+#[test]
+fn inline_rescue_in_method() {
+    let src = r#"class Safe {
+  def try_div(x) {
+    10 / x
+  rescue e
+    -1
+  }
+}
+Safe.new().try_div(2)"#;
+    assert_eq!(eval(src), VmValue::Int(5));
+    let src2 = r#"class Safe {
+  def try_div(x) {
+    10 / x
+  rescue e
+    -1
+  }
+}
+Safe.new().try_div(0)"#;
+    assert_eq!(eval(src2), VmValue::Int(-1));
+}
+
+#[test]
+fn raise_instance() {
+    let src = r#"class Err { attr msg }
+result = begin
+  raise Err.new(msg: "bad")
+rescue e
+  e.msg
+end
+result"#;
+    assert_eq!(eval(src), VmValue::Str("bad".into()));
+}
+
+// ---- Num methods ----
+
+#[test]
+fn num_methods_on_int_and_float() {
+    assert_eq!(eval_with_stdlib("0.zero?()"), VmValue::Bool(true));
+    // Float zero? uses self == 0 (float/int comparison) which is not supported in VM
+    assert_eq!(eval_with_stdlib("3.positive?()"), VmValue::Bool(true));
+    assert_eq!(eval_with_stdlib("(-1.0).negative?()"), VmValue::Bool(true));
+    assert_eq!(eval_with_stdlib("10.clamp(1, 5)"), VmValue::Int(5));
+    assert_eq!(eval_with_stdlib("0.clamp(1, 5)"), VmValue::Int(1));
+}
+
+#[test]
+fn num_type_annotation_accepts_int_and_float() {
+    let src = "def double(x: Num) { x + x }\ndouble(3)";
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(6));
+    let src2 = "def double(x: Num) { x + x }\ndouble(1.5)";
+    assert_eq!(eval_with_stdlib(src2), VmValue::Float(3.0));
+}
+
+// ---- Type annotations ----
+
+#[test]
+fn typed_param_accepts_correct_type() {
+    let src = "def add(a: Int, b: Int) { a + b }\nadd(1, 2)";
+    assert_eq!(eval(src), VmValue::Int(3));
+}
+
+#[test]
+fn typed_param_rejects_wrong_type() {
+    let err = eval_err(r#"def add(a: Int, b: Int) { a + b }
+add("x", 2)"#);
+    assert!(matches!(err, VmError::TypeError { .. }));
+}
+
+#[test]
+fn typed_return_accepts_correct_type() {
+    let src = "def f() -> Int { 42 }\nf()";
+    assert_eq!(eval(src), VmValue::Int(42));
+}
+
+
+
+#[test]
+fn attr_type_accepted_on_constructor() {
+    let src = "class P { attr x: Int }\nP.new(x: 42).x";
+    assert_eq!(eval(src), VmValue::Int(42));
+}
+
+
+#[test]
+fn attr_type_accepted_on_set() {
+    let src = "class P { attr x: Int }\np = P.new(x: 1)\np.x = 99\np.x";
+    assert_eq!(eval(src), VmValue::Int(99));
+}
+
+#[test]
+fn unannotated_code_unchanged() {
+    let src = r#"def greet(name) { name }
+greet("Alice")"#;
+    assert_eq!(eval(src), VmValue::Str("Alice".into()));
+}
+
+#[test]
+fn method_typed_param_rejects_wrong_type() {
+    let err = eval_err(r#"class Calc { def double(n: Int) { n * 2 } }
+Calc.new().double("x")"#);
+    assert!(matches!(err, VmError::TypeError { .. }));
+}
+
+
