@@ -1771,7 +1771,6 @@ fn dispatch_native_method(
             ("sqrt",  []) => Ok(VmValue::Float(n.sqrt())),
             ("nan?",  []) => Ok(VmValue::Bool(n.is_nan())),
             ("infinite?", []) => Ok(VmValue::Bool(n.is_infinite())),
-            ("zero?", []) => Ok(VmValue::Bool(*n == 0.0)),
             _ => Err(type_err(&format!("Float has no method '{}'", name))),
         },
 
