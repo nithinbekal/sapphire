@@ -1435,4 +1435,54 @@ Calc.new().double("x")"#);
     assert!(matches!(err, VmError::TypeError { .. }));
 }
 
+// --- Method chaining after blocks ---
+
+#[test]
+fn chain_map_then_size() {
+    // .map { } followed by .size() on the same line
+    let src = "[1, 2, 3].map() { |x| x * 2 }.size()";
+    assert_eq!(eval(src), VmValue::Int(3));
+}
+
+#[test]
+fn chain_map_then_index() {
+    // result of .map { } immediately indexed
+    let src = "[1, 2, 3].map() { |x| x * 10 }[1]";
+    assert_eq!(eval(src), VmValue::Int(20));
+}
+
+#[test]
+fn chain_map_then_map() {
+    // two block calls chained on one line
+    let src = "[1, 2, 3].map() { |x| x * 2 }.map() { |x| x + 1 }[0]";
+    assert_eq!(eval(src), VmValue::Int(3));
+}
+
+#[test]
+fn chain_multiline_map_then_size() {
+    // .map { } on one line, .size() on the next
+    let src = "[1, 2, 3]\n  .map() { |x| x * 2 }\n  .size()";
+    assert_eq!(eval(src), VmValue::Int(3));
+}
+
+#[test]
+fn chain_multiline_map_then_map() {
+    // two block-calls across newlines
+    let src = "result = [1, 2, 3]\n  .map() { |x| x * 2 }\n  .map() { |x| x + 1 }\nresult[2]";
+    assert_eq!(eval(src), VmValue::Int(7));
+}
+
+#[test]
+fn chain_multiline_select_then_size() {
+    let src = "[1, 2, 3, 4]\n  .select() { |x| x > 2 }\n  .size()";
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
+}
+
+#[test]
+fn chain_multiline_map_then_select() {
+    // map then select across lines
+    let src = "[1, 2, 3, 4]\n  .map() { |x| x * 2 }\n  .select() { |x| x > 4 }\n  .size()";
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
+}
+
 
