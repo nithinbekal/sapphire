@@ -1762,7 +1762,11 @@ fn dispatch_native_method(
         },
 
         VmValue::Float(n) => match (name, args) {
-            ("to_s",  []) => Ok(VmValue::Str(format!("{}", n))),
+            ("to_s",  []) => Ok(VmValue::Str(if n.fract() == 0.0 {
+                format!("{}.0", *n as i64)
+            } else {
+                format!("{}", n)
+            })),
             ("to_i",  []) => Ok(VmValue::Int(*n as i64)),
             ("abs",   []) => Ok(VmValue::Float(n.abs())),
             ("round", []) => Ok(VmValue::Int(n.round() as i64)),
