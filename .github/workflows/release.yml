@@ -64,7 +64,10 @@ jobs:
 
       - name: Extract changelog section
         run: |
+          echo "Tag: ${GITHUB_REF_NAME}"
           awk "/^## ${GITHUB_REF_NAME}/{found=1; next} found && /^## /{exit} found" CHANGELOG.md > release_notes.txt
+          echo "--- release_notes.txt ---"
+          cat release_notes.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
