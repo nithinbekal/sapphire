@@ -1,6 +1,6 @@
 use std::fmt;
 use std::rc::Rc;
-use crate::ast::{Block, Expr, StringPart, MethodDef};
+use crate::ast::{Block, Expr, StringPart, MethodDef, TypeExpr};
 use crate::chunk::{Chunk, Constant, Function, OpCode, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
@@ -49,6 +49,7 @@ struct FunctionState {
     arity:        usize,
     /// Stack of active while-loop contexts, innermost last.
     loop_stack:   Vec<LoopCtx>,
+    return_type:  Option<String>,
 }
 
 impl FunctionState {
@@ -61,6 +62,7 @@ impl FunctionState {
             name:         name.to_string(),
             arity,
             loop_stack:   Vec::new(),
+            return_type:  None,
         }
     }
 }
@@ -120,6 +122,7 @@ impl Compiler {
                 .into_iter()
                 .map(|uv| UpvalueDef { is_local: uv.is_local, index: uv.index })
                 .collect(),
+            return_type: state.return_type,
         })
     }
 
@@ -609,11 +612,12 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::Function { name, params, body, .. } => {
+            Expr::Function { name, params, return_type, body } => {
                 let line  = self.state().current_line;
                 let arity = params.len();
 
                 self.push_fn(name, arity, line);
+                self.state_mut().return_type = type_expr_name(return_type.as_ref());
                 // Slot 0 = the function itself — enables direct recursion by name.
                 self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
                 for p in params {
@@ -956,6 +960,7 @@ impl Compiler {
         for method in &class_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
+            self.state_mut().return_type = type_expr_name(method.return_type.as_ref());
             self.state_mut().locals.push(LocalInfo { name: "self".into(), captured: false });
             for p in &method.params {
                 self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
@@ -970,6 +975,7 @@ impl Compiler {
         for method in &instance_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
+            self.state_mut().return_type = type_expr_name(method.return_type.as_ref());
             self.state_mut().locals.push(LocalInfo { name: "self".into(), captured: false });
             for p in &method.params {
                 self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
@@ -1026,4 +1032,13 @@ pub fn compile(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
 
 pub fn compile_repl(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
     Compiler::compile_repl(exprs)
+}
+
+/// Extract a plain type name string from an optional TypeExpr.
+/// Returns `None` for absent annotations and `TypeExpr::Any`.
+fn type_expr_name(te: Option<&TypeExpr>) -> Option<String> {
+    match te {
+        Some(TypeExpr::Named(n)) => Some(n.clone()),
+        _ => None,
+    }
 }

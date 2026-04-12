@@ -18,6 +18,9 @@ pub struct Function {
     pub arity:        usize,
     pub chunk:        Chunk,
     pub upvalue_defs: Vec<UpvalueDef>,
+    /// Return type annotation, if one was present in the source (`-> TypeName`).
+    /// When `Some`, the VM checks the actual return value at runtime.
+    pub return_type:  Option<String>,
 }
 
 /// Two `Function` values are equal only if they are the exact same allocation.

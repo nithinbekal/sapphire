@@ -1616,3 +1616,46 @@ fn float_zero_false() {
 fn float_zero_negative_zero() {
     assert_eq!(eval_with_stdlib("(-0.0).zero?()"), VmValue::Bool(true));
 }
+
+// ── Return type annotations (runtime enforcement) ─────────────────────────────
+
+#[test]
+fn return_type_annotation_correct() {
+    let result = eval("def add(a: Int, b: Int) -> Int { a + b }\nadd(1, 2)");
+    assert_eq!(result, VmValue::Int(3));
+}
+
+#[test]
+fn return_type_annotation_wrong_type() {
+    let err = eval_err("def greet() -> Int { \"hello\" }\ngreet()");
+    match err {
+        VmError::TypeError { message, .. } => {
+            assert!(message.contains("expected Int"), "unexpected message: {}", message);
+            assert!(message.contains("got String"), "unexpected message: {}", message);
+        }
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+#[test]
+fn return_type_annotation_early_return_wrong() {
+    let err = eval_err("def f() -> Int { return \"oops\" }\nf()");
+    match err {
+        VmError::TypeError { message, .. } => {
+            assert!(message.contains("expected Int"), "unexpected message: {}", message);
+        }
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+#[test]
+fn return_type_annotation_num_accepts_int() {
+    let result = eval("def f() -> Num { 42 }\nf()");
+    assert_eq!(result, VmValue::Int(42));
+}
+
+#[test]
+fn return_type_annotation_num_accepts_float() {
+    let result = eval("def f() -> Num { 3.14 }\nf()");
+    assert_eq!(result, VmValue::Float(3.14));
+}
