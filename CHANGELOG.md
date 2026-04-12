@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.2.0
+
+**VM**
+- The bytecode VM is now the sole runtime — the tree-walk interpreter has been removed
+- The REPL (`sapphire console`) now runs on the VM
+
+**Parser fixes**
+
+Method chaining after a block now works, both on one line and across lines:
+
+```ruby
+# Now works — previously: parse error: unexpected token 'Dot'
+[1, 2, 3].map { |n| n * 2 }.each { |n| print n }
+
+[1, 2, 3]
+  .map { |n| n * 2 }
+  .each { |n| print n }
+```
+
+`elsif` and `else` can now appear on the next line after the closing `}`:
+
+```ruby
+# Now works — previously: parse error: unexpected token 'Elsif'
+if x == 1 { "one" }
+elsif x == 2 { "two" }
+else { "other" }
+```
+
+---
+
 ## v0.1.1
 
 **Classes**
