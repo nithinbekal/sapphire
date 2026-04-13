@@ -1281,6 +1281,24 @@ impl Vm {
                     // Close every upvalue that points into the returning frame.
                     self.close_upvalues_above(frame.base);
 
+                    // Enforce return type annotation if present.
+                    if let Some(expected_type) = &frame.function.return_type {
+                        let val = return_val.as_ref().unwrap_or(&VmValue::Nil);
+                        let actual_type = value_type_name(val);
+                        let types_match = actual_type == expected_type.as_str()
+                            || (expected_type == "Num"
+                                && (actual_type == "Int" || actual_type == "Float"));
+                        if !types_match {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "return type error in '{}': expected {}, got {}",
+                                    frame.function.name, expected_type, actual_type
+                                ),
+                                line,
+                            });
+                        }
+                    }
+
                     if self.frames.len() <= min_depth {
                         return Ok(return_val);
                     }
@@ -2050,6 +2068,24 @@ fn primitive_class_name(val: &VmValue) -> Option<&'static str> {
     }
 }
 
+/// Return the type name of a value for use in runtime type-checking error messages.
+fn value_type_name(val: &VmValue) -> &str {
+    match val {
+        VmValue::Int(_)              => "Int",
+        VmValue::Float(_)            => "Float",
+        VmValue::Str(_)              => "String",
+        VmValue::Bool(_)             => "Bool",
+        VmValue::Nil                 => "Nil",
+        VmValue::List(_)             => "List",
+        VmValue::Map(_)              => "Map",
+        VmValue::Range { .. }        => "Range",
+        VmValue::Instance { class_name, .. } => class_name.as_str(),
+        VmValue::Class { name, .. }  => name.as_str(),
+        VmValue::Function(_)         => "Function",
+        VmValue::Closure { .. }      => "Function",
+    }
+}
+
 fn starting_class_name_for_is_a(recv: &VmValue) -> Option<String> {
     match recv {
         VmValue::Instance { class_name, .. } => Some(class_name.clone()),
@@ -2164,7 +2200,7 @@ mod tests {
     use crate::chunk::{Chunk, Constant, Function, OpCode};
 
     fn run(chunk: Chunk) -> Result<Option<VmValue>, VmError> {
-        let f = Rc::new(Function { name: String::new(), arity: 0, chunk, upvalue_defs: vec![] });
+        let f = Rc::new(Function { name: String::new(), arity: 0, chunk, upvalue_defs: vec![], return_type: None });
         Vm::new(f).run()
     }
 
