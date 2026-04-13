@@ -1518,6 +1518,71 @@ fn chain_multiline_map_then_select() {
     assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
 }
 
+// ── break / next in while loops ───────────────────────────────────────────────
+
+#[test]
+fn break_exits_while_loop() {
+    let src = "
+i = 0
+while true {
+  if i == 3 { break }
+  i = i + 1
+}
+i";
+    assert_eq!(eval(src), VmValue::Int(3));
+}
+
+#[test]
+fn next_skips_to_next_iteration() {
+    // Accumulate only even numbers via next
+    let src = "
+sum = 0
+i = 0
+while i < 6 {
+  i = i + 1
+  if i % 2 != 0 { next }
+  sum = sum + i
+}
+sum";
+    assert_eq!(eval(src), VmValue::Int(12)); // 2 + 4 + 6
+}
+
+#[test]
+fn break_in_nested_while_exits_inner_only() {
+    let src = "
+outer = 0
+i = 0
+while i < 3 {
+  j = 0
+  while j < 3 {
+    if j == 1 { break }
+    j = j + 1
+  }
+  outer = outer + j
+  i = i + 1
+}
+outer";
+    assert_eq!(eval(src), VmValue::Int(3)); // j stops at 1 each time, 3 iterations
+}
+
+#[test]
+fn next_in_nested_while_skips_inner_only() {
+    let src = "
+count = 0
+i = 0
+while i < 3 {
+  i = i + 1
+  j = 0
+  while j < 3 {
+    j = j + 1
+    if j == 2 { next }
+    count = count + 1
+  }
+}
+count";
+    assert_eq!(eval(src), VmValue::Int(6)); // 2 increments per outer iter, 3 iters
+}
+
 // ── Float#to_s ────────────────────────────────────────────────────────────────
 
 #[test]
