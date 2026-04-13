@@ -66,7 +66,7 @@ fn typecheck_file(path: &str) {
 }
 
 fn run_repl() {
-    println!("Sapphire 0.1.0 — Ctrl+D to quit");
+    println!("Sapphire {} — Ctrl+D to quit", env!("CARGO_PKG_VERSION"));
 
     let mut vm = vm::Vm::new_repl();
     if let Err(e) = vm.load_stdlib() {
