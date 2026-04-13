@@ -590,9 +590,11 @@ fn int_methods() {
     assert_eq!(eval("42.to_s()"), VmValue::Str("42".into()));
     assert_eq!(eval("42.to_f()"), VmValue::Float(42.0));
     assert_eq!(eval_with_stdlib("n = -5\nn.abs()"), VmValue::Int(5));
-    assert_eq!(eval("4.even?()"), VmValue::Bool(true));
-    assert_eq!(eval("3.odd?()"), VmValue::Bool(true));
+    assert_eq!(eval_with_stdlib("4.even?()"), VmValue::Bool(true));
+    assert_eq!(eval_with_stdlib("3.odd?()"), VmValue::Bool(true));
     assert_eq!(eval_with_stdlib("0.zero?()"), VmValue::Bool(true));
+    assert_eq!(eval_with_stdlib("5.max(10)"), VmValue::Int(10));
+    assert_eq!(eval_with_stdlib("10.min(5)"), VmValue::Int(5));
 }
 
 #[test]

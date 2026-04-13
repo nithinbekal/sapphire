@@ -1768,12 +1768,8 @@ fn dispatch_native_method(
         VmValue::Int(n) => match (name, args) {
             ("to_s",  [])                           => Ok(VmValue::Str(n.to_string())),
             ("to_f",  [])                           => Ok(VmValue::Float(*n as f64)),
-            ("even?", [])                           => Ok(VmValue::Bool(n % 2 == 0)),
-            ("odd?",  [])                           => Ok(VmValue::Bool(n % 2 != 0)),
             ("to_r",  [])                           => Ok(recv.clone()),
             ("pow",   [VmValue::Int(e)]) if *e >= 0 => Ok(VmValue::Int(n.pow(*e as u32))),
-            ("max",   [VmValue::Int(other)])        => Ok(VmValue::Int(*n.max(other))),
-            ("min",   [VmValue::Int(other)])        => Ok(VmValue::Int(*n.min(other))),
             _ => Err(type_err(&format!("Int has no method '{}'", name))),
         },
 
