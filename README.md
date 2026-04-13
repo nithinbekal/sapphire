@@ -2,19 +2,18 @@
 
 Sapphire is an object-oriented programming language built as a learning project to explore interpreter and compiler design.
 
-It follows Ruby's object model — everything is an object, interfaces act as mixins — but with a cleaner, more explicit syntax: no sigils on variables, no metaprogramming, and parens always required on method calls.
+It follows Ruby's object model — everything is an object — but adds gradual typing and simplifies the syntax where possible.
 
 ## Goals
 
 - Explore Ruby's object model in a typed setting
-- Experiment with OOP features: classes, inheritance, interfaces as mixins, and closures
+- Experiment with OOP features: classes, inheritance, and closures
 - Follow the [Crafting Interpreters](https://craftinginterpreters.com) path — tree-walk interpreter first, bytecode VM later
 - Keep the language small and the implementation readable
 
 ## Design Principles
 
 - **Everything is an object** — primitives like `Int` and `Bool` are objects with methods
-- **Interfaces as mixins** — interfaces can be mixed into classes, not just used as type constraints
 - **No magic** — no global variables, no class variables, no metaprogramming
 
 ## Running
