@@ -64,16 +64,6 @@ class List {
     }
   }
 
-  # Returns true if some element is == to item.
-  #
-  #   [1, 2, 3].include?(2)   # true
-  #   [1, 2, 3].include?(9)   # false
-  #
-  def include?(item) {
-    result = each { |x| break true if x == item }
-    result == true
-  }
-
   # Returns a new list of pairs: the i-th element of self with the i-th of other.
   # The number of pairs is self.length; other must have at least that many elements.
   #
