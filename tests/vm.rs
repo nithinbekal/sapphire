@@ -589,10 +589,10 @@ f()";
 fn int_methods() {
     assert_eq!(eval("42.to_s()"), VmValue::Str("42".into()));
     assert_eq!(eval("42.to_f()"), VmValue::Float(42.0));
-    assert_eq!(eval("n = -5\nn.abs()"), VmValue::Int(5));
+    assert_eq!(eval_with_stdlib("n = -5\nn.abs()"), VmValue::Int(5));
     assert_eq!(eval("4.even?()"), VmValue::Bool(true));
     assert_eq!(eval("3.odd?()"), VmValue::Bool(true));
-    assert_eq!(eval("0.zero?()"), VmValue::Bool(true));
+    assert_eq!(eval_with_stdlib("0.zero?()"), VmValue::Bool(true));
 }
 
 #[test]
@@ -601,7 +601,7 @@ fn float_methods() {
     assert_eq!(eval("3.7.floor()"), VmValue::Int(3));
     assert_eq!(eval("3.2.ceil()"), VmValue::Int(4));
     assert_eq!(eval("3.5.to_i()"), VmValue::Int(3));
-    assert_eq!(eval("n = -2.5\nn.abs()"), VmValue::Float(2.5));
+    assert_eq!(eval_with_stdlib("n = -2.5\nn.abs()"), VmValue::Float(2.5));
 }
 
 #[test]
