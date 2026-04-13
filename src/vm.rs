@@ -1762,33 +1762,55 @@ fn dispatch_native_method(
     args: &[VmValue],
     line: u32,
 ) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
-
     match recv {
-        VmValue::Int(n) => match (name, args) {
-            ("to_s",  [])                           => Ok(VmValue::Str(n.to_string())),
-            ("to_f",  [])                           => Ok(VmValue::Float(*n as f64)),
-            ("pow",   [VmValue::Int(e)]) if *e >= 0 => Ok(VmValue::Int(n.pow(*e as u32))),
-            _ => Err(type_err(&format!("Int has no method '{}'", name))),
-        },
+        VmValue::Int(n) => dispatch_int_method(*n, name, args, line),
+        VmValue::Float(n) => dispatch_float_method(*n, name, args, line),
 
-        VmValue::Float(n) => match (name, args) {
-            ("to_s",  []) => Ok(VmValue::Str(if n.fract() == 0.0 {
-                format!("{}.0", *n as i64)
-            } else {
-                format!("{}", n)
-            })),
-            ("to_i",  []) => Ok(VmValue::Int(*n as i64)),
-            ("round", []) => Ok(VmValue::Int(n.round() as i64)),
-            ("floor", []) => Ok(VmValue::Int(n.floor() as i64)),
-            ("ceil",  []) => Ok(VmValue::Int(n.ceil() as i64)),
-            ("sqrt",  []) => Ok(VmValue::Float(n.sqrt())),
-            ("nan?",  []) => Ok(VmValue::Bool(n.is_nan())),
-            ("infinite?", []) => Ok(VmValue::Bool(n.is_infinite())),
-            _ => Err(type_err(&format!("Float has no method '{}'", name))),
-        },
+        VmValue::Str(s) => dispatch_str_method(s, name, args, line),
+        VmValue::Bool(b) => dispatch_bool_method(*b, name, args, line),
+        VmValue::Nil => dispatch_nil_method(name, args, line),
+        VmValue::List(elems) => dispatch_list_method(elems, recv, name, args, line),
+        VmValue::Map(map) => dispatch_map_method(map, recv, name, args, line),
+        VmValue::Range { from, to } => dispatch_range_method(*from, *to, recv, name, args, line),
+        other => Err(VmError::TypeError {
+            message: format!("'{}' has no method '{}'", other, name),
+            line,
+        }),
+    }
+}
 
-        VmValue::Str(s) => match name {
+fn dispatch_int_method(n: i64, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    match (name, args) {
+        ("to_s",  [])                           => Ok(VmValue::Str(n.to_string())),
+        ("to_f",  [])                           => Ok(VmValue::Float(n as f64)),
+        ("pow",   [VmValue::Int(e)]) if *e >= 0 => Ok(VmValue::Int(n.pow(*e as u32))),
+        _ => Err(type_err(&format!("Int has no method '{}'", name))),
+    }
+}
+
+fn dispatch_float_method(n: f64, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    match (name, args) {
+        ("to_s",  []) => Ok(VmValue::Str(if n.fract() == 0.0 {
+            format!("{}.0", n as i64)
+        } else {
+            format!("{}", n)
+        })),
+        ("to_i",  []) => Ok(VmValue::Int(n as i64)),
+        ("round", []) => Ok(VmValue::Int(n.round() as i64)),
+        ("floor", []) => Ok(VmValue::Int(n.floor() as i64)),
+        ("ceil",  []) => Ok(VmValue::Int(n.ceil() as i64)),
+        ("sqrt",  []) => Ok(VmValue::Float(n.sqrt())),
+        ("nan?",  []) => Ok(VmValue::Bool(n.is_nan())),
+        ("infinite?", []) => Ok(VmValue::Bool(n.is_infinite())),
+        _ => Err(type_err(&format!("Float has no method '{}'", name))),
+    }
+}
+
+fn dispatch_str_method(s: &str, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    match name {
             "size" | "length" if args.is_empty() => Ok(VmValue::Int(s.chars().count() as i64)),
             "upcase"   if args.is_empty() => Ok(VmValue::Str(s.to_uppercase())),
             "downcase" if args.is_empty() => Ok(VmValue::Str(s.to_lowercase())),
@@ -1797,7 +1819,7 @@ fn dispatch_native_method(
             "chomp"    if args.is_empty() => Ok(VmValue::Str(s.trim_end_matches('\n').to_string())),
             "to_i"     if args.is_empty() => Ok(VmValue::Int(s.trim().parse::<i64>().unwrap_or(0))),
             "to_f"     if args.is_empty() => Ok(VmValue::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
-            "to_s"     if args.is_empty() => Ok(recv.clone()),
+            "to_s"     if args.is_empty() => Ok(VmValue::Str(s.to_string())),
             "empty?"   if args.is_empty() => Ok(VmValue::Bool(s.is_empty())),
             "chars"    if args.is_empty() => {
                 let chars: Vec<VmValue> = s.chars().map(|c| VmValue::Str(c.to_string())).collect();
@@ -1853,23 +1875,38 @@ fn dispatch_native_method(
                 }
                 _ => Err(type_err("slice expects (Int, Int)")),
             },
-            _ => Err(type_err(&format!("String has no method '{}'", name))),
-        },
+        _ => Err(type_err(&format!("String has no method '{}'", name))),
+    }
+}
 
-        VmValue::Bool(b) => match (name, args) {
-            ("to_s",   []) => Ok(VmValue::Str(b.to_string())),
-            ("nil?",   []) => Ok(VmValue::Bool(false)),
-            _ => Err(type_err(&format!("Bool has no method '{}'", name))),
-        },
+fn dispatch_bool_method(b: bool, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    match (name, args) {
+        ("to_s",   []) => Ok(VmValue::Str(b.to_string())),
+        ("nil?",   []) => Ok(VmValue::Bool(false)),
+        _ => Err(type_err(&format!("Bool has no method '{}'", name))),
+    }
+}
 
-        VmValue::Nil => match (name, args) {
-            ("to_s",   []) => Ok(VmValue::Str(String::new())),
-            ("nil?",   []) => Ok(VmValue::Bool(true)),
-            ("inspect",[]) => Ok(VmValue::Str("nil".to_string())),
-            _ => Err(type_err(&format!("Nil has no method '{}'", name))),
-        },
+fn dispatch_nil_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    match (name, args) {
+        ("to_s",   []) => Ok(VmValue::Str(String::new())),
+        ("nil?",   []) => Ok(VmValue::Bool(true)),
+        ("inspect",[]) => Ok(VmValue::Str("nil".to_string())),
+        _ => Err(type_err(&format!("Nil has no method '{}'", name))),
+    }
+}
 
-        VmValue::List(elems) => match name {
+fn dispatch_list_method(
+    elems: &Rc<RefCell<Vec<VmValue>>>,
+    recv: &VmValue,
+    name: &str,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    match name {
             "size" | "length" if args.is_empty() => Ok(VmValue::Int(elems.borrow().len() as i64)),
             "empty?"   if args.is_empty() => Ok(VmValue::Bool(elems.borrow().is_empty())),
             "first"    if args.is_empty() => Ok(elems.borrow().first().cloned().unwrap_or(VmValue::Nil)),
@@ -1955,10 +1992,19 @@ fn dispatch_native_method(
             "any?" if args.is_empty() => Err(type_err("any? requires a block")),
             "all?" if args.is_empty() => Err(type_err("all? requires a block")),
             "to_s" if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
-            _ => Err(type_err(&format!("List has no method '{}'", name))),
-        },
+        _ => Err(type_err(&format!("List has no method '{}'", name))),
+    }
+}
 
-        VmValue::Map(map) => match name {
+fn dispatch_map_method(
+    map: &Rc<RefCell<HashMap<String, VmValue>>>,
+    recv: &VmValue,
+    name: &str,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    match name {
             "size" | "length" if args.is_empty() => Ok(VmValue::Int(map.borrow().len() as i64)),
             "empty?"   if args.is_empty() => Ok(VmValue::Bool(map.borrow().is_empty())),
             "keys"     if args.is_empty() => {
@@ -2002,31 +2048,35 @@ fn dispatch_native_method(
                 _ => Err(type_err("merge expects a Map")),
             },
             "to_s" if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
-            _ => Err(type_err(&format!("Map has no method '{}'", name))),
-        },
+        _ => Err(type_err(&format!("Map has no method '{}'", name))),
+    }
+}
 
-        VmValue::Range { from, to } => match name {
+fn dispatch_range_method(
+    from: i64,
+    to: i64,
+    recv: &VmValue,
+    name: &str,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    match name {
             "size" | "length" if args.is_empty() => Ok(VmValue::Int((to - from).max(0))),
             "to_a" if args.is_empty() => {
-                let v: Vec<VmValue> = (*from..*to).map(VmValue::Int).collect();
+                let v: Vec<VmValue> = (from..to).map(VmValue::Int).collect();
                 Ok(VmValue::List(Rc::new(RefCell::new(v))))
             }
             "include?" if args.len() == 1 => match &args[0] {
-                VmValue::Int(n) => Ok(VmValue::Bool(n >= from && n < to)),
+                VmValue::Int(n) => Ok(VmValue::Bool(n >= &from && n < &to)),
                 _ => Err(type_err("include? expects an Int")),
             },
-            "first" if args.is_empty() => Ok(VmValue::Int(*from)),
+            "first" if args.is_empty() => Ok(VmValue::Int(from)),
             "last"  if args.is_empty() => Ok(VmValue::Int(to - 1)),
-            "min"   if args.is_empty() => Ok(VmValue::Int(*from)),
+            "min"   if args.is_empty() => Ok(VmValue::Int(from)),
             "max"   if args.is_empty() => Ok(VmValue::Int(to - 1)),
             "to_s"  if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
-            _ => Err(type_err(&format!("Range has no method '{}'", name))),
-        },
-
-        other => Err(VmError::TypeError {
-            message: format!("'{}' has no method '{}'", other, name),
-            line,
-        }),
+        _ => Err(VmError::TypeError { message: format!("Range has no method '{}'", name), line }),
     }
 }
 
