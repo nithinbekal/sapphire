@@ -76,22 +76,31 @@ struct Compiler {
     /// When true (REPL mode), top-level variable assignments and definitions
     /// are stored as globals rather than stack slots.
     global_mode: bool,
+    /// True when the file contains at least one `import` statement.  Enables
+    /// `GetGlobal` fallback for unresolved variable references so that names
+    /// defined in imported files (which run as globals) are accessible.
+    has_imports: bool,
 }
 
 impl Compiler {
     fn new() -> Self {
-        Compiler { states: Vec::new(), global_mode: false }
+        Compiler { states: Vec::new(), global_mode: false, has_imports: false }
+    }
+
+    fn new_with_imports() -> Self {
+        Compiler { states: Vec::new(), global_mode: false, has_imports: true }
     }
 
     fn new_repl() -> Self {
-        Compiler { states: Vec::new(), global_mode: true }
+        Compiler { states: Vec::new(), global_mode: true, has_imports: false }
     }
 
     // ── Public entry points ───────────────────────────────────────────────────
 
     /// Compile a top-level program (arity 0, anonymous).
     pub fn compile(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
-        let mut c = Compiler::new();
+        let has_imports = exprs.iter().any(|e| matches!(e, Expr::Import { .. }));
+        let mut c = if has_imports { Compiler::new_with_imports() } else { Compiler::new() };
         c.push_fn("", 0, 0);
         c.compile_body(exprs)?;
         Ok(c.pop_fn())
@@ -198,6 +207,7 @@ impl Compiler {
                 | Expr::Next(_)
                 | Expr::Raise(_)
                 | Expr::MultiAssign { .. }
+                | Expr::Import { .. }
         )
     }
 
@@ -304,6 +314,11 @@ impl Compiler {
                 }
             }
 
+            Expr::Import { path } => {
+                let idx = self.state_mut().chunk.add_constant(Constant::Str(path.clone()));
+                self.emit(OpCode::Import(idx));
+            }
+
             e => {
                 let is_new_local = self.is_new_local_assign(e);
                 // In global mode, function/class defs emit SetGlobal (peek) instead of
@@ -328,7 +343,7 @@ impl Compiler {
             | Expr::Next(_)
             | Expr::Raise(_) => self.stmt(expr),
 
-            Expr::While { .. } | Expr::MultiAssign { .. } => {
+            Expr::While { .. } | Expr::MultiAssign { .. } | Expr::Import { .. } => {
                 self.stmt(expr)?;
                 self.emit(OpCode::Nil);
                 Ok(())
@@ -396,7 +411,7 @@ impl Compiler {
                     self.emit(OpCode::GetLocal(slot));
                 } else if let Some(idx) = self.resolve_upvalue(depth, name) {
                     self.emit(OpCode::GetUpvalue(idx));
-                } else if self.global_mode {
+                } else if self.global_mode || self.has_imports {
                     let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
                     self.emit(OpCode::GetGlobal(idx));
                 } else {

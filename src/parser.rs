@@ -186,6 +186,26 @@ impl Parser {
             self.advance();
             return Ok(Expr::Print(Box::new(self.logical()?)));
         }
+        if self.check(&TokenKind::Import) {
+            let line = self.peek().line;
+            self.advance();
+            match self.peek().kind.clone() {
+                TokenKind::StringLit(path) => {
+                    if !path.starts_with("./") && !path.starts_with("../") {
+                        return Err(SapphireError::ParseError {
+                            message: format!("import path must be relative (start with ./ or ../): {:?}", path),
+                            line,
+                        });
+                    }
+                    self.advance();
+                    return Ok(Expr::Import { path });
+                }
+                _ => return Err(SapphireError::ParseError {
+                    message: "expected a string literal after 'import'".into(),
+                    line,
+                }),
+            }
+        }
         Ok(self.logical()?)
     }
 

@@ -10,7 +10,7 @@ fn eval(src: &str) -> VmValue {
     let tokens = Lexer::new(src).scan_tokens();
     let stmts = Parser::new(tokens).parse().expect("parse error");
     let func = compile(&stmts).expect("compile error");
-    let mut vm = Vm::new(func);
+    let mut vm = Vm::new(func, std::path::PathBuf::new());
     vm.load_stdlib().expect("stdlib");
     vm.run().expect("vm error").expect("empty stack")
 }

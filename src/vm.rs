@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::chunk::{Constant, Function, OpCode};
@@ -238,22 +239,43 @@ pub struct Vm {
     classes: HashMap<String, ClassEntry>,
     /// Global variable store used by the REPL to persist values across calls.
     pub globals: HashMap<String, VmValue>,
+    /// Directory of the currently-executing top-level file; used to resolve
+    /// relative import paths.  Empty for the REPL (imports not supported).
+    current_dir: PathBuf,
+    /// Canonicalized paths of files already imported; prevents double-loading.
+    imported: HashSet<PathBuf>,
 }
 
 impl Vm {
-    pub fn new(function: Rc<Function>) -> Self {
+    pub fn new(function: Rc<Function>, current_dir: PathBuf) -> Self {
         let frame = CallFrame {
             function, upvalues: vec![], ip: 0, base: 0,
             block: None, is_block_caller: false, rescues: vec![],
             class_name: None,
         };
-        Vm { frames: vec![frame], stack: Vec::new(), open_upvalues: Vec::new(), classes: HashMap::new(), globals: HashMap::new() }
+        Vm {
+            frames: vec![frame],
+            stack: Vec::new(),
+            open_upvalues: Vec::new(),
+            classes: HashMap::new(),
+            globals: HashMap::new(),
+            current_dir,
+            imported: HashSet::new(),
+        }
     }
 
     /// Create an empty VM with no initial frame, for use in the REPL.
     /// Call `load_stdlib()` before evaluating any user code.
     pub fn new_repl() -> Self {
-        Vm { frames: vec![], stack: Vec::new(), open_upvalues: Vec::new(), classes: HashMap::new(), globals: HashMap::new() }
+        Vm {
+            frames: vec![],
+            stack: Vec::new(),
+            open_upvalues: Vec::new(),
+            classes: HashMap::new(),
+            globals: HashMap::new(),
+            current_dir: PathBuf::new(),
+            imported: HashSet::new(),
+        }
     }
 
     /// Evaluate a compiled function in the current VM context and return its result.
@@ -1237,6 +1259,44 @@ impl Vm {
                     };
                     let val = self.stack.last().ok_or(VmError::StackUnderflow)?.clone();
                     self.globals.insert(name, val);
+                }
+
+                OpCode::Import(path_idx) => {
+                    let path_str = match &self.frames.last().unwrap().function.chunk.constants[path_idx] {
+                        Constant::Str(s) => s.clone(),
+                        _ => return Err(VmError::TypeError { message: "import: expected string constant".into(), line }),
+                    };
+                    if self.current_dir == PathBuf::new() {
+                        return Err(VmError::TypeError {
+                            message: "import is not supported in the REPL".into(),
+                            line,
+                        });
+                    }
+                    let raw_path = self.current_dir.join(&path_str).with_extension("spr");
+                    let canonical = raw_path.canonicalize().map_err(|_| VmError::TypeError {
+                        message: format!("import: file not found: {}", raw_path.display()),
+                        line,
+                    })?;
+                    if !self.imported.contains(&canonical) {
+                        self.imported.insert(canonical.clone());
+                        let saved_dir = self.current_dir.clone();
+                        self.current_dir = canonical.parent()
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(|| PathBuf::from("."));
+                        let source = std::fs::read_to_string(&canonical).map_err(|e| VmError::TypeError {
+                            message: format!("import: could not read {}: {}", canonical.display(), e),
+                            line,
+                        })?;
+                        let tokens = crate::lexer::Lexer::new(&source).scan_tokens();
+                        let stmts = crate::parser::Parser::new(tokens).parse()
+                            .map_err(|e| VmError::TypeError { message: format!("import {}: {}", canonical.display(), e), line: 0 })?;
+                        // Compile in global mode so imported classes/functions are
+                        // stored as globals and remain accessible after the frame exits.
+                        let func = crate::compiler::compile_repl(&stmts)
+                            .map_err(|e| VmError::TypeError { message: format!("import {}: {}", canonical.display(), e), line: 0 })?;
+                        self.run_extra(func)?;
+                        self.current_dir = saved_dir;
+                    }
                 }
 
                 OpCode::Call(arg_count) => {
@@ -2243,7 +2303,7 @@ mod tests {
 
     fn run(chunk: Chunk) -> Result<Option<VmValue>, VmError> {
         let f = Rc::new(Function { name: String::new(), arity: 0, chunk, upvalue_defs: vec![], return_type: None });
-        Vm::new(f).run()
+        Vm::new(f, PathBuf::new()).run()
     }
 
     fn chunk_with(ops: impl Fn(&mut Chunk)) -> Chunk {
