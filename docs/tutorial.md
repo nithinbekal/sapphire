@@ -501,6 +501,68 @@ end
 
 ---
 
+## Imports
+
+Split your code across files with `import`. The path must be relative (starting with `./` or `../`) and the `.spr` extension is added automatically:
+
+```ruby
+import "./utils"
+import "../shared/helpers"
+```
+
+Everything defined at the top level of the imported file — classes and functions — becomes available in the importing file. Each file is only executed once, even if imported from multiple places.
+
+A common pattern is a library file that defines a class:
+
+```ruby
+# geometry/point.spr
+class Point {
+  attr x: Float
+  attr y: Float
+
+  def distance_to(other) -> Float {
+    dx = self.x - other.x
+    dy = self.y - other.y
+    ((dx * dx) + (dy * dy)).sqrt()
+  }
+
+  def to_s() -> Str {
+    "(#{self.x}, #{self.y})"
+  }
+}
+```
+
+And a main file that uses it:
+
+```ruby
+# main.spr
+import "./geometry/point"
+
+a = Point.new(x: 0.0, y: 0.0)
+b = Point.new(x: 3.0, y: 4.0)
+
+print a.to_s()              # (0.0, 4.0)
+print a.distance_to(b)      # 5.0
+```
+
+Files can import other files — a file inside `geometry/` can itself import from the same directory using `./`:
+
+```ruby
+# geometry/shapes.spr
+import "./point"
+
+class Circle {
+  attr center: Point
+  attr radius: Float
+
+  def area() -> Float {
+    3.14159 * self.radius * self.radius
+  }
+}
+```
+
+---
+
 ## Putting it together
 
 Here is a small program that uses classes, inheritance, type annotations, blocks, and error handling. It models geometric shapes and computes statistics over a collection of them.
