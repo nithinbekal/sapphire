@@ -34,7 +34,13 @@ fn run_file(path: &str) {
         Ok(f) => f,
         Err(e) => { eprintln!("{}", e); std::process::exit(1); }
     };
-    let mut vm = vm::Vm::new(func);
+    let current_dir = std::path::Path::new(path)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(path))
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let mut vm = vm::Vm::new(func, current_dir);
     if let Err(e) = vm.load_stdlib() {
         eprintln!("stdlib error: {}", e);
         std::process::exit(1);

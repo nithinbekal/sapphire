@@ -170,6 +170,11 @@ pub enum OpCode {
     /// Pop TOS, print it with a newline, push Nil.
     Print,
 
+    // Module loading
+    /// Load, compile, and execute a relative file in the current scope.
+    /// `path_idx` is a Str constant holding the import path.
+    Import(usize),
+
     // Global variables (used by the REPL to persist state across calls)
     /// Push the value of a global variable onto the stack.
     /// `idx` is an index into the constants table pointing to a `Constant::Str` name.
@@ -311,6 +316,7 @@ impl Chunk {
                 OpCode::JumpIfTrueKeep(off)     => println!("JUMP_IF_TRUE_KEEP   {:4}", off),
                 OpCode::GetGlobal(idx)          => println!("GET_GLOBAL          {:4}  ({})", idx, self.constants[*idx]),
                 OpCode::SetGlobal(idx)          => println!("SET_GLOBAL          {:4}  ({})", idx, self.constants[*idx]),
+                OpCode::Import(idx)             => println!("IMPORT              {:4}  ({})", idx, self.constants[*idx]),
                 other                           => println!("{:?}", other),
             }
         }

@@ -7,14 +7,14 @@ fn eval(src: &str) -> VmValue {
     let tokens = Lexer::new(src).scan_tokens();
     let stmts = Parser::new(tokens).parse().expect("parse error");
     let func = compile(&stmts).expect("compile error");
-    Vm::new(func).run().expect("vm error").expect("empty stack")
+    Vm::new(func, std::path::PathBuf::new()).run().expect("vm error").expect("empty stack")
 }
 
 fn eval_with_stdlib(src: &str) -> VmValue {
     let tokens = Lexer::new(src).scan_tokens();
     let stmts = Parser::new(tokens).parse().expect("parse error");
     let func = compile(&stmts).expect("compile error");
-    let mut vm = Vm::new(func);
+    let mut vm = Vm::new(func, std::path::PathBuf::new());
     vm.load_stdlib().expect("stdlib");
     vm.run().expect("vm error").expect("empty stack")
 }
@@ -23,7 +23,7 @@ fn eval_err(src: &str) -> VmError {
     let tokens = Lexer::new(src).scan_tokens();
     let stmts = Parser::new(tokens).parse().expect("parse error");
     let func = compile(&stmts).expect("compile error");
-    Vm::new(func).run().expect_err("expected vm error")
+    Vm::new(func, std::path::PathBuf::new()).run().expect_err("expected vm error")
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn last_expr_is_implicit_return() {
     let tokens = Lexer::new("1 + 1\n2 + 2").scan_tokens();
     let stmts = Parser::new(tokens).parse().unwrap();
     let func = compile(&stmts).unwrap();
-    let result = Vm::new(func).run().unwrap();
+    let result = Vm::new(func, std::path::PathBuf::new()).run().unwrap();
     assert_eq!(result, Some(VmValue::Int(4)));
 }
 

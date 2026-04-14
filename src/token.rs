@@ -59,6 +59,7 @@ pub enum TokenKind {
     Begin,
     Rescue,
     End,
+    Import,
 
     Newline,
     Eof,
