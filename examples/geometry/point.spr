@@ -1,0 +1,18 @@
+class Point {
+  attr x: Float
+  attr y: Float
+
+  def distance_to(other: Point) -> Float {
+    dx = self.x - other.x
+    dy = self.y - other.y
+    ((dx * dx) + (dy * dy)).sqrt()
+  }
+
+  def translate(dx: Float, dy: Float) -> Point {
+    Point.new(x: self.x + dx, y: self.y + dy)
+  }
+
+  def to_s() -> String {
+    "(#{self.x}, #{self.y})"
+  }
+}

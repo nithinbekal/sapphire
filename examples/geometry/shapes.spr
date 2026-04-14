@@ -1,0 +1,36 @@
+import "./point"
+
+class Circle {
+  attr center: Point
+  attr radius: Float
+
+  def area() -> Float {
+    3.14159 * self.radius * self.radius
+  }
+
+  def contains(p: Point) -> Bool {
+    self.center.distance_to(p) <= self.radius
+  }
+
+  def to_s() -> String {
+    "Circle(center=#{self.center.to_s()}, r=#{self.radius})"
+  }
+}
+
+class Rectangle {
+  attr top_left: Point
+  attr width: Float
+  attr height: Float
+
+  def area() -> Float {
+    self.width * self.height
+  }
+
+  def perimeter() -> Float {
+    2.0 * (self.width + self.height)
+  }
+
+  def to_s() -> String {
+    "Rect(origin=#{self.top_left.to_s()}, #{self.width}x#{self.height})"
+  }
+}
