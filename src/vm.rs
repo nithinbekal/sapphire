@@ -201,6 +201,10 @@ struct CallFrame {
     /// True if this frame was pushed by `CallWithBlock`/`InvokeWithBlock`.
     /// Signals `break` to stop unwinding here.
     is_block_caller: bool,
+    /// True if this frame was pushed by `call_block` on behalf of a native
+    /// method.  Signals `break` to stop unwinding and propagate as an error
+    /// so the native dispatch can catch and handle it.
+    is_native_block: bool,
     /// Active rescue handlers within this frame (push on BeginRescue, pop on PopRescue).
     rescues: Vec<RescueInfo>,
     /// The class that defines the method running in this frame; None for
@@ -250,7 +254,7 @@ impl Vm {
     pub fn new(function: Rc<Function>, current_dir: PathBuf) -> Self {
         let frame = CallFrame {
             function, upvalues: vec![], ip: 0, base: 0,
-            block: None, is_block_caller: false, rescues: vec![],
+            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
             class_name: None,
         };
         Vm {
@@ -286,7 +290,7 @@ impl Vm {
         self.stack.push(VmValue::Function(func.clone()));
         self.frames.push(CallFrame {
             function: func, upvalues: vec![], ip: 0, base,
-            block: None, is_block_caller: false, rescues: vec![],
+            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
             class_name: None,
         });
         let result = self.run_inner(min_depth);
@@ -305,7 +309,7 @@ impl Vm {
         self.stack.push(VmValue::Function(func.clone()));
         self.frames.push(CallFrame {
             function: func, upvalues: vec![], ip: 0, base,
-            block: None, is_block_caller: false, rescues: vec![],
+            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
             class_name: None,
         });
         self.run_inner(min_depth)?;
@@ -725,7 +729,7 @@ impl Vm {
                                             self.frames.push(CallFrame {
                                                 function: m.function, upvalues: m.upvalues,
                                                 ip: 0, base: recv_slot,
-                                                block: None, is_block_caller: false, rescues: vec![],
+                                                block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
                                                 class_name,
                                             });
                                         }
@@ -814,7 +818,7 @@ impl Vm {
                                 function,
                                 upvalues,
                                 ip: 0, base: recv_slot,
-                                block: None, is_block_caller: false, rescues: vec![],
+                                block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
                                 class_name: None,
                             });
                             continue;
@@ -841,7 +845,7 @@ impl Vm {
                             function:  method.function,
                             upvalues:  method.upvalues,
                             ip: 0, base: recv_slot,
-                            block: None, is_block_caller: false, rescues: vec![],
+                            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
                             class_name: Some(method.defined_in),
                         });
                         continue;
@@ -893,7 +897,7 @@ impl Vm {
                                     function: m.function,
                                     upvalues: m.upvalues,
                                     ip: 0, base: recv_slot,
-                                    block: None, is_block_caller: false, rescues: vec![],
+                                    block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
                                     class_name,
                                 });
                                 continue;
@@ -938,7 +942,7 @@ impl Vm {
                         function: method.function,
                         upvalues: method.upvalues,
                         ip: 0, base: recv_slot,
-                        block: None, is_block_caller: false, rescues: vec![],
+                        block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
                         class_name,
                     });
                 }
@@ -989,7 +993,7 @@ impl Vm {
                         function: method.function,
                         upvalues: method.upvalues,
                         ip: 0, base: recv_slot,
-                        block: None, is_block_caller: false, rescues: vec![],
+                        block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
                         class_name: Some(super_name),
                     });
                 }
@@ -1036,7 +1040,7 @@ impl Vm {
                     }
                     self.frames.push(CallFrame {
                         function, upvalues, ip: 0, base: fn_slot,
-                        block, is_block_caller: true, rescues: vec![],
+                        block, is_block_caller: true, is_native_block: false, rescues: vec![],
                         class_name: None,
                     });
                 }
@@ -1091,7 +1095,7 @@ impl Vm {
                                 self.frames.push(CallFrame {
                                     function: m.function, upvalues: m.upvalues,
                                     ip: 0, base: recv_slot,
-                                    block, is_block_caller: true, rescues: vec![],
+                                    block, is_block_caller: true, is_native_block: false, rescues: vec![],
                                     class_name,
                                 });
                                 continue;
@@ -1140,7 +1144,7 @@ impl Vm {
                         function: method.function,
                         upvalues: method.upvalues,
                         ip: 0, base: recv_slot,
-                        block, is_block_caller: true, rescues: vec![],
+                        block, is_block_caller: true, is_native_block: false, rescues: vec![],
                         class_name,
                     });
                 }
@@ -1176,7 +1180,7 @@ impl Vm {
                         upvalues: block.upvalues,
                         ip:    0,
                         base:  args_start,
-                        block: None, is_block_caller: false, rescues: vec![],
+                        block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
                         class_name: None,
                     });
                 }
@@ -1192,10 +1196,13 @@ impl Vm {
                     let val = self.pop()?;
                     // Unwind until we reach a frame created by CallWithBlock /
                     // InvokeWithBlock, then return the break value from IT too.
+                    // If we hit a native-block frame first, stop unwinding and
+                    // propagate as an error so the native dispatch can catch it.
                     loop {
                         if let Some(frame) = self.frames.last() {
-                            let is_caller = frame.is_block_caller;
-                            let base      = frame.base;
+                            let is_caller        = frame.is_block_caller;
+                            let is_native_block  = frame.is_native_block;
+                            let base             = frame.base;
                             self.close_upvalues_above(base);
                             self.frames.pop();
                             self.stack.truncate(base);
@@ -1203,6 +1210,10 @@ impl Vm {
                                 // Push break value as the result of the call-with-block.
                                 self.stack.push(val);
                                 break;
+                            }
+                            if is_native_block {
+                                // Native method called this block; let it handle break.
+                                return Err(VmError::Break(val));
                             }
                         } else {
                             return Err(VmError::Break(val));
@@ -1329,7 +1340,7 @@ impl Vm {
                     let base = fn_slot;
                     self.frames.push(CallFrame {
                         function, upvalues, ip: 0, base,
-                        block: None, is_block_caller: false, rescues: vec![],
+                        block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
                         class_name: None,
                     });
                 }
@@ -1538,7 +1549,7 @@ impl Vm {
             function: block.function.clone(),
             upvalues: block.upvalues.clone(),
             ip: 0, base,
-            block: None, is_block_caller: false, rescues: vec![],
+            block: None, is_block_caller: false, is_native_block: true, rescues: vec![],
             class_name: None,
         });
         // run_inner stops when the block's frame returns (frames.len() drops to min_depth)
