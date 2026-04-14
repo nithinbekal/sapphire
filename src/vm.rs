@@ -60,6 +60,8 @@ pub enum VmValue {
         fields:        Vec<(String, VmValue)>,
         methods:       Rc<HashMap<String, VmMethod>>,
         class_methods: Rc<HashMap<String, VmMethod>>,
+        /// Nested class definitions, accessible as `Outer.Inner`.
+        namespace:     Rc<HashMap<String, VmValue>>,
     },
     /// A live instance of a class.
     Instance {
@@ -575,26 +577,49 @@ impl Vm {
                 // ── Class opcodes ────────────────────────────────────────────
 
                 OpCode::DefClass(desc_idx) => {
-                    let (class_name, superclass_name, own_fields, class_method_names, method_names, private_methods) = {
+                    let (class_name, superclass_name, superclass_dynamic, own_fields,
+                         class_method_names, method_names, private_methods, nested_class_names) = {
                         let consts = &self.frames.last().unwrap().function.chunk.constants;
                         match &consts[desc_idx] {
-                            Constant::ClassDesc { name, superclass, field_names, field_defaults, method_names, private_methods, class_method_names } => {
+                            Constant::ClassDesc {
+                                name, superclass, superclass_dynamic,
+                                field_names, field_defaults, method_names, private_methods,
+                                class_method_names, nested_class_names,
+                            } => {
                                 let own_fields: Vec<(String, VmValue)> = field_names.iter()
                                     .zip(field_defaults.iter())
                                     .map(|(n, d)| (n.clone(), d.as_ref().map(VmValue::from).unwrap_or(VmValue::Nil)))
                                     .collect();
-                                (name.clone(), superclass.clone(), own_fields, class_method_names.clone(), method_names.clone(), private_methods.clone())
+                                (name.clone(), superclass.clone(), *superclass_dynamic, own_fields,
+                                 class_method_names.clone(), method_names.clone(),
+                                 private_methods.clone(), nested_class_names.clone())
                             }
                             _ => panic!("DefClass: expected ClassDesc constant"),
                         }
                     };
-                    // Drain class method closures first (emitted first by compiler).
-                    let n_class = class_method_names.len();
+                    // Pop dynamic superclass from TOS if the superclass expression was not a
+                    // simple variable (e.g. `Foo.Bar`).
+                    let dynamic_super: Option<String> = if superclass_dynamic {
+                        match self.pop()? {
+                            VmValue::Class { name, .. } => Some(name),
+                            other => return Err(VmError::TypeError {
+                                message: format!("superclass must be a class, got {}", other),
+                                line,
+                            }),
+                        }
+                    } else {
+                        None
+                    };
+                    // Drain class method closures, instance method closures, then nested
+                    // class values from the stack (pushed in that order by the compiler).
+                    let n_class  = class_method_names.len();
+                    let n_nested = nested_class_names.len();
                     let class_start = self.stack.len()
-                        .checked_sub(n_class + method_names.len())
+                        .checked_sub(n_class + method_names.len() + n_nested)
                         .ok_or(VmError::StackUnderflow)?;
-                    let all_closures: Vec<VmValue> = self.stack.drain(class_start..).collect();
-                    let (class_closures, instance_closures) = all_closures.split_at(n_class);
+                    let all_values: Vec<VmValue> = self.stack.drain(class_start..).collect();
+                    let (class_closures, rest) = all_values.split_at(n_class);
+                    let (instance_closures, nested_values) = rest.split_at(method_names.len());
 
                     let mut own_class_methods: HashMap<String, VmMethod> = HashMap::new();
                     for (mname, closure) in class_method_names.iter().zip(class_closures) {
@@ -621,14 +646,21 @@ impl Vm {
                             _ => panic!("DefClass: method is not a closure"),
                         }
                     }
-                    // If no explicit superclass and Object is loaded, inherit from it.
-                    let effective_super = superclass_name.clone().or_else(|| {
-                        if class_name != "Object" && self.classes.contains_key("Object") {
-                            Some("Object".to_string())
-                        } else {
-                            None
-                        }
-                    });
+                    // Build namespace from nested class values.
+                    let namespace: HashMap<String, VmValue> = nested_class_names.iter()
+                        .zip(nested_values.iter())
+                        .map(|(n, v)| (n.clone(), v.clone()))
+                        .collect();
+                    // Resolve the effective superclass name.
+                    let effective_super = dynamic_super
+                        .or(superclass_name)
+                        .or_else(|| {
+                            if class_name != "Object" && self.classes.contains_key("Object") {
+                                Some("Object".to_string())
+                            } else {
+                                None
+                            }
+                        });
                     // Merge inherited fields, instance methods, and class methods.
                     let (merged_fields, merged_methods, merged_class_methods) = if let Some(ref sname) = effective_super {
                         let (parent_fields, parent_methods, parent_class_methods) = match self.classes.get(sname) {
@@ -662,6 +694,7 @@ impl Vm {
                         fields:        merged_fields,
                         methods:       merged_rc,
                         class_methods: merged_class_rc,
+                        namespace:     Rc::new(namespace),
                     });
                 }
 
@@ -710,6 +743,16 @@ impl Vm {
                         VmValue::Instance { ref fields, .. } => {
                             let val = fields.borrow().get(&name).cloned().unwrap_or(VmValue::Nil);
                             self.stack.push(val);
+                        }
+                        // Namespace lookup: `Outer.Inner` where `Inner` is a nested class.
+                        VmValue::Class { ref namespace, .. } => {
+                            match namespace.get(&name) {
+                                Some(val) => { self.stack.push(val.clone()); }
+                                None => return Err(VmError::TypeError {
+                                    message: format!("class has no nested class or attribute '{}'", name),
+                                    line,
+                                }),
+                            }
                         }
                         // For primitives, treat `obj.name` as a zero-arg method call.
                         ref other => {

@@ -1725,3 +1725,55 @@ count = 0
 count"#);
     assert_eq!(result, VmValue::Int(3)); // inner each runs once per outer iteration
 }
+
+// ---- Nested classes / namespaces ----
+
+#[test]
+fn nested_class_accessible_via_dot() {
+    let src = r#"class Outer {
+  class Inner {
+    def greet() { "hello" }
+  }
+}
+Outer.Inner.new().greet()"#;
+    assert_eq!(eval(src), VmValue::Str("hello".into()));
+}
+
+#[test]
+fn nested_class_instantiation() {
+    let src = r#"class Geometry {
+  class Point {
+    attr x
+    attr y
+  }
+}
+p = Geometry.Point.new(x: 3, y: 4)
+p.x + p.y"#;
+    assert_eq!(eval(src), VmValue::Int(7));
+}
+
+#[test]
+fn nested_class_inherits_from_flat_class() {
+    let src = r#"class Base {
+  def kind() { "base" }
+}
+class Container {
+  class Child < Base {}
+}
+Container.Child.new().kind()"#;
+    assert_eq!(eval(src), VmValue::Str("base".into()));
+}
+
+#[test]
+fn superclass_via_dot_notation() {
+    let src = r#"class Outer {
+  class Animal {
+    def sound() { "..." }
+  }
+}
+class Dog < Outer.Animal {
+  def sound() { "woof" }
+}
+Dog.new().sound()"#;
+    assert_eq!(eval(src), VmValue::Str("woof".into()));
+}

@@ -123,9 +123,12 @@ pub enum Expr {
     /// `class Name ...` — defines a class; value is the class object.
     Class {
         name: String,
-        superclass: Option<String>,
+        /// Superclass expression: `Name` or `Outer.Inner`.  `None` means inherit from Object.
+        superclass: Option<Box<Expr>>,
         fields: Vec<FieldDef>,
         methods: Vec<MethodDef>,
+        /// Nested class definitions — accessible only as `Outer.Inner`.
+        nested: Vec<Expr>,
     },
     /// Top-level `def name(...)` on `Object`; value is the method name string.
     Function {

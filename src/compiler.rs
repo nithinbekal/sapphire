@@ -622,8 +622,8 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::Class { name, superclass, fields, methods } => {
-                self.compile_class(name, superclass.as_deref(), fields, methods)?;
+            Expr::Class { name, superclass, fields, methods, nested } => {
+                self.compile_class(name, superclass.as_deref(), fields, methods, nested, true)?;
                 Ok(())
             }
 
@@ -958,12 +958,18 @@ impl Compiler {
 
     /// Compile a class definition: emit each method as a closure, then emit
     /// `DefClass` which collects them into a Class value stored as a local.
+    ///
+    /// `bind` — when `true` (normal top-level class), store the result in a
+    /// named local/global slot.  When `false` (nested class), leave the value
+    /// on the stack for the enclosing `DefClass` to pick up.
     fn compile_class(
         &mut self,
         name:       &str,
-        superclass: Option<&str>,
+        superclass: Option<&Expr>,
         fields:     &[crate::ast::FieldDef],
         methods:    &[MethodDef],
+        nested:     &[Expr],
+        bind:       bool,
     ) -> Result<(), CompileError> {
         let line = self.state().current_line;
 
@@ -1001,6 +1007,30 @@ impl Compiler {
             self.emit(OpCode::Closure(fi));
         }
 
+        // Emit nested class values (each leaves a Class value on the stack).
+        let mut nested_class_names: Vec<String> = Vec::new();
+        for nested_expr in nested {
+            match nested_expr {
+                Expr::Class { name: nname, superclass: nsuper, fields: nfields, methods: nmethods, nested: nnested } => {
+                    nested_class_names.push(nname.clone());
+                    self.compile_class(nname, nsuper.as_deref(), nfields, nmethods, nnested, false)?;
+                }
+                _ => return Err(self.error("nested class body must be a class expression".to_string())),
+            }
+        }
+
+        // Resolve superclass: static (simple Variable) vs dynamic (any other expr).
+        let (static_super, superclass_dynamic) = match superclass {
+            None => (None, false),
+            Some(Expr::Variable(sname)) => (Some(sname.as_str()), false),
+            Some(expr) => {
+                // Dynamic: emit the expression — its value will be on TOS after
+                // the nested class values, and DefClass will pop it.
+                self.expr(expr)?;
+                (None, true)
+            }
+        };
+
         let field_names:        Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
         let field_defaults: Vec<Option<Constant>> = fields.iter().map(|f| {
             match &f.default {
@@ -1014,15 +1044,23 @@ impl Compiler {
         let private_methods:    Vec<String> = instance_methods.iter().filter(|m| m.private).map(|m| m.name.clone()).collect();
         let class_method_names: Vec<String> = class_methods.iter().map(|m| m.name.clone()).collect();
         let desc_idx = self.state_mut().chunk.add_constant(Constant::ClassDesc {
-            name:       name.to_string(),
-            superclass: superclass.map(|s| s.to_string()),
+            name:               name.to_string(),
+            superclass:         static_super.map(|s| s.to_string()),
+            superclass_dynamic,
             field_names,
             field_defaults,
             method_names,
             private_methods,
             class_method_names,
+            nested_class_names,
         });
         self.emit(OpCode::DefClass(desc_idx));
+
+        if !bind {
+            // Nested class: leave the Class value on the stack; the enclosing
+            // DefClass will drain it.
+            return Ok(());
+        }
 
         if self.global_mode && self.states.len() == 1 {
             // REPL top-level: store in globals, don't allocate a stack slot.
