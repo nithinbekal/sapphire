@@ -1661,3 +1661,67 @@ fn return_type_annotation_num_accepts_float() {
     let result = eval("def f() -> Num { 3.14 }\nf()");
     assert_eq!(result, VmValue::Float(3.14));
 }
+
+// ── break / next inside blocks passed to native methods ───────────────────────
+
+#[test]
+fn break_in_each_stops_iteration() {
+    // break should stop iteration and execution continues after the each call
+    let result = eval_with_stdlib(r#"
+sum = 0
+[1, 2, 3, 4, 5].each { |n|
+  break if n == 3
+  sum = sum + n
+}
+sum"#);
+    assert_eq!(result, VmValue::Int(3)); // 1 + 2, stops before 3
+}
+
+#[test]
+fn break_in_each_execution_continues_after() {
+    // code after the each call must still run
+    let result = eval_with_stdlib(r#"
+x = 0
+[1, 2, 3].each { |n| break if n == 2 }
+x = 99
+x"#);
+    assert_eq!(result, VmValue::Int(99));
+}
+
+#[test]
+fn break_in_map_stops_early() {
+    // map collects [10, 20] then hits break; result is a partial list
+    let result = eval_with_stdlib(r#"
+[1, 2, 3, 4].map { |n|
+  break if n == 3
+  n * 10
+}.length"#);
+    assert_eq!(result, VmValue::Int(3)); // [10, 20, nil] — 2 mapped + the break value
+}
+
+#[test]
+fn next_in_each_skips_element() {
+    let result = eval_with_stdlib(r#"
+sum = 0
+[1, 2, 3, 4, 5].each { |n|
+  next if n % 2 == 0
+  sum = sum + n
+}
+sum"#);
+    assert_eq!(result, VmValue::Int(9)); // 1 + 3 + 5
+}
+
+#[test]
+fn break_in_nested_each_exits_inner_only() {
+    // break inside the inner each should not affect the outer each
+    let result = eval_with_stdlib(r#"
+count = 0
+[1, 2, 3].each { |i|
+  [10, 20, 30].each { |j|
+    break if j == 20
+    count = count + 1
+  }
+}
+count"#);
+    assert_eq!(result, VmValue::Int(3)); // inner each runs once per outer iteration
+}
