@@ -206,12 +206,17 @@ pub enum Constant {
     /// order as the closures that will be popped off the stack by `DefClass`).
     ClassDesc {
         name:               String,
+        /// Static superclass name — used when the superclass is a plain `Variable`.
         superclass:         Option<String>,
+        /// When true, the superclass value is on the stack (TOS) and must be popped by DefClass.
+        superclass_dynamic: bool,
         field_names:        Vec<String>,
         field_defaults:     Vec<Option<Constant>>,
         method_names:       Vec<String>,
         private_methods:    Vec<String>,
         class_method_names: Vec<String>,
+        /// Names of nested classes; matched 1-to-1 with class values pushed after instance methods.
+        nested_class_names: Vec<String>,
     },
 }
 
@@ -223,6 +228,7 @@ impl std::fmt::Display for Constant {
             Constant::Str(s)              => write!(f, "{:?}", s),
             Constant::Function(func)      => write!(f, "<fn {}>", func.name),
             Constant::ClassDesc { name, superclass: Some(s), .. } => write!(f, "<class {} extends {}>", name, s),
+            Constant::ClassDesc { name, superclass_dynamic: true, .. } => write!(f, "<class {} extends (dynamic)>", name),
             Constant::ClassDesc { name, .. } => write!(f, "<class {}>", name),
         }
     }

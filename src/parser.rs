@@ -220,13 +220,26 @@ impl Parser {
         };
         let superclass = if self.check(&TokenKind::Less) {
             self.advance(); // consume '<'
-            match self.peek().kind.clone() {
-                TokenKind::Identifier(n) => { self.advance(); Some(n) }
+            let first = match self.peek().kind.clone() {
+                TokenKind::Identifier(n) => { self.advance(); n }
                 _ => return Err(SapphireError::ParseError {
                     message: "expected superclass name after '<'".into(),
                     line: self.peek().line,
                 }),
+            };
+            let mut expr: Expr = Expr::Variable(first);
+            while self.check(&TokenKind::Dot) {
+                self.advance(); // consume '.'
+                let field = match self.peek().kind.clone() {
+                    TokenKind::Identifier(n) => { self.advance(); n }
+                    _ => return Err(SapphireError::ParseError {
+                        message: "expected identifier after '.' in superclass".into(),
+                        line: self.peek().line,
+                    }),
+                };
+                expr = Expr::Get { object: Box::new(expr), name: field };
             }
+            Some(Box::new(expr))
         } else {
             None
         };
@@ -239,10 +252,13 @@ impl Parser {
         self.advance(); // consume '{'
         let mut fields = Vec::new();
         let mut methods = Vec::new();
+        let mut nested = Vec::new();
         loop {
             self.skip_terminators();
             if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
-            if self.check(&TokenKind::Attr) {
+            if self.check(&TokenKind::Class) {
+                nested.push(self.class_def()?);
+            } else if self.check(&TokenKind::Attr) {
                 self.advance(); // consume 'attr'
                 let field_name = match self.peek().kind.clone() {
                     TokenKind::Identifier(n) => { self.advance(); n }
@@ -295,7 +311,7 @@ impl Parser {
                 self.advance(); // consume '}'
             } else {
                 return Err(SapphireError::ParseError {
-                    message: "expected 'attr', 'def', 'defp', or 'self' in class body".into(),
+                    message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body".into(),
                     line: self.peek().line,
                 });
             }
@@ -312,6 +328,7 @@ impl Parser {
             superclass,
             fields,
             methods,
+            nested,
         })
     }
 
