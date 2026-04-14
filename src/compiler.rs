@@ -777,13 +777,13 @@ impl Compiler {
     /// True when `expr` is an assignment to a name that is neither an existing
     /// local nor an upvalue — i.e. it will create a new stack slot.
     fn is_new_local_assign(&self, expr: &Expr) -> bool {
-        if self.global_mode {
-            // In global mode top-level assigns go to globals (SetGlobal uses peek
-            // semantics), so the value stays on the stack and stmt must Pop it.
+        let depth = self.states.len() - 1;
+        if self.global_mode && depth == 0 {
+            // At the top level in global mode, assigns go to globals via SetGlobal
+            // (peek semantics), so the value stays on the stack and stmt must Pop it.
             return false;
         }
         if let Expr::Assign { name, .. } = expr {
-            let depth = self.states.len() - 1;
             self.resolve_local(depth, name).is_none()
                 && !self.would_be_upvalue(depth, name)
         } else {
