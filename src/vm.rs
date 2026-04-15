@@ -1506,6 +1506,49 @@ impl Vm {
                     self.stack.push(numeric_binop(&a, &b, line, "modulo", |x, y| x % y, |x, y| x % y)?);
                 }
 
+                OpCode::BitAnd => {
+                    let (a, b) = self.pop2()?;
+                    match (&a, &b) {
+                        (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x & y)),
+                        _ => return Err(VmError::TypeError { message: format!("bitwise AND requires integers, got {} and {}", a, b), line }),
+                    }
+                }
+                OpCode::BitOr => {
+                    let (a, b) = self.pop2()?;
+                    match (&a, &b) {
+                        (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x | y)),
+                        _ => return Err(VmError::TypeError { message: format!("bitwise OR requires integers, got {} and {}", a, b), line }),
+                    }
+                }
+                OpCode::BitXor => {
+                    let (a, b) = self.pop2()?;
+                    match (&a, &b) {
+                        (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x ^ y)),
+                        _ => return Err(VmError::TypeError { message: format!("bitwise XOR requires integers, got {} and {}", a, b), line }),
+                    }
+                }
+                OpCode::BitNot => {
+                    let v = self.pop()?;
+                    match v {
+                        VmValue::Int(n) => self.stack.push(VmValue::Int(!n)),
+                        other => return Err(VmError::TypeError { message: format!("bitwise NOT requires an integer, got {}", other), line }),
+                    }
+                }
+                OpCode::Shl => {
+                    let (a, b) = self.pop2()?;
+                    match (&a, &b) {
+                        (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x << y)),
+                        _ => return Err(VmError::TypeError { message: format!("left shift requires integers, got {} and {}", a, b), line }),
+                    }
+                }
+                OpCode::Shr => {
+                    let (a, b) = self.pop2()?;
+                    match (&a, &b) {
+                        (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x >> y)),
+                        _ => return Err(VmError::TypeError { message: format!("right shift requires integers, got {} and {}", a, b), line }),
+                    }
+                }
+
                 OpCode::Equal    => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a == b)); }
                 OpCode::NotEqual => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a != b)); }
 
