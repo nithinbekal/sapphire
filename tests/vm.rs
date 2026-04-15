@@ -1777,3 +1777,55 @@ class Dog < Outer.Animal {
 Dog.new().sound()"#;
     assert_eq!(eval(src), VmValue::Str("woof".into()));
 }
+
+// --- Optional parentheses for zero-arg method calls ---
+
+#[test]
+fn method_call_no_parens() {
+    let src = r#"class Greeter {
+  def hello() { "hi" }
+}
+g = Greeter.new()
+g.hello"#;
+    assert_eq!(eval(src), VmValue::Str("hi".into()));
+}
+
+#[test]
+fn method_call_no_parens_chained() {
+    let src = r#"class Wrapper {
+  def value() { 42 }
+}
+w = Wrapper.new()
+w.value + 1"#;
+    assert_eq!(eval(src), VmValue::Int(43));
+}
+
+#[test]
+fn attr_field_read_no_parens() {
+    let src = r#"class Dog {
+  attr name
+}
+d = Dog.new(name: "Rex")
+d.name"#;
+    assert_eq!(eval(src), VmValue::Str("Rex".into()));
+}
+
+#[test]
+fn method_call_explicit_parens_still_works() {
+    let src = r#"class Counter {
+  def count() { 7 }
+}
+c = Counter.new()
+c.count()"#;
+    assert_eq!(eval(src), VmValue::Int(7));
+}
+
+#[test]
+fn method_call_no_parens_inside_expression() {
+    let src = r#"class Box {
+  attr size
+}
+b = Box.new(size: 5)
+b.size * 2"#;
+    assert_eq!(eval(src), VmValue::Int(10));
+}

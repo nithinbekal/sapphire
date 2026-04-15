@@ -804,7 +804,12 @@ impl Parser {
                     expr = Expr::Call { callee: Box::new(get), args: Vec::new(), block };
                     continue;
                 }
-                expr = Expr::Get { object: Box::new(expr), name };
+                let get = Expr::Get { object: Box::new(expr), name };
+                if self.check(&TokenKind::LeftParen) {
+                    expr = self.finish_call(get)?;
+                } else {
+                    expr = Expr::Call { callee: Box::new(get), args: Vec::new(), block: None };
+                }
             } else if self.check(&TokenKind::AmpDot) {
                 self.advance(); // consume '&.'
                 let name = match self.peek().kind.clone() {
@@ -1223,8 +1228,13 @@ mod tests {
 
     #[test]
     fn test_field_access() {
+        // Without parens, dot access is now a zero-arg call (parens are optional)
         let expr = parse_expr("p.x");
-        assert!(matches!(expr, Expr::Get { name, .. } if name == "x"));
+        assert!(matches!(
+            expr,
+            Expr::Call { callee, args, .. }
+            if args.is_empty() && matches!(callee.as_ref(), Expr::Get { name, .. } if name == "x")
+        ));
     }
 
     #[test]
