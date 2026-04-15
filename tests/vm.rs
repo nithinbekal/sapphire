@@ -1829,3 +1829,37 @@ b = Box.new(size: 5)
 b.size * 2"#;
     assert_eq!(eval(src), VmValue::Int(10));
 }
+
+// --- Optional parentheses for zero-arg method definitions ---
+
+#[test]
+fn def_no_parens_basic() {
+    let src = r#"class Greeter {
+  def hello { "hi" }
+}
+Greeter.new().hello()"#;
+    assert_eq!(eval(src), VmValue::Str("hi".into()));
+}
+
+#[test]
+fn def_no_parens_called_without_parens() {
+    let src = r#"class Counter {
+  def count { 7 }
+}
+Counter.new().count"#;
+    assert_eq!(eval(src), VmValue::Int(7));
+}
+
+#[test]
+fn def_no_parens_top_level() {
+    assert_eq!(eval("def answer { 42 }\nanswer()"), VmValue::Int(42));
+}
+
+#[test]
+fn def_with_parens_still_works() {
+    let src = r#"class Box {
+  def size() { 5 }
+}
+Box.new().size()"#;
+    assert_eq!(eval(src), VmValue::Int(5));
+}

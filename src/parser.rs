@@ -389,38 +389,34 @@ impl Parser {
                 line: self.peek().line,
             }),
         };
-        if !self.check(&TokenKind::LeftParen) {
-            return Err(SapphireError::ParseError {
-                message: "expected '(' after function name".into(),
-                line: self.peek().line,
-            });
-        }
-        self.advance(); // consume '('
         let mut params = Vec::new();
-        if !self.check(&TokenKind::RightParen) {
-            loop {
-                match self.peek().kind.clone() {
-                    TokenKind::Identifier(p) => {
-                        self.advance();
-                        let type_ann = self.parse_type_ann()?;
-                        params.push(ParamDef { name: p, type_ann });
+        if self.check(&TokenKind::LeftParen) {
+            self.advance(); // consume '('
+            if !self.check(&TokenKind::RightParen) {
+                loop {
+                    match self.peek().kind.clone() {
+                        TokenKind::Identifier(p) => {
+                            self.advance();
+                            let type_ann = self.parse_type_ann()?;
+                            params.push(ParamDef { name: p, type_ann });
+                        }
+                        _ => return Err(SapphireError::ParseError {
+                            message: "expected parameter name".into(),
+                            line: self.peek().line,
+                        }),
                     }
-                    _ => return Err(SapphireError::ParseError {
-                        message: "expected parameter name".into(),
-                        line: self.peek().line,
-                    }),
+                    if !self.check(&TokenKind::Comma) { break; }
+                    self.advance();
                 }
-                if !self.check(&TokenKind::Comma) { break; }
-                self.advance();
             }
+            if !self.check(&TokenKind::RightParen) {
+                return Err(SapphireError::ParseError {
+                    message: "expected ')' after parameters".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume ')'
         }
-        if !self.check(&TokenKind::RightParen) {
-            return Err(SapphireError::ParseError {
-                message: "expected ')' after parameters".into(),
-                line: self.peek().line,
-            });
-        }
-        self.advance(); // consume ')'
         let return_type = self.parse_return_type()?;
         let body = self.block_with_rescue()?;
         Ok(Expr::Function {
@@ -468,38 +464,34 @@ impl Parser {
                 line: self.peek().line,
             }),
         };
-        if !self.check(&TokenKind::LeftParen) {
-            return Err(SapphireError::ParseError {
-                message: "expected '(' after method name".into(),
-                line: self.peek().line,
-            });
-        }
-        self.advance(); // consume '('
         let mut params = Vec::new();
-        if !self.check(&TokenKind::RightParen) {
-            loop {
-                match self.peek().kind.clone() {
-                    TokenKind::Identifier(p) => {
-                        self.advance();
-                        let type_ann = self.parse_type_ann()?;
-                        params.push(ParamDef { name: p, type_ann });
+        if self.check(&TokenKind::LeftParen) {
+            self.advance(); // consume '('
+            if !self.check(&TokenKind::RightParen) {
+                loop {
+                    match self.peek().kind.clone() {
+                        TokenKind::Identifier(p) => {
+                            self.advance();
+                            let type_ann = self.parse_type_ann()?;
+                            params.push(ParamDef { name: p, type_ann });
+                        }
+                        _ => return Err(SapphireError::ParseError {
+                            message: "expected parameter name".into(),
+                            line: self.peek().line,
+                        }),
                     }
-                    _ => return Err(SapphireError::ParseError {
-                        message: "expected parameter name".into(),
-                        line: self.peek().line,
-                    }),
+                    if !self.check(&TokenKind::Comma) { break; }
+                    self.advance();
                 }
-                if !self.check(&TokenKind::Comma) { break; }
-                self.advance();
             }
+            if !self.check(&TokenKind::RightParen) {
+                return Err(SapphireError::ParseError {
+                    message: "expected ')' after parameters".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume ')'
         }
-        if !self.check(&TokenKind::RightParen) {
-            return Err(SapphireError::ParseError {
-                message: "expected ')' after parameters".into(),
-                line: self.peek().line,
-            });
-        }
-        self.advance(); // consume ')'
         let return_type = self.parse_return_type()?;
         let body = self.block_with_rescue()?;
         Ok(MethodDef { name, params, return_type, body, private, class_method: false })
