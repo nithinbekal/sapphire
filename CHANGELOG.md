@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.3.0
+
+**Language**
+
+- Nested class definitions — classes can now be defined inside other classes and accessed with dot notation (`Geometry.Point`), including as superclasses:
+
+```ruby
+class Geometry {
+  class Point {
+    attr x: 0
+    attr y: 0
+  }
+}
+
+p = Geometry.Point.new(x: 1, y: 2)
+```
+
+- Relative file imports — use `import "./path"` to load a `.spr` file relative to the current file; imported classes and functions become available in the importing file; duplicate imports are silently skipped
+
+**VM**
+
+- Return type annotations are now enforced at runtime — functions declared with `-> TypeName` raise a type error if the return value doesn't match; the `Num` supertype accepts both `Int` and `Float`
+
+**Bug fixes**
+
+- `break` inside blocks passed to native methods (e.g. `each`, `map`, `select`) now works correctly — previously it would silently stop execution past the native call
+- `break` and `next` inside `while` loops now work correctly
+
+---
+
 ## v0.2.1
 
 **Bug fixes**
