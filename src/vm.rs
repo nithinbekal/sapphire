@@ -869,28 +869,43 @@ impl Vm {
                     }
 
                     // Class method dispatch: receiver is a Class value.
-                    if let VmValue::Class { ref class_methods, .. } = self.stack[recv_slot].clone() {
-                        let method = class_methods.get(&method_name).cloned()
-                            .ok_or_else(|| VmError::TypeError {
-                                message: format!("unknown class method '{}'", method_name),
-                                line,
-                            })?;
-                        if method.function.arity != arg_count {
+                    if let VmValue::Class { ref class_methods, ref namespace, .. } = self.stack[recv_slot].clone() {
+                        let method_opt = class_methods.get(&method_name).cloned();
+                        if let Some(method) = method_opt {
+                            if method.function.arity != arg_count {
+                                return Err(VmError::TypeError {
+                                    message: format!(
+                                        "class method '{}' expects {} arg(s), got {}",
+                                        method_name, method.function.arity, arg_count
+                                    ),
+                                    line,
+                                });
+                            }
+                            self.frames.push(CallFrame {
+                                function:  method.function,
+                                upvalues:  method.upvalues,
+                                ip: 0, base: recv_slot,
+                                block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                                class_name: Some(method.defined_in),
+                            });
+                        } else if arg_count == 0 {
+                            // Fall back to namespace lookup (nested class access like `Outer.Inner`)
+                            match namespace.get(&method_name) {
+                                Some(val) => {
+                                    self.stack.truncate(recv_slot);
+                                    self.stack.push(val.clone());
+                                }
+                                None => return Err(VmError::TypeError {
+                                    message: format!("unknown class method '{}'", method_name),
+                                    line,
+                                }),
+                            }
+                        } else {
                             return Err(VmError::TypeError {
-                                message: format!(
-                                    "class method '{}' expects {} arg(s), got {}",
-                                    method_name, method.function.arity, arg_count
-                                ),
+                                message: format!("unknown class method '{}'", method_name),
                                 line,
                             });
                         }
-                        self.frames.push(CallFrame {
-                            function:  method.function,
-                            upvalues:  method.upvalues,
-                            ip: 0, base: recv_slot,
-                            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
-                            class_name: Some(method.defined_in),
-                        });
                         continue;
                     }
 
@@ -952,42 +967,59 @@ impl Vm {
                         }
                     }
 
-                    let method = match &self.stack[recv_slot] {
-                        VmValue::Instance { methods, .. } => {
-                            methods.get(&method_name).cloned()
-                                .ok_or_else(|| VmError::TypeError {
-                                    message: format!("method '{}' not found", method_name),
-                                    line,
-                                })?
-                        }
+                    let method_opt = match &self.stack[recv_slot] {
+                        VmValue::Instance { methods, .. } => methods.get(&method_name).cloned(),
                         _ => unreachable!(),
                     };
-                    if method.private {
-                        let caller_class = self.frames.last().and_then(|f| f.class_name.as_deref()).unwrap_or("");
-                        if caller_class != method.defined_in {
+                    if let Some(method) = method_opt {
+                        if method.private {
+                            let caller_class = self.frames.last().and_then(|f| f.class_name.as_deref()).unwrap_or("");
+                            if caller_class != method.defined_in {
+                                return Err(VmError::TypeError {
+                                    message: format!("private method '{}' called from outside class", method_name),
+                                    line,
+                                });
+                            }
+                        }
+                        if method.function.arity != arg_count {
                             return Err(VmError::TypeError {
-                                message: format!("private method '{}' called from outside class", method_name),
+                                message: format!(
+                                    "method '{}' expects {} arg(s), got {}",
+                                    method_name, method.function.arity, arg_count
+                                ),
                                 line,
                             });
                         }
-                    }
-                    if method.function.arity != arg_count {
+                        let class_name = Some(method.defined_in.clone());
+                        self.frames.push(CallFrame {
+                            function: method.function,
+                            upvalues: method.upvalues,
+                            ip: 0, base: recv_slot,
+                            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                            class_name,
+                        });
+                    } else if arg_count == 0 {
+                        // No method found — fall back to field read (attr-declared fields accessed without parens)
+                        let field_val = match &self.stack[recv_slot] {
+                            VmValue::Instance { fields, .. } => fields.borrow().get(&method_name).cloned(),
+                            _ => unreachable!(),
+                        };
+                        match field_val {
+                            Some(val) => {
+                                self.stack.truncate(recv_slot);
+                                self.stack.push(val);
+                            }
+                            None => return Err(VmError::TypeError {
+                                message: format!("undefined method or field '{}' not found", method_name),
+                                line,
+                            }),
+                        }
+                    } else {
                         return Err(VmError::TypeError {
-                            message: format!(
-                                "method '{}' expects {} arg(s), got {}",
-                                method_name, method.function.arity, arg_count
-                            ),
+                            message: format!("method '{}' not found", method_name),
                             line,
                         });
                     }
-                    let class_name = Some(method.defined_in.clone());
-                    self.frames.push(CallFrame {
-                        function: method.function,
-                        upvalues: method.upvalues,
-                        ip: 0, base: recv_slot,
-                        block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
-                        class_name,
-                    });
                 }
 
                 OpCode::SuperInvoke(name_idx, arg_count) => {
