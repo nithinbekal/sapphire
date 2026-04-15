@@ -58,11 +58,21 @@ impl Lexer {
                 '&' => {
                     if self.match_next('&') { TokenKind::AmpAmp }
                     else if self.match_next('.') { TokenKind::AmpDot }
-                    else { continue }
+                    else { TokenKind::Amp }
                 }
                 '|' => if self.match_next('|') { TokenKind::PipePipe } else { TokenKind::Pipe },
-                '<' => if self.match_next('=') { TokenKind::LessEq } else { TokenKind::Less },
-                '>' => if self.match_next('=') { TokenKind::GreaterEq } else { TokenKind::Greater },
+                '^' => TokenKind::Caret,
+                '~' => TokenKind::Tilde,
+                '<' => {
+                    if self.match_next('<') { TokenKind::LessLess }
+                    else if self.match_next('=') { TokenKind::LessEq }
+                    else { TokenKind::Less }
+                }
+                '>' => {
+                    if self.match_next('>') { TokenKind::GreaterGreater }
+                    else if self.match_next('=') { TokenKind::GreaterEq }
+                    else { TokenKind::Greater }
+                }
                 '{' => TokenKind::LeftBrace,
                 '}' => TokenKind::RightBrace,
                 '[' => TokenKind::LeftBracket,

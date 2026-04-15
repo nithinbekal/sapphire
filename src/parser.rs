@@ -696,13 +696,46 @@ impl Parser {
         Ok(left)
     }
 
-    // range: equality ('..' equality)?
+    // range: bitwise_or ('..' bitwise_or)?
     fn range(&mut self) -> Result<Expr, SapphireError> {
-        let left = self.equality()?;
+        let left = self.bitwise_or()?;
         if self.check(&TokenKind::DotDot) {
             self.advance();
-            let right = self.equality()?;
+            let right = self.bitwise_or()?;
             return Ok(Expr::Range { from: Box::new(left), to: Box::new(right) });
+        }
+        Ok(left)
+    }
+
+    // bitwise_or: bitwise_xor ('|' bitwise_xor)*
+    fn bitwise_or(&mut self) -> Result<Expr, SapphireError> {
+        let mut left = self.bitwise_xor()?;
+        while self.check(&TokenKind::Pipe) {
+            let op = self.advance().clone();
+            let right = self.bitwise_xor()?;
+            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // bitwise_xor: bitwise_and ('^' bitwise_and)*
+    fn bitwise_xor(&mut self) -> Result<Expr, SapphireError> {
+        let mut left = self.bitwise_and()?;
+        while self.check(&TokenKind::Caret) {
+            let op = self.advance().clone();
+            let right = self.bitwise_and()?;
+            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // bitwise_and: equality ('&' equality)*
+    fn bitwise_and(&mut self) -> Result<Expr, SapphireError> {
+        let mut left = self.equality()?;
+        while self.check(&TokenKind::Amp) {
+            let op = self.advance().clone();
+            let right = self.equality()?;
+            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
         }
         Ok(left)
     }
@@ -718,12 +751,23 @@ impl Parser {
         Ok(left)
     }
 
-    // comparison: term (('<' | '<=' | '>' | '>=') term)*
+    // comparison: shift (('<' | '<=' | '>' | '>=') shift)*
     fn comparison(&mut self) -> Result<Expr, SapphireError> {
-        let mut left = self.term()?;
+        let mut left = self.shift()?;
         while self.check(&TokenKind::Less) || self.check(&TokenKind::LessEq)
             || self.check(&TokenKind::Greater) || self.check(&TokenKind::GreaterEq)
         {
+            let op = self.advance().clone();
+            let right = self.shift()?;
+            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // shift: term (('<<' | '>>') term)*
+    fn shift(&mut self) -> Result<Expr, SapphireError> {
+        let mut left = self.term()?;
+        while self.check(&TokenKind::LessLess) || self.check(&TokenKind::GreaterGreater) {
             let op = self.advance().clone();
             let right = self.term()?;
             left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
@@ -753,9 +797,9 @@ impl Parser {
         Ok(left)
     }
 
-    // unary: ('!' | '-') unary | call
+    // unary: ('!' | '-' | '~') unary | call
     fn unary(&mut self) -> Result<Expr, SapphireError> {
-        if self.check(&TokenKind::Bang) || self.check(&TokenKind::Minus) {
+        if self.check(&TokenKind::Bang) || self.check(&TokenKind::Minus) || self.check(&TokenKind::Tilde) {
             let op = self.advance().clone();
             let right = self.unary()?;
             return Ok(Expr::Unary { op, right: Box::new(right) });

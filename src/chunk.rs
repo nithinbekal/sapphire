@@ -52,6 +52,14 @@ pub enum OpCode {
     Greater,
     GreaterEqual,
 
+    // Bitwise
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitNot,
+    Shl,
+    Shr,
+
     // Unary
     Negate,
     Not,

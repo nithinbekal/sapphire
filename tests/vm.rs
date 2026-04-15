@@ -68,6 +68,74 @@ fn not() {
 }
 
 #[test]
+fn bitwise_and() {
+    assert_eq!(eval("12 & 10"), VmValue::Int(8));   // 1100 & 1010 = 1000
+    assert_eq!(eval("255 & 15"), VmValue::Int(15));  // 11111111 & 00001111 = 00001111
+    assert_eq!(eval("7 & 0"), VmValue::Int(0));
+}
+
+#[test]
+fn bitwise_or() {
+    assert_eq!(eval("12 | 10"), VmValue::Int(14));    // 1100 | 1010 = 1110
+    assert_eq!(eval("240 | 15"), VmValue::Int(255));  // 11110000 | 00001111 = 11111111
+    assert_eq!(eval("7 | 0"), VmValue::Int(7));
+}
+
+#[test]
+fn bitwise_xor() {
+    assert_eq!(eval("12 ^ 10"), VmValue::Int(6));    // 1100 ^ 1010 = 0110
+    assert_eq!(eval("255 ^ 255"), VmValue::Int(0));
+    assert_eq!(eval("7 ^ 0"), VmValue::Int(7));
+}
+
+#[test]
+fn bitwise_not() {
+    assert_eq!(eval("~0"), VmValue::Int(-1));
+    assert_eq!(eval("~12"), VmValue::Int(-13));
+    assert_eq!(eval("~(-1)"), VmValue::Int(0));
+}
+
+#[test]
+fn shift_left() {
+    assert_eq!(eval("1 << 4"), VmValue::Int(16));
+    assert_eq!(eval("12 << 2"), VmValue::Int(48));
+}
+
+#[test]
+fn shift_right() {
+    assert_eq!(eval("16 >> 4"), VmValue::Int(1));
+    assert_eq!(eval("12 >> 1"), VmValue::Int(6));
+}
+
+#[test]
+fn bitwise_operator_precedence() {
+    // shifts bind tighter than comparisons
+    assert_eq!(eval("1 << 3 == 8"), VmValue::Bool(true));
+    // & binds tighter than |
+    assert_eq!(eval("5 | 3 & 6"), VmValue::Int(7)); // 5 | (3 & 6) = 5 | 2 = 7
+    // ^ between & and |
+    assert_eq!(eval("5 | 3 ^ 6"), VmValue::Int(5)); // 5 | (3 ^ 6) = 5 | 5 = 5
+    // arithmetic binds tighter than bitwise
+    assert_eq!(eval("3 + 1 & 6"), VmValue::Int(4)); // (3+1) & 6 = 4 & 6 = 4
+}
+
+#[test]
+fn bitwise_type_error() {
+    let err = eval_err("1 & 1.0");
+    assert!(matches!(err, VmError::TypeError { .. }));
+    let err = eval_err("1 | 1.0");
+    assert!(matches!(err, VmError::TypeError { .. }));
+    let err = eval_err("1 ^ 1.0");
+    assert!(matches!(err, VmError::TypeError { .. }));
+    let err = eval_err("1 << 1.0");
+    assert!(matches!(err, VmError::TypeError { .. }));
+    let err = eval_err("1 >> 1.0");
+    assert!(matches!(err, VmError::TypeError { .. }));
+    let err = eval_err("~1.0");
+    assert!(matches!(err, VmError::TypeError { .. }));
+}
+
+#[test]
 fn comparisons() {
     assert_eq!(eval("3 < 5"), VmValue::Bool(true));
     assert_eq!(eval("5 > 3"), VmValue::Bool(true));

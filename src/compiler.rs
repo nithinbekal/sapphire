@@ -359,6 +359,7 @@ impl Compiler {
                 match &op.kind {
                     TokenKind::Minus => self.emit(OpCode::Negate),
                     TokenKind::Bang  => self.emit(OpCode::Not),
+                    TokenKind::Tilde => self.emit(OpCode::BitNot),
                     other => return Err(self.error(format!("unknown unary op: {:?}", other))),
                 }
                 Ok(())
@@ -389,17 +390,22 @@ impl Compiler {
                 self.expr(left)?;
                 self.expr(right)?;
                 match &op.kind {
-                    TokenKind::Plus      => self.emit(OpCode::Add),
-                    TokenKind::Minus     => self.emit(OpCode::Sub),
-                    TokenKind::Star      => self.emit(OpCode::Mul),
-                    TokenKind::Slash     => self.emit(OpCode::Div),
-                    TokenKind::Percent   => self.emit(OpCode::Mod),
-                    TokenKind::EqEq      => self.emit(OpCode::Equal),
-                    TokenKind::BangEq    => self.emit(OpCode::NotEqual),
-                    TokenKind::Less      => self.emit(OpCode::Less),
-                    TokenKind::LessEq    => self.emit(OpCode::LessEqual),
-                    TokenKind::Greater   => self.emit(OpCode::Greater),
-                    TokenKind::GreaterEq => self.emit(OpCode::GreaterEqual),
+                    TokenKind::Plus           => self.emit(OpCode::Add),
+                    TokenKind::Minus          => self.emit(OpCode::Sub),
+                    TokenKind::Star           => self.emit(OpCode::Mul),
+                    TokenKind::Slash          => self.emit(OpCode::Div),
+                    TokenKind::Percent        => self.emit(OpCode::Mod),
+                    TokenKind::Amp            => self.emit(OpCode::BitAnd),
+                    TokenKind::Pipe           => self.emit(OpCode::BitOr),
+                    TokenKind::Caret          => self.emit(OpCode::BitXor),
+                    TokenKind::LessLess       => self.emit(OpCode::Shl),
+                    TokenKind::GreaterGreater => self.emit(OpCode::Shr),
+                    TokenKind::EqEq           => self.emit(OpCode::Equal),
+                    TokenKind::BangEq         => self.emit(OpCode::NotEqual),
+                    TokenKind::Less           => self.emit(OpCode::Less),
+                    TokenKind::LessEq         => self.emit(OpCode::LessEqual),
+                    TokenKind::Greater        => self.emit(OpCode::Greater),
+                    TokenKind::GreaterEq      => self.emit(OpCode::GreaterEqual),
                     other => return Err(self.error(format!("unknown binary op: {:?}", other))),
                 }
                 Ok(())
