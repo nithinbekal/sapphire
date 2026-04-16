@@ -1,0 +1,45 @@
+class NumTest < Test {
+  def test_zero_true {
+    self.assert(0.zero?())
+  }
+
+  def test_zero_false {
+    self.assert(!1.zero?())
+  }
+
+  def test_positive_true {
+    self.assert(1.positive?())
+  }
+
+  def test_positive_false {
+    self.assert(!(-1).positive?())
+  }
+
+  def test_negative_true {
+    self.assert((-1).negative?())
+  }
+
+  def test_negative_false {
+    self.assert(!1.negative?())
+  }
+
+  def test_abs_positive {
+    self.assert_equal(5, (-5).abs())
+  }
+
+  def test_abs_already_positive {
+    self.assert_equal(5, 5.abs())
+  }
+
+  def test_clamp_above_max {
+    self.assert_equal(5, 10.clamp(1, 5))
+  }
+
+  def test_clamp_below_min {
+    self.assert_equal(1, 0.clamp(1, 5))
+  }
+
+  def test_clamp_within_range {
+    self.assert_equal(3, 3.clamp(1, 5))
+  }
+}
