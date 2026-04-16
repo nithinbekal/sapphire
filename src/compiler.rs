@@ -630,8 +630,8 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::Class { name, superclass, fields, methods, nested } => {
-                self.compile_class(name, superclass.as_deref(), fields, methods, nested, true)?;
+            Expr::Class { name, superclass, fields, methods, nested, constants } => {
+                self.compile_class(name, superclass.as_deref(), fields, methods, nested, constants, true)?;
                 Ok(())
             }
 
@@ -977,6 +977,7 @@ impl Compiler {
         fields:     &[crate::ast::FieldDef],
         methods:    &[MethodDef],
         nested:     &[Expr],
+        constants:  &[(String, Box<Expr>)],
         bind:       bool,
     ) -> Result<(), CompileError> {
         let line = self.state().current_line;
@@ -1019,12 +1020,18 @@ impl Compiler {
         let mut nested_class_names: Vec<String> = Vec::new();
         for nested_expr in nested {
             match nested_expr {
-                Expr::Class { name: nname, superclass: nsuper, fields: nfields, methods: nmethods, nested: nnested } => {
+                Expr::Class { name: nname, superclass: nsuper, fields: nfields, methods: nmethods, nested: nnested, constants: nconsts } => {
                     nested_class_names.push(nname.clone());
-                    self.compile_class(nname, nsuper.as_deref(), nfields, nmethods, nnested, false)?;
+                    self.compile_class(nname, nsuper.as_deref(), nfields, nmethods, nnested, nconsts, false)?;
                 }
                 _ => return Err(self.error("nested class body must be a class expression".to_string())),
             }
+        }
+
+        // Emit class constants (each leaves a value on the stack, stored in namespace).
+        for (cname, cexpr) in constants {
+            nested_class_names.push(cname.clone());
+            self.expr(cexpr)?;
         }
 
         // Resolve superclass: static (simple Variable) vs dynamic (any other expr).

@@ -253,11 +253,30 @@ impl Parser {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
         let mut nested = Vec::new();
+        let mut constants = Vec::new();
         loop {
             self.skip_terminators();
             if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
             if self.check(&TokenKind::Class) {
                 nested.push(self.class_def()?);
+            } else if let TokenKind::Identifier(n) = self.peek().kind.clone() {
+                // ALL_CAPS identifier followed by `=` is a class constant: `PI = 3.14`
+                let next_is_eq = self.tokens.get(self.current + 1)
+                    .map(|t| t.kind == TokenKind::Eq)
+                    .unwrap_or(false);
+                if n.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+                    && next_is_eq
+                {
+                    self.advance(); // consume name
+                    self.advance(); // consume '='
+                    let val = self.logical()?;
+                    constants.push((n, Box::new(val)));
+                } else {
+                    return Err(SapphireError::ParseError {
+                        message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body".into(),
+                        line: self.peek().line,
+                    });
+                }
             } else if self.check(&TokenKind::Attr) {
                 self.advance(); // consume 'attr'
                 let field_name = match self.peek().kind.clone() {
@@ -329,6 +348,7 @@ impl Parser {
             fields,
             methods,
             nested,
+            constants,
         })
     }
 
