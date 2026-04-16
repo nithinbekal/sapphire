@@ -129,6 +129,8 @@ pub enum Expr {
         methods: Vec<MethodDef>,
         /// Nested class definitions — accessible only as `Outer.Inner`.
         nested: Vec<Expr>,
+        /// Class-level constants (`PI = 3.14`) — accessible as `ClassName.PI`.
+        constants: Vec<(String, Box<Expr>)>,
     },
     /// Top-level `def name(...)` on `Object`; value is the method name string.
     Function {
