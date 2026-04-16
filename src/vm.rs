@@ -335,6 +335,7 @@ impl Vm {
             ("stdlib/map.spr",    include_str!("../stdlib/map.spr")),
             ("stdlib/test.spr",   include_str!("../stdlib/test.spr")),
             ("stdlib/file.spr",   include_str!("../stdlib/file.spr")),
+            ("stdlib/math.spr",   include_str!("../stdlib/math.spr")),
         ];
         for (name, src) in SOURCES {
             let tokens = crate::lexer::Lexer::new(src).scan_tokens();
