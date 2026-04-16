@@ -1,0 +1,33 @@
+class IntTest < Test {
+  def test_even_true {
+    self.assert(4.even?())
+  }
+
+  def test_even_false {
+    self.assert(!3.even?())
+  }
+
+  def test_odd_true {
+    self.assert(3.odd?())
+  }
+
+  def test_odd_false {
+    self.assert(!4.odd?())
+  }
+
+  def test_max_returns_larger {
+    self.assert_equal(10, 5.max(10))
+  }
+
+  def test_max_self_is_larger {
+    self.assert_equal(10, 10.max(5))
+  }
+
+  def test_min_returns_smaller {
+    self.assert_equal(5, 5.min(10))
+  }
+
+  def test_min_other_is_smaller {
+    self.assert_equal(5, 10.min(5))
+  }
+}

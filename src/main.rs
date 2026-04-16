@@ -6,6 +6,8 @@ fn main() {
     match args.as_slice() {
         [_, cmd, path] if cmd == "run"       => run_file(path),
         [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
+        [_, cmd, path] if cmd == "test"      => run_tests(path),
+        [_, cmd] if cmd == "test"    => run_tests("."),
         [_, cmd] if cmd == "console" => run_repl(),
         [_, cmd] if cmd == "version" => println!("sapphire {}", env!("CARGO_PKG_VERSION")),
         _ => {
@@ -13,6 +15,7 @@ fn main() {
             eprintln!("Commands:");
             eprintln!("  run <file.spr>       Run a Sapphire file");
             eprintln!("  typecheck <file.spr> Type-check a file");
+            eprintln!("  test [path]          Run tests (file or directory)");
             eprintln!("  console              Start the REPL");
             eprintln!("  version              Print the version");
             std::process::exit(1);
@@ -68,6 +71,113 @@ fn typecheck_file(path: &str) {
                 std::process::exit(1);
             }
         }
+    }
+}
+
+fn collect_test_files(path: &str) -> Vec<std::path::PathBuf> {
+    let p = std::path::Path::new(path);
+    if p.is_file() {
+        return vec![p.to_path_buf()];
+    }
+    let mut files = Vec::new();
+    collect_test_files_recursive(p, &mut files);
+    files.sort();
+    files
+}
+
+fn collect_test_files_recursive(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_test_files_recursive(&path, out);
+        } else if path.extension().map_or(false, |e| e == "spr")
+            && path.file_name()
+                .and_then(|n| n.to_str())
+                .map_or(false, |n| n.ends_with("_test.spr"))
+        {
+            out.push(path);
+        }
+    }
+}
+
+fn run_tests(path: &str) {
+    let test_files = collect_test_files(path);
+    if test_files.is_empty() {
+        eprintln!("No test files found in '{}'", path);
+        std::process::exit(1);
+    }
+
+    let mut total = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    let mut dots = String::new();
+
+    for file_path in &test_files {
+        let source = match std::fs::read_to_string(file_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error reading '{}': {}", file_path.display(), e);
+                std::process::exit(1);
+            }
+        };
+        let tokens = lexer::Lexer::new(&source).scan_tokens();
+        let exprs = match parser::Parser::new(tokens).parse() {
+            Ok(s) => s,
+            Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+        };
+        let func = match compiler::compile(&exprs) {
+            Ok(f) => f,
+            Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+        };
+        let current_dir = file_path
+            .canonicalize()
+            .unwrap_or_else(|_| file_path.to_path_buf())
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        let mut machine = vm::Vm::new(func, current_dir);
+        if let Err(e) = machine.load_stdlib() {
+            eprintln!("stdlib error: {}", e);
+            std::process::exit(1);
+        }
+        if let Err(e) = machine.run() {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+
+        let test_classes = machine.collect_test_classes();
+        for (class_name, tests) in test_classes {
+            for (label, method) in &tests {
+                total += 1;
+                match machine.run_single_test(&class_name, method) {
+                    Ok(()) => dots.push('.'),
+                    Err(msg) => {
+                        dots.push('F');
+                        failures.push(format!("  {}#{} — {}", class_name, label, msg));
+                    }
+                }
+            }
+        }
+    }
+
+    println!("{}\n", dots);
+    if !failures.is_empty() {
+        println!("Failures:");
+        for f in &failures {
+            println!("{}", f);
+        }
+        println!();
+    }
+    println!(
+        "{} {}, {} {}",
+        total,
+        if total == 1 { "test" } else { "tests" },
+        failures.len(),
+        if failures.len() == 1 { "failure" } else { "failures" },
+    );
+    if !failures.is_empty() {
+        std::process::exit(1);
     }
 }
 

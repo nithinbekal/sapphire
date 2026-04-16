@@ -1,0 +1,68 @@
+class Test {
+  def setup { }
+
+  def teardown { }
+
+  # Fails unless `cond` is truthy.
+  #
+  #   self.assert(1 == 1)   # passes
+  #   self.assert(1 == 2)   # raises "assertion failed"
+  #
+  def assert(cond) {
+    if !cond {
+      raise("assertion failed")
+    }
+  }
+
+  # Fails unless `expected` equals `actual`.
+  #
+  #   self.assert_equal(5, (-5).abs())   # passes
+  #   self.assert_equal(5, 3)            # raises "expected 5, got 3"
+  #
+  def assert_equal(expected, actual) {
+    if expected != actual {
+      raise("expected #{expected}, got #{actual}")
+    }
+  }
+
+  # Fails unless `obj` is nil.
+  #
+  #   self.assert_nil(nil)   # passes
+  #   self.assert_nil(0)     # raises "expected nil, got 0"
+  #
+  def assert_nil(obj) {
+    if obj != nil {
+      raise("expected nil, got #{obj}")
+    }
+  }
+
+  # Fails unless `actual` is within `delta` of `expected`.
+  # Useful for floating-point comparisons where exact equality is unreliable.
+  #
+  #   self.assert_in_delta(3.14, 3.1415, 0.01)   # passes
+  #   self.assert_in_delta(3.14, 3.15, 0.001)    # raises
+  #
+  def assert_in_delta(expected, actual, delta) {
+    diff = (expected - actual).abs()
+    if diff > delta {
+      raise("expected #{actual} to be within #{delta} of #{expected}")
+    }
+  }
+
+  # Fails unless the block raises an exception.
+  #
+  #   self.assert_raises { raise("boom") }   # passes
+  #   self.assert_raises { 1 + 1 }           # raises "expected an exception but none was raised"
+  #
+  def assert_raises {
+    raised = false
+    begin
+      yield
+    rescue e
+      raised = true
+    end
+    if !raised {
+      raise("expected an exception but none was raised")
+    }
+  }
+}

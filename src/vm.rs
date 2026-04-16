@@ -331,6 +331,7 @@ impl Vm {
             ("stdlib/bool.spr",   include_str!("../stdlib/bool.spr")),
             ("stdlib/list.spr",   include_str!("../stdlib/list.spr")),
             ("stdlib/map.spr",    include_str!("../stdlib/map.spr")),
+            ("stdlib/test.spr",   include_str!("../stdlib/test.spr")),
         ];
         for (name, src) in SOURCES {
             let tokens = crate::lexer::Lexer::new(src).scan_tokens();
@@ -1941,6 +1942,99 @@ impl Vm {
         let b = self.pop()?;
         let a = self.pop()?;
         Ok((a, b))
+    }
+
+    // ── Test runner ───────────────────────────────────────────────────────────
+
+    /// Return all subclasses of `Test` (excluding `Test` itself) together with
+    /// the list of their test methods (names starting with `test_`).
+    /// Each entry is `(class_name, Vec<(test_label, VmMethod)>)` where
+    /// `test_label` is the method name with the `test_` prefix stripped.
+    pub fn collect_test_classes(&self) -> Vec<(String, Vec<(String, VmMethod)>)> {
+        let mut result = Vec::new();
+        let mut names: Vec<&String> = self.classes.keys().collect();
+        names.sort();
+        for class_name in names {
+            if class_name == "Test" { continue; }
+            if !vm_is_subclass(&self.classes, class_name.clone(), "Test") { continue; }
+            let entry = &self.classes[class_name];
+            let mut tests: Vec<(String, VmMethod)> = entry.methods
+                .iter()
+                .filter(|(name, _)| name.starts_with("test_"))
+                .map(|(name, method)| (name.trim_start_matches("test_").to_string(), method.clone()))
+                .collect();
+            tests.sort_by(|a, b| a.0.cmp(&b.0));
+            if !tests.is_empty() {
+                result.push((class_name.clone(), tests));
+            }
+        }
+        result
+    }
+
+    /// Call a single method on an instance without disturbing the existing
+    /// stack.  Returns `Err(message)` if the method raises or there is a VM
+    /// error.
+    fn call_method_on_instance(
+        &mut self,
+        instance: VmValue,
+        method: &VmMethod,
+    ) -> Result<(), String> {
+        let min_depth = self.frames.len();
+        let base = self.stack.len();
+        self.stack.push(instance);
+        self.frames.push(CallFrame {
+            function: method.function.clone(),
+            upvalues: method.upvalues.clone(),
+            ip: 0,
+            base,
+            block: None,
+            is_block_caller: false,
+            is_native_block: false,
+            rescues: vec![],
+            class_name: Some(method.defined_in.clone()),
+        });
+        let result = self.run_inner(min_depth);
+        self.stack.truncate(base);
+        self.frames.truncate(min_depth);
+        result.map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    /// Run a single test: build a fresh instance of `class_name`, call
+    /// `setup`, run `test_method`, call `teardown`.  Returns `Ok(())` on
+    /// success or `Err(message)` if any step raises.
+    pub fn run_single_test(
+        &mut self,
+        class_name: &str,
+        test_method: &VmMethod,
+    ) -> Result<(), String> {
+        let entry = self.classes.get(class_name)
+            .ok_or_else(|| format!("class '{}' not found", class_name))?;
+
+        let fields: HashMap<String, VmValue> = entry.fields
+            .iter()
+            .map(|(name, val)| (name.clone(), val.clone()))
+            .collect();
+        let methods = entry.methods.clone();
+        let instance = VmValue::Instance {
+            class_name: class_name.to_string(),
+            fields: Rc::new(RefCell::new(fields)),
+            methods: methods.clone(),
+        };
+
+        // Call setup if defined and not the base no-op from Test itself.
+        if let Some(setup) = methods.get("setup") {
+            self.call_method_on_instance(instance.clone(), setup)?;
+        }
+
+        // Run the test.
+        self.call_method_on_instance(instance.clone(), test_method)?;
+
+        // Call teardown if defined.
+        if let Some(teardown) = methods.get("teardown") {
+            self.call_method_on_instance(instance.clone(), teardown)?;
+        }
+
+        Ok(())
     }
 }
 
