@@ -16,6 +16,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
 
+  sapphire-tests:
+    name: Sapphire Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build
+      - run: target/debug/sapphire test tests/
+
   examples:
     name: Examples
     runs-on: ubuntu-latest
