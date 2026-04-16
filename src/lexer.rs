@@ -176,9 +176,34 @@ impl Lexer {
     }
 
     fn number(&mut self, first: char) -> TokenKind {
+        // Hex literal: 0xFF, 0xDEAD_BEEF, etc.
+        if first == '0'
+            && !self.is_at_end()
+            && (self.source[self.current] == 'x' || self.source[self.current] == 'X')
+        {
+            self.advance(); // consume 'x'/'X'
+            let mut hex = String::new();
+            while !self.is_at_end()
+                && (self.source[self.current].is_ascii_hexdigit()
+                    || (self.source[self.current] == '_'
+                        && self.current + 1 < self.source.len()
+                        && self.source[self.current + 1].is_ascii_hexdigit()))
+            {
+                let ch = self.advance();
+                if ch != '_' { hex.push(ch); }
+            }
+            return TokenKind::Number(i64::from_str_radix(&hex, 16).unwrap());
+        }
+
         let mut s = String::from(first);
-        while !self.is_at_end() && self.source[self.current].is_ascii_digit() {
-            s.push(self.advance());
+        while !self.is_at_end()
+            && (self.source[self.current].is_ascii_digit()
+                || (self.source[self.current] == '_'
+                    && self.current + 1 < self.source.len()
+                    && self.source[self.current + 1].is_ascii_digit()))
+        {
+            let ch = self.advance();
+            if ch != '_' { s.push(ch); }
         }
         // Consume `.digits` as the fractional part of a float.
         // Guard: next char is `.` AND the char after that is a digit (not `..`).
@@ -188,8 +213,14 @@ impl Lexer {
             && self.source[self.current + 1].is_ascii_digit()
         {
             s.push(self.advance()); // '.'
-            while !self.is_at_end() && self.source[self.current].is_ascii_digit() {
-                s.push(self.advance());
+            while !self.is_at_end()
+                && (self.source[self.current].is_ascii_digit()
+                    || (self.source[self.current] == '_'
+                        && self.current + 1 < self.source.len()
+                        && self.source[self.current + 1].is_ascii_digit()))
+            {
+                let ch = self.advance();
+                if ch != '_' { s.push(ch); }
             }
             TokenKind::Float(s.parse().unwrap())
         } else {
