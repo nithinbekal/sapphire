@@ -332,6 +332,7 @@ impl Vm {
             ("stdlib/list.spr",   include_str!("../stdlib/list.spr")),
             ("stdlib/map.spr",    include_str!("../stdlib/map.spr")),
             ("stdlib/test.spr",   include_str!("../stdlib/test.spr")),
+            ("stdlib/file.spr",   include_str!("../stdlib/file.spr")),
         ];
         for (name, src) in SOURCES {
             let tokens = crate::lexer::Lexer::new(src).scan_tokens();
@@ -340,6 +341,21 @@ impl Vm {
             let func = crate::compiler::compile(&stmts)
                 .map_err(|e| VmError::TypeError { message: format!("{}: {}", name, e), line: 0 })?;
             self.run_extra(func)?;
+        }
+        // Expose all stdlib classes as globals so user code can reference them
+        // by name (e.g. `File.read(...)`, `class Foo < Test`).
+        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        for cname in class_names {
+            let entry = &self.classes[&cname];
+            let val = VmValue::Class {
+                name:          cname.clone(),
+                superclass:    entry.superclass.clone(),
+                fields:        entry.fields.clone(),
+                methods:       entry.methods.clone(),
+                class_methods: entry.class_methods.clone(),
+                namespace:     Rc::new(HashMap::new()),
+            };
+            self.globals.insert(cname, val);
         }
         Ok(())
     }
@@ -870,7 +886,7 @@ impl Vm {
                     }
 
                     // Class method dispatch: receiver is a Class value.
-                    if let VmValue::Class { ref class_methods, ref namespace, .. } = self.stack[recv_slot].clone() {
+                    if let VmValue::Class { ref class_methods, ref namespace, ref name, .. } = self.stack[recv_slot].clone() {
                         let method_opt = class_methods.get(&method_name).cloned();
                         if let Some(method) = method_opt {
                             if method.function.arity != arg_count {
@@ -889,6 +905,20 @@ impl Vm {
                                 block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
                                 class_name: Some(method.defined_in),
                             });
+                        } else if name == "File" {
+                            // Native File class method dispatch.
+                            let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                            let result = match dispatch_file_class_method(&method_name, &args, line) {
+                                Ok(val) => val,
+                                Err(VmError::Raised(val)) => {
+                                    self.stack.truncate(recv_slot);
+                                    self.raise_value(val)?;
+                                    continue;
+                                }
+                                Err(e) => return Err(e),
+                            };
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
                         } else if arg_count == 0 {
                             // Fall back to namespace lookup (nested class access like `Outer.Inner`)
                             match namespace.get(&method_name) {
@@ -2375,6 +2405,56 @@ fn try_native_method(
     match dispatch_native_method(recv, name, args, line) {
         Err(VmError::TypeError { ref message, .. }) if message.contains("has no method") => None,
         result => Some(result),
+    }
+}
+
+/// Native dispatch for `File` class methods: `read`, `write`, `exist?`.
+fn dispatch_file_class_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
+    match name {
+        "read" => {
+            let path = match args {
+                [VmValue::Str(s)] => s.clone(),
+                [_] => return Err(VmError::TypeError {
+                    message: "File.read: path must be a string".to_string(), line,
+                }),
+                _ => return Err(VmError::TypeError {
+                    message: format!("File.read expects 1 argument, got {}", args.len()), line,
+                }),
+            };
+            std::fs::read_to_string(&path).map(VmValue::Str).map_err(|e| {
+                VmError::Raised(VmValue::Str(format!("{}: {}", path, e)))
+            })
+        }
+        "write" => {
+            let (path, content) = match args {
+                [VmValue::Str(p), VmValue::Str(c)] => (p.clone(), c.clone()),
+                [_, _] => return Err(VmError::TypeError {
+                    message: "File.write: path and content must be strings".to_string(), line,
+                }),
+                _ => return Err(VmError::TypeError {
+                    message: format!("File.write expects 2 arguments, got {}", args.len()), line,
+                }),
+            };
+            std::fs::write(&path, content).map(|_| VmValue::Nil).map_err(|e| {
+                VmError::Raised(VmValue::Str(format!("{}: {}", path, e)))
+            })
+        }
+        "exist?" => {
+            let path = match args {
+                [VmValue::Str(s)] => s.clone(),
+                [_] => return Err(VmError::TypeError {
+                    message: "File.exist?: path must be a string".to_string(), line,
+                }),
+                _ => return Err(VmError::TypeError {
+                    message: format!("File.exist? expects 1 argument, got {}", args.len()), line,
+                }),
+            };
+            Ok(VmValue::Bool(std::path::Path::new(&path).exists()))
+        }
+        _ => Err(VmError::TypeError {
+            message: format!("File has no class method '{}'", name),
+            line,
+        }),
     }
 }
 

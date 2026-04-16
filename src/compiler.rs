@@ -417,7 +417,9 @@ impl Compiler {
                     self.emit(OpCode::GetLocal(slot));
                 } else if let Some(idx) = self.resolve_upvalue(depth, name) {
                     self.emit(OpCode::GetUpvalue(idx));
-                } else if self.global_mode || self.has_imports {
+                } else if self.global_mode || self.has_imports
+                    || name.starts_with(|c: char| c.is_uppercase())
+                {
                     let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
                     self.emit(OpCode::GetGlobal(idx));
                 } else {
