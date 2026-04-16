@@ -4,6 +4,84 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::chunk::{Constant, Function, OpCode};
+use crate::gc::{GcHeap, GcRef, Trace};
+
+// ── GC heap objects ───────────────────────────────────────────────────────────
+
+/// Objects managed by the GC heap — all types that can form reference cycles.
+pub enum HeapObject {
+    List(Vec<VmValue>),
+    Map(HashMap<String, VmValue>),
+    /// Instance field storage.
+    Fields(HashMap<String, VmValue>),
+}
+
+impl Trace for HeapObject {
+    fn trace(&self, out: &mut Vec<GcRef>) {
+        match self {
+            HeapObject::List(v)   => v.iter().for_each(|val| collect_refs(val, out)),
+            HeapObject::Map(m)    => m.values().for_each(|val| collect_refs(val, out)),
+            HeapObject::Fields(f) => f.values().for_each(|val| collect_refs(val, out)),
+        }
+    }
+}
+
+/// Push all GcRefs contained directly in `val` into `out`.
+fn collect_refs(val: &VmValue, out: &mut Vec<GcRef>) {
+    match val {
+        VmValue::List(r) | VmValue::Map(r) => out.push(*r),
+        VmValue::Instance { fields, .. }   => out.push(*fields),
+        _ => {}
+    }
+}
+
+impl GcHeap<HeapObject> {
+    pub fn get_list(&self, r: GcRef) -> &Vec<VmValue> {
+        match self.get(r) { HeapObject::List(v) => v, _ => panic!("GcRef is not a List") }
+    }
+    pub fn get_list_mut(&mut self, r: GcRef) -> &mut Vec<VmValue> {
+        match self.get_mut(r) { HeapObject::List(v) => v, _ => panic!("GcRef is not a List") }
+    }
+    pub fn get_map(&self, r: GcRef) -> &HashMap<String, VmValue> {
+        match self.get(r) { HeapObject::Map(m) => m, _ => panic!("GcRef is not a Map") }
+    }
+    pub fn get_map_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> {
+        match self.get_mut(r) { HeapObject::Map(m) => m, _ => panic!("GcRef is not a Map") }
+    }
+    pub fn get_fields(&self, r: GcRef) -> &HashMap<String, VmValue> {
+        match self.get(r) { HeapObject::Fields(f) => f, _ => panic!("GcRef is not Fields") }
+    }
+    pub fn get_fields_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> {
+        match self.get_mut(r) { HeapObject::Fields(f) => f, _ => panic!("GcRef is not Fields") }
+    }
+}
+
+/// Recursively format `val` using heap data for List/Map/Instance.
+pub fn format_value_with_heap(heap: &GcHeap<HeapObject>, val: &VmValue) -> String {
+    match val {
+        VmValue::List(r) => {
+            let parts: Vec<String> = heap.get_list(*r).iter()
+                .map(|el| format_value_with_heap(heap, el))
+                .collect();
+            format!("[{}]", parts.join(", "))
+        }
+        VmValue::Map(r) => {
+            let mut parts: Vec<String> = heap.get_map(*r).iter()
+                .map(|(k, v)| format!("{}: {}", k, format_value_with_heap(heap, v)))
+                .collect();
+            parts.sort();
+            format!("{{{}}}", parts.join(", "))
+        }
+        VmValue::Instance { class_name, fields, .. } => {
+            let mut pairs: Vec<String> = heap.get_fields(*fields).iter()
+                .map(|(k, v)| format!("{}={}", k, format_value_with_heap(heap, v)))
+                .collect();
+            pairs.sort();
+            format!("#<{} {}>", class_name, pairs.join(", "))
+        }
+        other => format!("{}", other),
+    }
+}
 
 // ── Upvalue ───────────────────────────────────────────────────────────────────
 
@@ -49,8 +127,8 @@ pub enum VmValue {
         function: Rc<Function>,
         upvalues: Vec<Upvalue>,
     },
-    List(Rc<RefCell<Vec<VmValue>>>),
-    Map(Rc<RefCell<HashMap<String, VmValue>>>),
+    List(GcRef),
+    Map(GcRef),
     Range { from: i64, to: i64 },
     /// A compiled class: holds the static field list (with defaults) and the method table.
     Class {
@@ -66,7 +144,7 @@ pub enum VmValue {
     /// A live instance of a class.
     Instance {
         class_name: String,
-        fields:     Rc<RefCell<HashMap<String, VmValue>>>,
+        fields:     GcRef,
         methods:    Rc<HashMap<String, VmMethod>>,
     },
 }
@@ -93,12 +171,12 @@ impl PartialEq for VmValue {
             (VmValue::Function(a), VmValue::Function(b)) => Rc::ptr_eq(a, b),
             (VmValue::Closure { function: f1, .. },
              VmValue::Closure { function: f2, .. }) => Rc::ptr_eq(f1, f2),
-            (VmValue::List(a),  VmValue::List(b))  => Rc::ptr_eq(a, b),
-            (VmValue::Map(a),   VmValue::Map(b))   => Rc::ptr_eq(a, b),
+            (VmValue::List(a),  VmValue::List(b))  => a == b,
+            (VmValue::Map(a),   VmValue::Map(b))   => a == b,
             (VmValue::Range { from: f1, to: t1 },
              VmValue::Range { from: f2, to: t2 })  => f1 == f2 && t1 == t2,
             (VmValue::Instance { fields: f1, .. },
-             VmValue::Instance { fields: f2, .. }) => Rc::ptr_eq(f1, f2),
+             VmValue::Instance { fields: f2, .. }) => f1 == f2,
             _ => false,
         }
     }
@@ -114,26 +192,11 @@ impl fmt::Display for VmValue {
             VmValue::Nil         => write!(f, "nil"),
             VmValue::Function(func)          => write!(f, "<fn {}>", func.name),
             VmValue::Closure { function, .. } => write!(f, "<fn {}>", function.name),
-            VmValue::List(elems) => {
-                let parts: Vec<String> = elems.borrow().iter().map(|v| format!("{}", v)).collect();
-                write!(f, "[{}]", parts.join(", "))
-            }
-            VmValue::Map(pairs) => {
-                let mut parts: Vec<String> = pairs.borrow().iter()
-                    .map(|(k, v)| format!("{}: {}", k, v))
-                    .collect();
-                parts.sort();
-                write!(f, "{{{}}}", parts.join(", "))
-            }
+            VmValue::List(_)  => write!(f, "<list>"),
+            VmValue::Map(_)   => write!(f, "<map>"),
             VmValue::Range { from, to } => write!(f, "{}..{}", from, to),
             VmValue::Class { name, .. }  => write!(f, "<class {}>", name),
-            VmValue::Instance { class_name, fields, .. } => {
-                let mut pairs: Vec<String> = fields.borrow().iter()
-                    .map(|(k, v)| format!("{}={}", k, v))
-                    .collect();
-                pairs.sort();
-                write!(f, "#<{} {}>", class_name, pairs.join(", "))
-            }
+            VmValue::Instance { class_name, .. } => write!(f, "#<{}>", class_name),
         }
     }
 }
@@ -239,6 +302,8 @@ struct ClassEntry {
 pub struct Vm {
     frames:        Vec<CallFrame>,
     stack:         Vec<VmValue>,
+    /// GC-managed heap for List, Map, and instance field objects.
+    pub heap:      GcHeap<HeapObject>,
     /// All upvalues that still point into the live stack (open upvalues),
     /// kept so we can close them when a frame exits.
     open_upvalues: Vec<Upvalue>,
@@ -264,6 +329,7 @@ impl Vm {
         Vm {
             frames: vec![frame],
             stack: Vec::new(),
+            heap: GcHeap::new(),
             open_upvalues: Vec::new(),
             classes: HashMap::new(),
             globals: HashMap::new(),
@@ -278,6 +344,7 @@ impl Vm {
         Vm {
             frames: vec![],
             stack: Vec::new(),
+            heap: GcHeap::new(),
             open_upvalues: Vec::new(),
             classes: HashMap::new(),
             globals: HashMap::new(),
@@ -319,6 +386,59 @@ impl Vm {
         self.run_inner(min_depth)?;
         self.stack.truncate(base);
         Ok(())
+    }
+
+    // ── Heap helpers ──────────────────────────────────────────────────────────
+
+    fn get_list(&self, r: GcRef) -> &Vec<VmValue>              { self.heap.get_list(r) }
+    fn get_list_mut(&mut self, r: GcRef) -> &mut Vec<VmValue>  { self.heap.get_list_mut(r) }
+    fn get_map(&self, r: GcRef) -> &HashMap<String, VmValue>   { self.heap.get_map(r) }
+    fn get_map_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> { self.heap.get_map_mut(r) }
+    fn get_fields(&self, r: GcRef) -> &HashMap<String, VmValue> { self.heap.get_fields(r) }
+    fn get_fields_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> { self.heap.get_fields_mut(r) }
+
+    fn alloc_list(&mut self, v: Vec<VmValue>) -> VmValue {
+        self.maybe_gc();
+        VmValue::List(self.heap.alloc(HeapObject::List(v)))
+    }
+    fn alloc_map(&mut self, m: HashMap<String, VmValue>) -> VmValue {
+        self.maybe_gc();
+        VmValue::Map(self.heap.alloc(HeapObject::Map(m)))
+    }
+    fn alloc_fields(&mut self, m: HashMap<String, VmValue>) -> GcRef {
+        self.maybe_gc();
+        self.heap.alloc(HeapObject::Fields(m))
+    }
+
+    pub fn format_value(&self, val: &VmValue) -> String {
+        format_value_with_heap(&self.heap, val)
+    }
+
+    fn gc_roots(&self) -> Vec<GcRef> {
+        let mut out = Vec::new();
+        for v in &self.stack          { collect_refs(v, &mut out); }
+        for v in self.globals.values(){ collect_refs(v, &mut out); }
+        for frame in &self.frames {
+            for uv in &frame.upvalues {
+                if let UpvalueState::Closed(v) = &*uv.0.borrow() {
+                    collect_refs(v, &mut out);
+                }
+            }
+        }
+        // Class field defaults may also contain GcRefs (e.g. default list values).
+        for entry in self.classes.values() {
+            for (_, v) in &entry.fields {
+                collect_refs(v, &mut out);
+            }
+        }
+        out
+    }
+
+    fn maybe_gc(&mut self) {
+        if self.heap.should_collect() {
+            let roots = self.gc_roots();
+            self.heap.collect(&roots);
+        }
     }
 
     /// Compile and execute the stdlib Sapphire files to populate the class registry.
@@ -484,16 +604,16 @@ impl Vm {
 
                 OpCode::BuildString(n) => {
                     let start = self.stack.len().checked_sub(n).ok_or(VmError::StackUnderflow)?;
-                    let parts: Vec<String> = self.stack.drain(start..)
-                        .map(|v| format!("{}", v))
-                        .collect();
+                    let vals: Vec<VmValue> = self.stack.drain(start..).collect();
+                    let parts: Vec<String> = vals.iter().map(|v| self.format_value(v)).collect();
                     self.stack.push(VmValue::Str(parts.concat()));
                 }
 
                 OpCode::BuildList(n) => {
                     let start = self.stack.len().checked_sub(n).ok_or(VmError::StackUnderflow)?;
                     let elems: Vec<VmValue> = self.stack.drain(start..).collect();
-                    self.stack.push(VmValue::List(Rc::new(RefCell::new(elems))));
+                    let v = self.alloc_list(elems);
+                    self.stack.push(v);
                 }
 
                 OpCode::BuildMap(n) => {
@@ -511,7 +631,8 @@ impl Vm {
                         };
                         map.insert(key, chunk[1].clone());
                     }
-                    self.stack.push(VmValue::Map(Rc::new(RefCell::new(map))));
+                    let v = self.alloc_map(map);
+                    self.stack.push(v);
                 }
 
                 OpCode::BuildRange => {
@@ -531,9 +652,8 @@ impl Vm {
                     let idx = self.pop()?;
                     let obj = self.pop()?;
                     match (obj, &idx) {
-                        (VmValue::List(elems), VmValue::Int(i)) => {
-                            let elems = elems.borrow();
-                            let len = elems.len() as i64;
+                        (VmValue::List(r), VmValue::Int(i)) => {
+                            let len = self.get_list(r).len() as i64;
                             let i = if *i < 0 { len + i } else { *i };
                             if i < 0 || i >= len {
                                 return Err(VmError::TypeError {
@@ -541,10 +661,11 @@ impl Vm {
                                     line,
                                 });
                             }
-                            self.stack.push(elems[i as usize].clone());
+                            let v = self.get_list(r)[i as usize].clone();
+                            self.stack.push(v);
                         }
-                        (VmValue::Map(map), VmValue::Str(key)) => {
-                            let val = map.borrow().get(key).cloned().unwrap_or(VmValue::Nil);
+                        (VmValue::Map(r), VmValue::Str(key)) => {
+                            let val = self.get_map(r).get(key.as_str()).cloned().unwrap_or(VmValue::Nil);
                             self.stack.push(val);
                         }
                         (VmValue::Str(s), VmValue::Int(i)) => {
@@ -571,9 +692,8 @@ impl Vm {
                     let idx = self.pop()?;
                     let obj = self.pop()?;
                     match (obj, idx) {
-                        (VmValue::List(elems), VmValue::Int(i)) => {
-                            let mut elems = elems.borrow_mut();
-                            let len = elems.len() as i64;
+                        (VmValue::List(r), VmValue::Int(i)) => {
+                            let len = self.get_list(r).len() as i64;
                             let i = if i < 0 { len + i } else { i };
                             if i < 0 || i >= len {
                                 return Err(VmError::TypeError {
@@ -581,10 +701,10 @@ impl Vm {
                                     line,
                                 });
                             }
-                            elems[i as usize] = val.clone();
+                            self.get_list_mut(r)[i as usize] = val.clone();
                         }
-                        (VmValue::Map(map), VmValue::Str(key)) => {
-                            map.borrow_mut().insert(key, val.clone());
+                        (VmValue::Map(r), VmValue::Str(key)) => {
+                            self.get_map_mut(r).insert(key, val.clone());
                         }
                         (obj, idx) => return Err(VmError::TypeError {
                             message: format!("cannot index-assign {} with {}", obj, idx),
@@ -748,9 +868,10 @@ impl Vm {
                         }
                     }
                     self.stack.drain(base..);
+                    let fields = self.alloc_fields(instance_fields);
                     self.stack.push(VmValue::Instance {
                         class_name,
-                        fields:  Rc::new(RefCell::new(instance_fields)),
+                        fields,
                         methods,
                     });
                 }
@@ -762,8 +883,8 @@ impl Vm {
                     };
                     let obj = self.pop()?;
                     match obj {
-                        VmValue::Instance { ref fields, .. } => {
-                            let val = fields.borrow().get(&name).cloned().unwrap_or(VmValue::Nil);
+                        VmValue::Instance { fields, .. } => {
+                            let val = self.get_fields(fields).get(&name).cloned().unwrap_or(VmValue::Nil);
                             self.stack.push(val);
                         }
                         // Namespace lookup: `Outer.Inner` where `Inner` is a nested class.
@@ -778,7 +899,7 @@ impl Vm {
                         }
                         // For primitives, treat `obj.name` as a zero-arg method call.
                         ref other => {
-                            match try_native_method(other, &name, &[], line) {
+                            match try_native_method(&mut self.heap, other, &name, &[], line) {
                                 Some(Ok(result)) => { self.stack.push(result); }
                                 Some(Err(e)) => return Err(e),
                                 None => {
@@ -819,8 +940,8 @@ impl Vm {
                         VmValue::Nil => {
                             self.stack.push(VmValue::Nil);
                         }
-                        VmValue::Instance { ref fields, .. } => {
-                            let val = fields.borrow().get(&name).cloned().unwrap_or(VmValue::Nil);
+                        VmValue::Instance { fields, .. } => {
+                            let val = self.get_fields(fields).get(&name).cloned().unwrap_or(VmValue::Nil);
                             self.stack.push(val);
                         }
                         other => return Err(VmError::TypeError {
@@ -838,8 +959,8 @@ impl Vm {
                     let val = self.pop()?;
                     let obj = self.pop()?;
                     match obj {
-                        VmValue::Instance { ref fields, .. } => {
-                            fields.borrow_mut().insert(name, val.clone());
+                        VmValue::Instance { fields, .. } => {
+                            self.get_fields_mut(fields).insert(name, val.clone());
                             self.stack.push(val);
                         }
                         other => return Err(VmError::TypeError {
@@ -949,7 +1070,7 @@ impl Vm {
                         let recv = self.stack[recv_slot].clone();
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
                         // Try Rust native method first; if not found try compiled stdlib.
-                        match try_native_method(&recv, &method_name, &args, line) {
+                        match try_native_method(&mut self.heap, &recv, &method_name, &args, line) {
                             Some(Ok(result)) => {
                                 self.stack.truncate(recv_slot);
                                 self.stack.push(result);
@@ -1035,7 +1156,10 @@ impl Vm {
                     } else if arg_count == 0 {
                         // No method found — fall back to field read (attr-declared fields accessed without parens)
                         let field_val = match &self.stack[recv_slot] {
-                            VmValue::Instance { fields, .. } => fields.borrow().get(&method_name).cloned(),
+                            VmValue::Instance { fields, .. } => {
+                                let r = *fields;
+                                self.get_fields(r).get(&method_name).cloned()
+                            }
                             _ => unreachable!(),
                         };
                         match field_val {
@@ -1356,7 +1480,7 @@ impl Vm {
 
                 OpCode::Print => {
                     let val = self.pop()?;
-                    println!("{}", val);
+                    println!("{}", self.format_value(&val));
                     self.stack.push(val);
                 }
 
@@ -1589,8 +1713,8 @@ impl Vm {
                 OpCode::Len => {
                     let val = self.pop()?;
                     let n = match &val {
-                        VmValue::List(v) => v.borrow().len() as i64,
-                        VmValue::Map(m)  => m.borrow().len() as i64,
+                        VmValue::List(r) => self.get_list(*r).len() as i64,
+                        VmValue::Map(r)  => self.get_map(*r).len() as i64,
                         VmValue::Str(s)  => s.chars().count() as i64,
                         VmValue::Range { from, to } => (to - from).max(0),
                         other => return Err(VmError::TypeError {
@@ -1603,14 +1727,15 @@ impl Vm {
                 OpCode::MapKeys => {
                     let val = self.pop()?;
                     let mut keys = match val {
-                        VmValue::Map(m) => m.borrow().keys().cloned().collect::<Vec<_>>(),
+                        VmValue::Map(r) => self.get_map(r).keys().cloned().collect::<Vec<_>>(),
                         other => return Err(VmError::TypeError {
                             message: format!("map_keys() not supported for {}", other), line,
                         }),
                     };
                     keys.sort();
                     let list = keys.into_iter().map(VmValue::Str).collect();
-                    self.stack.push(VmValue::List(Rc::new(RefCell::new(list))));
+                    let v = self.alloc_list(list);
+                    self.stack.push(v);
                 }
 
                 OpCode::RangeFrom => {
@@ -1723,9 +1848,11 @@ impl Vm {
             line,
         })?;
         match recv {
-            VmValue::List(elems) => match name {
+            VmValue::List(r) => {
+                let r = *r;
+                match name {
                 "each" => {
-                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let items: Vec<VmValue> = self.get_list(r).clone();
                     for item in items {
                         match self.call_block(&blk, vec![item]) {
                             Err(VmError::Next(_)) => continue,
@@ -1737,7 +1864,7 @@ impl Vm {
                     Ok(recv.clone())
                 }
                 "map" => {
-                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let items: Vec<VmValue> = self.get_list(r).clone();
                     let mut out = Vec::with_capacity(items.len());
                     for item in items {
                         match self.call_block(&blk, vec![item]) {
@@ -1747,10 +1874,10 @@ impl Vm {
                             Ok(v) => out.push(v),
                         }
                     }
-                    Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                    Ok(self.alloc_list(out))
                 }
                 "select" | "filter" => {
-                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let items: Vec<VmValue> = self.get_list(r).clone();
                     let mut out = Vec::new();
                     for item in items {
                         match self.call_block(&blk, vec![item.clone()]) {
@@ -1760,10 +1887,10 @@ impl Vm {
                             Ok(_) => {}
                         }
                     }
-                    Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                    Ok(self.alloc_list(out))
                 }
                 "reject" => {
-                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let items: Vec<VmValue> = self.get_list(r).clone();
                     let mut out = Vec::new();
                     for item in items {
                         match self.call_block(&blk, vec![item.clone()]) {
@@ -1773,10 +1900,10 @@ impl Vm {
                             Ok(_) => {}
                         }
                     }
-                    Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                    Ok(self.alloc_list(out))
                 }
                 "any?" => {
-                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let items: Vec<VmValue> = self.get_list(r).clone();
                     for item in items {
                         match self.call_block(&blk, vec![item]) {
                             Err(VmError::Break(_)) => return Ok(VmValue::Bool(false)),
@@ -1788,7 +1915,7 @@ impl Vm {
                     Ok(VmValue::Bool(false))
                 }
                 "all?" => {
-                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let items: Vec<VmValue> = self.get_list(r).clone();
                     for item in items {
                         match self.call_block(&blk, vec![item]) {
                             Err(VmError::Break(_)) => return Ok(VmValue::Bool(true)),
@@ -1800,7 +1927,7 @@ impl Vm {
                     Ok(VmValue::Bool(true))
                 }
                 "none?" => {
-                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let items: Vec<VmValue> = self.get_list(r).clone();
                     for item in items {
                         match self.call_block(&blk, vec![item]) {
                             Err(VmError::Break(_)) => return Ok(VmValue::Bool(true)),
@@ -1812,7 +1939,7 @@ impl Vm {
                     Ok(VmValue::Bool(true))
                 }
                 "reduce" | "inject" => {
-                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let items: Vec<VmValue> = self.get_list(r).clone();
                     let mut acc = if args.is_empty() {
                         items.first().cloned().unwrap_or(VmValue::Nil)
                     } else {
@@ -1825,7 +1952,7 @@ impl Vm {
                     Ok(acc)
                 }
                 "each_with_index" => {
-                    let items: Vec<VmValue> = elems.borrow().clone();
+                    let items: Vec<VmValue> = self.get_list(r).clone();
                     for (i, item) in items.into_iter().enumerate() {
                         match self.call_block(&blk, vec![item, VmValue::Int(i as i64)]) {
                             Err(VmError::Break(v)) => return Ok(v),
@@ -1838,7 +1965,7 @@ impl Vm {
                 _ => Err(VmError::TypeError {
                     message: format!("List has no block method '{}'", name), line,
                 }),
-            },
+            }},
 
             VmValue::Range { from, to } => {
                 let (from, to) = (*from, *to);
@@ -1861,7 +1988,7 @@ impl Vm {
                         for i in from..to {
                             out.push(self.call_block(&blk, vec![VmValue::Int(i)])?);
                         }
-                        Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                        Ok(self.alloc_list(out))
                     }
                     _ => Err(VmError::TypeError {
                         message: format!("Range has no block method '{}'", name), line,
@@ -1902,9 +2029,11 @@ impl Vm {
                 }),
             },
 
-            VmValue::Map(map) => match name {
+            VmValue::Map(r) => {
+                let r = *r;
+                match name {
                 "each" => {
-                    let pairs: Vec<(String, VmValue)> = map.borrow().iter()
+                    let pairs: Vec<(String, VmValue)> = self.get_map(r).iter()
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect();
                     for (k, v) in pairs {
@@ -1917,19 +2046,19 @@ impl Vm {
                     Ok(recv.clone())
                 }
                 "map" => {
-                    let pairs: Vec<(String, VmValue)> = map.borrow().iter()
+                    let pairs: Vec<(String, VmValue)> = self.get_map(r).iter()
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect();
                     let mut out = Vec::with_capacity(pairs.len());
                     for (k, v) in pairs {
                         out.push(self.call_block(&blk, vec![VmValue::Str(k), v])?);
                     }
-                    Ok(VmValue::List(Rc::new(RefCell::new(out))))
+                    Ok(self.alloc_list(out))
                 }
                 _ => Err(VmError::TypeError {
                     message: format!("Map has no block method '{}'", name), line,
                 }),
-            },
+            }},
 
             other => Err(VmError::TypeError {
                 message: format!("'{}' does not support block method '{}'", other, name),
@@ -2041,14 +2170,15 @@ impl Vm {
         let entry = self.classes.get(class_name)
             .ok_or_else(|| format!("class '{}' not found", class_name))?;
 
-        let fields: HashMap<String, VmValue> = entry.fields
+        let fields_map: HashMap<String, VmValue> = entry.fields
             .iter()
             .map(|(name, val)| (name.clone(), val.clone()))
             .collect();
         let methods = entry.methods.clone();
+        let fields = self.alloc_fields(fields_map);
         let instance = VmValue::Instance {
             class_name: class_name.to_string(),
-            fields: Rc::new(RefCell::new(fields)),
+            fields,
             methods: methods.clone(),
         };
 
@@ -2071,6 +2201,7 @@ impl Vm {
 
 /// Dispatch a native (non-block) method call on a built-in type.
 fn dispatch_native_method(
+    heap: &mut GcHeap<HeapObject>,
     recv: &VmValue,
     name: &str,
     args: &[VmValue],
@@ -2080,12 +2211,12 @@ fn dispatch_native_method(
         VmValue::Int(n) => dispatch_int_method(*n, name, args, line),
         VmValue::Float(n) => dispatch_float_method(*n, name, args, line),
 
-        VmValue::Str(s) => dispatch_str_method(s, name, args, line),
+        VmValue::Str(s) => dispatch_str_method(heap, s, name, args, line),
         VmValue::Bool(b) => dispatch_bool_method(*b, name, args, line),
         VmValue::Nil => dispatch_nil_method(name, args, line),
-        VmValue::List(elems) => dispatch_list_method(elems, recv, name, args, line),
-        VmValue::Map(map) => dispatch_map_method(map, recv, name, args, line),
-        VmValue::Range { from, to } => dispatch_range_method(*from, *to, recv, name, args, line),
+        VmValue::List(r) => dispatch_list_method(heap, *r, recv, name, args, line),
+        VmValue::Map(r) => dispatch_map_method(heap, *r, recv, name, args, line),
+        VmValue::Range { from, to } => dispatch_range_method(heap, *from, *to, recv, name, args, line),
         other => Err(VmError::TypeError {
             message: format!("'{}' has no method '{}'", other, name),
             line,
@@ -2122,7 +2253,7 @@ fn dispatch_float_method(n: f64, name: &str, args: &[VmValue], line: u32) -> Res
     }
 }
 
-fn dispatch_str_method(s: &str, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
+fn dispatch_str_method(heap: &mut GcHeap<HeapObject>, s: &str, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
     let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
     match name {
             "size" | "length" if args.is_empty() => Ok(VmValue::Int(s.chars().count() as i64)),
@@ -2137,15 +2268,15 @@ fn dispatch_str_method(s: &str, name: &str, args: &[VmValue], line: u32) -> Resu
             "empty?"   if args.is_empty() => Ok(VmValue::Bool(s.is_empty())),
             "chars"    if args.is_empty() => {
                 let chars: Vec<VmValue> = s.chars().map(|c| VmValue::Str(c.to_string())).collect();
-                Ok(VmValue::List(Rc::new(RefCell::new(chars))))
+                Ok(VmValue::List(heap.alloc(HeapObject::List(chars))))
             }
             "bytes"    if args.is_empty() => {
                 let bytes: Vec<VmValue> = s.bytes().map(|b| VmValue::Int(b as i64)).collect();
-                Ok(VmValue::List(Rc::new(RefCell::new(bytes))))
+                Ok(VmValue::List(heap.alloc(HeapObject::List(bytes))))
             }
             "lines"    if args.is_empty() => {
                 let lines: Vec<VmValue> = s.lines().map(|l| VmValue::Str(l.to_string())).collect();
-                Ok(VmValue::List(Rc::new(RefCell::new(lines))))
+                Ok(VmValue::List(heap.alloc(HeapObject::List(lines))))
             }
             "include?" if args.len() == 1 => match &args[0] {
                 VmValue::Str(pat) => Ok(VmValue::Bool(s.contains(pat.as_str()))),
@@ -2162,11 +2293,11 @@ fn dispatch_str_method(s: &str, name: &str, args: &[VmValue], line: u32) -> Resu
             "split" => match args {
                 [] => {
                     let parts: Vec<VmValue> = s.split_whitespace().map(|p| VmValue::Str(p.to_string())).collect();
-                    Ok(VmValue::List(Rc::new(RefCell::new(parts))))
+                    Ok(VmValue::List(heap.alloc(HeapObject::List(parts))))
                 }
                 [VmValue::Str(sep)] => {
                     let parts: Vec<VmValue> = s.split(sep.as_str()).map(|p| VmValue::Str(p.to_string())).collect();
-                    Ok(VmValue::List(Rc::new(RefCell::new(parts))))
+                    Ok(VmValue::List(heap.alloc(HeapObject::List(parts))))
                 }
                 _ => Err(type_err("split expects a String delimiter")),
             },
@@ -2213,7 +2344,8 @@ fn dispatch_nil_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValu
 }
 
 fn dispatch_list_method(
-    elems: &Rc<RefCell<Vec<VmValue>>>,
+    heap: &mut GcHeap<HeapObject>,
+    r: GcRef,
     recv: &VmValue,
     name: &str,
     args: &[VmValue],
@@ -2221,32 +2353,33 @@ fn dispatch_list_method(
 ) -> Result<VmValue, VmError> {
     let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
     match name {
-            "size" | "length" if args.is_empty() => Ok(VmValue::Int(elems.borrow().len() as i64)),
-            "empty?"   if args.is_empty() => Ok(VmValue::Bool(elems.borrow().is_empty())),
-            "first"    if args.is_empty() => Ok(elems.borrow().first().cloned().unwrap_or(VmValue::Nil)),
-            "last"     if args.is_empty() => Ok(elems.borrow().last().cloned().unwrap_or(VmValue::Nil)),
-            "pop"      if args.is_empty() => Ok(elems.borrow_mut().pop().unwrap_or(VmValue::Nil)),
+            "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_list(r).len() as i64)),
+            "empty?"   if args.is_empty() => Ok(VmValue::Bool(heap.get_list(r).is_empty())),
+            "first"    if args.is_empty() => Ok(heap.get_list(r).first().cloned().unwrap_or(VmValue::Nil)),
+            "last"     if args.is_empty() => Ok(heap.get_list(r).last().cloned().unwrap_or(VmValue::Nil)),
+            "pop"      if args.is_empty() => Ok(heap.get_list_mut(r).pop().unwrap_or(VmValue::Nil)),
             "reverse"  if args.is_empty() => {
-                let v: Vec<VmValue> = elems.borrow().iter().cloned().rev().collect();
-                Ok(VmValue::List(Rc::new(RefCell::new(v))))
+                let v: Vec<VmValue> = heap.get_list(r).iter().cloned().rev().collect();
+                Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
             }
             "sort"     if args.is_empty() => {
-                let mut v: Vec<VmValue> = elems.borrow().clone();
+                let mut v: Vec<VmValue> = heap.get_list(r).clone();
                 v.sort_by(vm_value_partial_cmp);
-                Ok(VmValue::List(Rc::new(RefCell::new(v))))
+                Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
             }
-            "include?" if args.len() == 1 => Ok(VmValue::Bool(elems.borrow().contains(&args[0]))),
+            "include?" if args.len() == 1 => Ok(VmValue::Bool(heap.get_list(r).contains(&args[0]))),
             "push" | "append" if args.len() == 1 => {
-                elems.borrow_mut().push(args[0].clone());
+                heap.get_list_mut(r).push(args[0].clone());
                 Ok(recv.clone())
             }
             "unshift" | "prepend" if args.len() == 1 => {
-                elems.borrow_mut().insert(0, args[0].clone());
+                heap.get_list_mut(r).insert(0, args[0].clone());
                 Ok(recv.clone())
             }
             "concat" if args.len() == 1 => match &args[0] {
-                VmValue::List(other) => {
-                    elems.borrow_mut().extend(other.borrow().iter().cloned());
+                VmValue::List(other_r) => {
+                    let other_items: Vec<VmValue> = heap.get_list(*other_r).clone();
+                    heap.get_list_mut(r).extend(other_items);
                     Ok(recv.clone())
                 }
                 _ => Err(type_err("concat expects a List")),
@@ -2257,42 +2390,47 @@ fn dispatch_list_method(
                     None => String::new(),
                     _ => return Err(type_err("join expects a String")),
                 };
-                let s = elems.borrow().iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(&sep);
+                let s = heap.get_list(r).iter()
+                    .map(|v| format_value_with_heap(heap, v))
+                    .collect::<Vec<_>>()
+                    .join(&sep);
                 Ok(VmValue::Str(s))
             }
             "flatten" if args.is_empty() => {
-                fn flatten_list(v: &VmValue) -> Vec<VmValue> {
+                fn flatten_list(heap: &GcHeap<HeapObject>, v: &VmValue) -> Vec<VmValue> {
                     match v {
-                        VmValue::List(inner) => inner.borrow().iter().flat_map(flatten_list).collect(),
+                        VmValue::List(inner) => heap.get_list(*inner).iter()
+                            .flat_map(|el| flatten_list(heap, el)).collect(),
                         other => vec![other.clone()],
                     }
                 }
-                let v = elems.borrow().iter().flat_map(flatten_list).collect();
-                Ok(VmValue::List(Rc::new(RefCell::new(v))))
+                let v: Vec<VmValue> = heap.get_list(r).iter()
+                    .flat_map(|el| flatten_list(heap, el)).collect();
+                Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
             }
             "uniq" if args.is_empty() => {
                 let mut seen = Vec::new();
-                for item in elems.borrow().iter() {
+                for item in heap.get_list(r).iter() {
                     if !seen.contains(item) { seen.push(item.clone()); }
                 }
-                Ok(VmValue::List(Rc::new(RefCell::new(seen))))
+                Ok(VmValue::List(heap.alloc(HeapObject::List(seen))))
             }
             "min" if args.is_empty() => {
-                let v = elems.borrow();
+                let v = heap.get_list(r);
                 if v.is_empty() { return Ok(VmValue::Nil); }
                 let m = v.iter().min_by(|a, b| vm_value_partial_cmp(a, b)).cloned().unwrap();
                 Ok(m)
             }
             "max" if args.is_empty() => {
-                let v = elems.borrow();
+                let v = heap.get_list(r);
                 if v.is_empty() { return Ok(VmValue::Nil); }
                 let m = v.iter().max_by(|a, b| vm_value_partial_cmp(a, b)).cloned().unwrap();
                 Ok(m)
             }
             "sum" if args.is_empty() => {
-                let v = elems.borrow();
+                let items: Vec<VmValue> = heap.get_list(r).clone();
                 let mut acc = VmValue::Int(0);
-                for item in v.iter() {
+                for item in items.iter() {
                     acc = match (&acc, item) {
                         (VmValue::Int(a), VmValue::Int(b)) => VmValue::Int(a + b),
                         (VmValue::Float(a), VmValue::Float(b)) => VmValue::Float(a + b),
@@ -2305,13 +2443,14 @@ fn dispatch_list_method(
             }
             "any?" if args.is_empty() => Err(type_err("any? requires a block")),
             "all?" if args.is_empty() => Err(type_err("all? requires a block")),
-            "to_s" if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
+            "to_s" if args.is_empty() => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
         _ => Err(type_err(&format!("List has no method '{}'", name))),
     }
 }
 
 fn dispatch_map_method(
-    map: &Rc<RefCell<HashMap<String, VmValue>>>,
+    heap: &mut GcHeap<HeapObject>,
+    r: GcRef,
     recv: &VmValue,
     name: &str,
     args: &[VmValue],
@@ -2319,54 +2458,56 @@ fn dispatch_map_method(
 ) -> Result<VmValue, VmError> {
     let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
     match name {
-            "size" | "length" if args.is_empty() => Ok(VmValue::Int(map.borrow().len() as i64)),
-            "empty?"   if args.is_empty() => Ok(VmValue::Bool(map.borrow().is_empty())),
+            "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_map(r).len() as i64)),
+            "empty?"   if args.is_empty() => Ok(VmValue::Bool(heap.get_map(r).is_empty())),
             "keys"     if args.is_empty() => {
-                let mut keys: Vec<VmValue> = map.borrow().keys().map(|k| VmValue::Str(k.clone())).collect();
+                let mut keys: Vec<VmValue> = heap.get_map(r).keys().map(|k| VmValue::Str(k.clone())).collect();
                 keys.sort_by(vm_value_partial_cmp);
-                Ok(VmValue::List(Rc::new(RefCell::new(keys))))
+                Ok(VmValue::List(heap.alloc(HeapObject::List(keys))))
             }
             "values"   if args.is_empty() => {
-                let mut pairs: Vec<(String, VmValue)> = map.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                let mut pairs: Vec<(String, VmValue)> = heap.get_map(r).iter().map(|(k, v)| (k.clone(), v.clone())).collect();
                 pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
                 let vals: Vec<VmValue> = pairs.into_iter().map(|(_, v)| v).collect();
-                Ok(VmValue::List(Rc::new(RefCell::new(vals))))
+                Ok(VmValue::List(heap.alloc(HeapObject::List(vals))))
             }
             "has_key?" if args.len() == 1 => match &args[0] {
-                VmValue::Str(k) => Ok(VmValue::Bool(map.borrow().contains_key(k.as_str()))),
+                VmValue::Str(k) => Ok(VmValue::Bool(heap.get_map(r).contains_key(k.as_str()))),
                 _ => Err(type_err("has_key? expects a String")),
             },
             "get" if args.len() == 1 => match &args[0] {
-                VmValue::Str(k) => Ok(map.borrow().get(k.as_str()).cloned().unwrap_or(VmValue::Nil)),
+                VmValue::Str(k) => Ok(heap.get_map(r).get(k.as_str()).cloned().unwrap_or(VmValue::Nil)),
                 _ => Err(type_err("get expects a String key")),
             },
             "set" if args.len() == 2 => match &args[0] {
                 VmValue::Str(k) => {
-                    map.borrow_mut().insert(k.clone(), args[1].clone());
+                    let (k, v) = (k.clone(), args[1].clone());
+                    heap.get_map_mut(r).insert(k, v);
                     Ok(args[1].clone())
                 }
                 _ => Err(type_err("set expects a String key")),
             },
             "delete" if args.len() == 1 => match &args[0] {
-                VmValue::Str(k) => Ok(map.borrow_mut().remove(k.as_str()).unwrap_or(VmValue::Nil)),
+                VmValue::Str(k) => Ok(heap.get_map_mut(r).remove(k.as_str()).unwrap_or(VmValue::Nil)),
                 _ => Err(type_err("delete expects a String key")),
             },
             "merge" if args.len() == 1 => match &args[0] {
-                VmValue::Map(other) => {
-                    let mut new_map = map.borrow().clone();
-                    for (k, v) in other.borrow().iter() {
+                VmValue::Map(other_r) => {
+                    let mut new_map = heap.get_map(r).clone();
+                    for (k, v) in heap.get_map(*other_r).iter() {
                         new_map.insert(k.clone(), v.clone());
                     }
-                    Ok(VmValue::Map(Rc::new(RefCell::new(new_map))))
+                    Ok(VmValue::Map(heap.alloc(HeapObject::Map(new_map))))
                 }
                 _ => Err(type_err("merge expects a Map")),
             },
-            "to_s" if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
+            "to_s" if args.is_empty() => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
         _ => Err(type_err(&format!("Map has no method '{}'", name))),
     }
 }
 
 fn dispatch_range_method(
+    heap: &mut GcHeap<HeapObject>,
     from: i64,
     to: i64,
     recv: &VmValue,
@@ -2379,7 +2520,7 @@ fn dispatch_range_method(
             "size" | "length" if args.is_empty() => Ok(VmValue::Int((to - from).max(0))),
             "to_a" if args.is_empty() => {
                 let v: Vec<VmValue> = (from..to).map(VmValue::Int).collect();
-                Ok(VmValue::List(Rc::new(RefCell::new(v))))
+                Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
             }
             "include?" if args.len() == 1 => match &args[0] {
                 VmValue::Int(n) => Ok(VmValue::Bool(n >= &from && n < &to)),
@@ -2398,12 +2539,13 @@ fn dispatch_range_method(
 /// exists for this method, allowing callers to try the class registry next.
 /// Any real type error (wrong arg count, wrong type, etc.) is still `Some(Err)`.
 fn try_native_method(
+    heap: &mut GcHeap<HeapObject>,
     recv: &VmValue,
     name: &str,
     args: &[VmValue],
     line: u32,
 ) -> Option<Result<VmValue, VmError>> {
-    match dispatch_native_method(recv, name, args, line) {
+    match dispatch_native_method(heap, recv, name, args, line) {
         Err(VmError::TypeError { ref message, .. }) if message.contains("has no method") => None,
         result => Some(result),
     }
