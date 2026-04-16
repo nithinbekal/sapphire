@@ -1,5 +1,5 @@
-use sapphire::{compiler, lexer, parser, typechecker, vm};
-use std::io::{self, Write};
+use sapphire::{compiler, lexer, parser, token::TokenKind, typechecker, vm};
+use rustyline::{DefaultEditor, error::ReadlineError};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -181,6 +181,22 @@ fn run_tests(path: &str) {
     }
 }
 
+fn is_input_complete(source: &str) -> bool {
+    let tokens = lexer::Lexer::new(source).scan_tokens();
+    let mut depth: i32 = 0;
+    let mut begin_depth: i32 = 0;
+    for token in &tokens {
+        match &token.kind {
+            TokenKind::LeftBrace | TokenKind::LeftParen | TokenKind::LeftBracket => depth += 1,
+            TokenKind::RightBrace | TokenKind::RightParen | TokenKind::RightBracket => depth -= 1,
+            TokenKind::Begin => begin_depth += 1,
+            TokenKind::End => begin_depth -= 1,
+            _ => {}
+        }
+    }
+    depth <= 0 && begin_depth <= 0
+}
+
 fn run_repl() {
     println!("Sapphire {} — Ctrl+D to quit", env!("CARGO_PKG_VERSION"));
 
@@ -190,22 +206,33 @@ fn run_repl() {
         std::process::exit(1);
     }
 
+    let mut rl = DefaultEditor::new().expect("failed to create editor");
+
     loop {
-        print!("> ");
-        io::stdout().flush().unwrap();
+        let first_line = match rl.readline("> ") {
+            Ok(line) => line,
+            Err(ReadlineError::Interrupted) => continue,
+            Err(ReadlineError::Eof) => { println!(); break; }
+            Err(e) => { eprintln!("error: {}", e); break; }
+        };
 
-        let mut line = String::new();
-        match io::stdin().read_line(&mut line) {
-            Ok(0) | Err(_) => { println!(); break; }
-            _ => {}
-        }
-
-        let source = line.trim();
-        if source.is_empty() {
+        if first_line.trim().is_empty() {
             continue;
         }
 
-        let tokens = lexer::Lexer::new(source).scan_tokens();
+        let mut source = first_line;
+
+        while !is_input_complete(&source) {
+            match rl.readline(".. ") {
+                Ok(line) => { source.push('\n'); source.push_str(&line); }
+                Err(_) => break,
+            }
+        }
+
+        rl.add_history_entry(&source).ok();
+
+        let trimmed = source.trim();
+        let tokens = lexer::Lexer::new(trimmed).scan_tokens();
         let exprs = match parser::Parser::new(tokens).parse() {
             Err(e) => { eprintln!("{}", e); continue; }
             Ok(e) => e,

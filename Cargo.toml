@@ -4,6 +4,7 @@ version = "0.3.0"
 edition = "2024"
 
 [dependencies]
+rustyline = "14"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
