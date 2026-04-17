@@ -2236,7 +2236,7 @@ fn dispatch_list_method(
             }
             "sort"     if args.is_empty() => {
                 let mut v: Vec<VmValue> = elems.borrow().clone();
-                v.sort_by(|a, b| vm_value_partial_cmp(a, b));
+                v.sort_by(vm_value_partial_cmp);
                 Ok(VmValue::List(Rc::new(RefCell::new(v))))
             }
             "include?" if args.len() == 1 => Ok(VmValue::Bool(elems.borrow().contains(&args[0]))),
@@ -2327,7 +2327,7 @@ fn dispatch_map_method(
             "empty?"   if args.is_empty() => Ok(VmValue::Bool(map.borrow().is_empty())),
             "keys"     if args.is_empty() => {
                 let mut keys: Vec<VmValue> = map.borrow().keys().map(|k| VmValue::Str(k.clone())).collect();
-                keys.sort_by(|a, b| vm_value_partial_cmp(a, b));
+                keys.sort_by(vm_value_partial_cmp);
                 Ok(VmValue::List(Rc::new(RefCell::new(keys))))
             }
             "values"   if args.is_empty() => {
