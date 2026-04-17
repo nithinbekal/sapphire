@@ -197,6 +197,10 @@ pub enum OpCode {
     // Stack manipulation
     Pop,
     Return,
+    /// Explicit `return` statement inside a block called by a native method.
+    /// Behaves like `Return` in normal frames; raises `VmError::Return` in
+    /// `is_native_block` frames so the dispatcher can perform a non-local return.
+    NonLocalReturn,
 
     // Literals
     True,

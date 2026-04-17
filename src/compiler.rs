@@ -240,7 +240,7 @@ impl Compiler {
         match stmt {
             Expr::Return(expr) => {
                 self.expr(expr)?;
-                self.emit(OpCode::Return);
+                self.emit(OpCode::NonLocalReturn);
             }
 
             Expr::While { condition, body } => {
