@@ -232,6 +232,8 @@ struct ClassEntry {
     methods:       Rc<HashMap<String, VmMethod>>,
     /// Merged (inherited + own) class methods.
     class_methods: Rc<HashMap<String, VmMethod>>,
+    /// Constants defined in the class body (e.g. `PI = 3.14`).
+    namespace:     Rc<HashMap<String, VmValue>>,
 }
 
 pub struct Vm {
@@ -353,7 +355,7 @@ impl Vm {
                 fields:        entry.fields.clone(),
                 methods:       entry.methods.clone(),
                 class_methods: entry.class_methods.clone(),
-                namespace:     Rc::new(HashMap::new()),
+                namespace:     entry.namespace.clone(),
             };
             self.globals.insert(cname, val);
         }
@@ -699,11 +701,13 @@ impl Vm {
                     };
                     let merged_rc         = Rc::new(merged_methods);
                     let merged_class_rc   = Rc::new(merged_class_methods);
+                    let namespace_rc = Rc::new(namespace);
                     self.classes.insert(class_name.clone(), ClassEntry {
                         superclass:    effective_super.clone(),
                         fields:        merged_fields.clone(),
                         methods:       merged_rc.clone(),
                         class_methods: merged_class_rc.clone(),
+                        namespace:     namespace_rc.clone(),
                     });
                     self.stack.push(VmValue::Class {
                         name:          class_name,
@@ -711,7 +715,7 @@ impl Vm {
                         fields:        merged_fields,
                         methods:       merged_rc,
                         class_methods: merged_class_rc,
-                        namespace:     Rc::new(namespace),
+                        namespace:     namespace_rc,
                     });
                 }
 
