@@ -38,7 +38,6 @@ class Map {
   #   { a: 1, b: 2 }.none? { |k, v| v > 1 }   # false
   #
   def none?() {
-    result = each { |k, v| break true if yield(k, v) }
-    result != true
+    !any? { |k, v| yield(k, v) }
   }
 }
