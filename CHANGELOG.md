@@ -1,5 +1,63 @@
 # Changelog
 
+## v0.4.0
+
+**Language**
+
+- Class-level constants — define named constants directly inside a class body:
+
+```ruby
+class Circle {
+  PI = 3.14159
+
+  def area(r) { PI * r * r }
+}
+```
+
+- Bitwise operators — `&`, `|`, `^`, `~`, `<<`, `>>` are now supported on integers
+- Numeric literal improvements — underscore separators and hexadecimal literals are now valid:
+
+```ruby
+population = 8_000_000_000
+color      = 0xFF5733
+```
+
+- Parentheses are optional for zero-argument method definitions and calls:
+
+```ruby
+def greet { "hello" }   # same as def greet() { "hello" }
+
+greet                    # same as greet()
+"hello".upcase           # same as "hello".upcase()
+```
+
+**Standard library**
+
+- `Math` class with `Math.PI` and `Math.E` constants
+- `File` class — `File.read(path)`, `File.write(path, content)`, and `File.exist?(path)` for basic file I/O
+
+**CLI**
+
+- `sapphire test` — built-in test runner for `.spr` test files
+
+**Editor support**
+
+- Vim plugin — syntax highlighting for `.spr` files is available at [sapphire-project/vim-sapphire](https://github.com/sapphire-project/vim-sapphire)
+
+**REPL**
+
+- Command history and multiline input support in `sapphire console`
+
+**VM**
+
+- Mark-and-sweep garbage collector to break reference cycles in object graphs
+
+**Bug fixes**
+
+- Class namespace constants defined inside nested classes are now correctly preserved when loading the standard library
+
+---
+
 ## v0.3.0
 
 **Language**
