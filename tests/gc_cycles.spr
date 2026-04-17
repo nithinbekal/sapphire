@@ -1,0 +1,15 @@
+class Node {
+  attr value
+  attr next_node
+  def init(v) { self.value = v; self.next_node = nil }
+}
+
+a = Node.new(value: 1)
+b = Node.new(value: 2)
+a.next_node = b
+b.next_node = a
+
+a = nil
+b = nil
+
+print "ok"
