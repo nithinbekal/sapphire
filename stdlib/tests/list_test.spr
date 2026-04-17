@@ -1,0 +1,98 @@
+class ListTest < Test {
+  def test_map_transforms_elements {
+    result = [1, 2, 3].map { |x| x * 2 }
+    self.assert_equal(3, result.length)
+    self.assert_equal(2, result[0])
+    self.assert_equal(4, result[1])
+    self.assert_equal(6, result[2])
+  }
+
+  def test_map_empty_list {
+    result = [].map { |x| x * 2 }
+    self.assert_equal(0, result.length)
+  }
+
+  def test_select_keeps_matching_elements {
+    result = [1, 2, 3, 4].select { |x| x > 2 }
+    self.assert_equal(2, result.length)
+    self.assert_equal(3, result[0])
+    self.assert_equal(4, result[1])
+  }
+
+  def test_select_empty_when_none_match {
+    result = [1, 2, 3].select { |x| x > 9 }
+    self.assert_equal(0, result.length)
+  }
+
+  def test_select_all_when_all_match {
+    result = [1, 2, 3].select { |x| x > 0 }
+    self.assert_equal(3, result.length)
+  }
+
+  def test_any_true_when_one_matches {
+    self.assert([1, 2, 3].any? { |x| x > 2 })
+  }
+
+  def test_any_false_when_none_match {
+    self.assert(![1, 2, 3].any? { |x| x > 9 })
+  }
+
+  def test_any_false_for_empty_list {
+    self.assert(![].any? { |x| x > 0 })
+  }
+
+  def test_all_true_when_all_match {
+    self.assert([1, 2, 3].all? { |x| x > 0 })
+  }
+
+  def test_all_false_when_one_fails {
+    self.assert(![1, 2, 3].all? { |x| x > 2 })
+  }
+
+  def test_all_true_for_empty_list {
+    self.assert([].all? { |x| x > 0 })
+  }
+
+  def test_none_true_when_none_match {
+    self.assert([1, 2, 3].none? { |x| x > 9 })
+  }
+
+  def test_none_false_when_one_matches {
+    self.assert(![1, 2, 3].none? { |x| x > 2 })
+  }
+
+  def test_none_true_for_empty_list {
+    self.assert([].none? { |x| x > 0 })
+  }
+
+  def test_each_with_index_yields_indices {
+    indices = []
+    ["a", "b", "c"].each_with_index { |item, i| indices.push(i) }
+    self.assert_equal(0, indices[0])
+    self.assert_equal(1, indices[1])
+    self.assert_equal(2, indices[2])
+  }
+
+  def test_each_with_index_yields_elements {
+    items = []
+    ["a", "b", "c"].each_with_index { |item, i| items.push(item) }
+    self.assert_equal("a", items[0])
+    self.assert_equal("b", items[1])
+    self.assert_equal("c", items[2])
+  }
+
+  def test_zip_creates_pairs {
+    result = [1, 2, 3].zip([4, 5, 6])
+    self.assert_equal(3, result.length)
+    self.assert_equal(1, result[0][0])
+    self.assert_equal(4, result[0][1])
+  }
+
+  def test_zip_all_pairs_correct {
+    result = [1, 2, 3].zip([4, 5, 6])
+    self.assert_equal(2, result[1][0])
+    self.assert_equal(5, result[1][1])
+    self.assert_equal(3, result[2][0])
+    self.assert_equal(6, result[2][1])
+  }
+}
