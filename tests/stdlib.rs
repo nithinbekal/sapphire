@@ -38,3 +38,6 @@ mod num;
 
 #[path = "stdlib/object.rs"]
 mod object;
+
+#[path = "stdlib/math.rs"]
+mod math;
