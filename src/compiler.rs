@@ -810,13 +810,12 @@ impl Compiler {
         let depth = self.states.len() - 1;
         for stmt in body {
             match stmt {
-                Expr::Assign { name, .. } => {
+                Expr::Assign { name, .. }
                     if self.resolve_local(depth, name).is_none()
-                        && !self.would_be_upvalue(depth, name)
-                    {
-                        self.emit(OpCode::Nil);
-                        self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
-                    }
+                        && !self.would_be_upvalue(depth, name) =>
+                {
+                    self.emit(OpCode::Nil);
+                    self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
                 }
                 Expr::MultiAssign { names, .. } => {
                     for name in names {
@@ -887,7 +886,7 @@ impl Compiler {
 
         // Check BEFORE compiling body: is_new_local_assign checks whether the name is already
         // registered — after body compilation it would be, giving a false negative.
-        let body_creates_new_local_result = body.last().map_or(false, |e| self.is_new_local_assign(e));
+        let body_creates_new_local_result = body.last().is_some_and(|e| self.is_new_local_assign(e));
 
         let begin_idx = self.emit_begin_rescue(rescue_var_slot);
 
@@ -970,6 +969,7 @@ impl Compiler {
     /// `bind` — when `true` (normal top-level class), store the result in a
     /// named local/global slot.  When `false` (nested class), leave the value
     /// on the stack for the enclosing `DefClass` to pick up.
+    #[allow(clippy::too_many_arguments)]
     fn compile_class(
         &mut self,
         name:       &str,

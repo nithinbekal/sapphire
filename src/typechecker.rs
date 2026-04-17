@@ -93,14 +93,13 @@ impl TypeChecker {
     fn check_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Return(inner) => {
-                if let Some(rt) = self.current_return_type.clone() {
-                    if let Some(actual) = self.infer_type(inner) {
-                        if !types_compatible(&actual, &rt) {
-                            self.errors.push(TypeCheckError {
-                                message: format!("return value expected {}, got {}", te_name(&rt), te_name(&actual)),
-                            });
-                        }
-                    }
+                if let Some(rt) = self.current_return_type.clone()
+                    && let Some(actual) = self.infer_type(inner)
+                    && !types_compatible(&actual, &rt)
+                {
+                    self.errors.push(TypeCheckError {
+                        message: format!("return value expected {}, got {}", te_name(&rt), te_name(&actual)),
+                    });
                 }
                 self.check_expr(inner);
             }
@@ -126,16 +125,13 @@ impl TypeChecker {
             Expr::Call { callee, args, .. } => self.check_call(callee, args),
             Expr::Assign { name, value } => {
                 let ty = self.infer_type(value).or_else(|| {
-                    if let Expr::Call { callee, .. } = value.as_ref() {
-                        if let Expr::Get { object, name: m } = callee.as_ref() {
-                            if m == "new" {
-                                if let Expr::Variable(cn) = object.as_ref() {
-                                    if self.classes.contains_key(cn) {
-                                        return Some(TypeExpr::Named(cn.clone()));
-                                    }
-                                }
-                            }
-                        }
+                    if let Expr::Call { callee, .. } = value.as_ref()
+                        && let Expr::Get { object, name: m } = callee.as_ref()
+                        && m == "new"
+                        && let Expr::Variable(cn) = object.as_ref()
+                        && self.classes.contains_key(cn)
+                    {
+                        return Some(TypeExpr::Named(cn.clone()));
                     }
                     None
                 });
@@ -147,20 +143,16 @@ impl TypeChecker {
             Expr::Get { object, .. } | Expr::SafeGet { object, .. } => self.check_expr(object),
             Expr::Set { object, value, name } => {
                 // If we can determine the receiver's class, check the field type.
-                if let Some(TypeExpr::Named(class_name)) = self.infer_type(object) {
-                    if let Some(cls) = self.classes.get(&class_name).cloned() {
-                        if let Some(fd) = cls.fields.iter().find(|f| &f.name == name) {
-                            if let Some(te) = &fd.type_ann {
-                                if let Some(actual) = self.infer_type(value) {
-                                    if !types_compatible(&actual, te) {
-                                        self.errors.push(TypeCheckError {
-                                            message: format!("field '{}' expected {}, got {}", name, te_name(te), te_name(&actual)),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
+                if let Some(TypeExpr::Named(class_name)) = self.infer_type(object)
+                    && let Some(cls) = self.classes.get(&class_name).cloned()
+                    && let Some(fd) = cls.fields.iter().find(|f| &f.name == name)
+                    && let Some(te) = &fd.type_ann
+                    && let Some(actual) = self.infer_type(value)
+                    && !types_compatible(&actual, te)
+                {
+                    self.errors.push(TypeCheckError {
+                        message: format!("field '{}' expected {}, got {}", name, te_name(te), te_name(&actual)),
+                    });
                 }
                 self.check_expr(object);
                 self.check_expr(value);
@@ -200,21 +192,23 @@ impl TypeChecker {
                     let saved = self.current_return_type.take();
                     self.current_return_type = method.return_type.clone();
                     self.push_scope();
+
                     for p in &method.params {
                         if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
                     }
+
                     for s in &method.body { self.check_expr(s); }
-                    if let Some(rt) = &method.return_type.clone() {
-                        if let Some(last_expr) = method.body.last() {
-                            if let Some(actual) = self.infer_type(last_expr) {
-                                if !types_compatible(&actual, rt) {
-                                    self.errors.push(TypeCheckError {
-                                        message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
-                                    });
-                                }
-                            }
-                        }
+
+                    if let Some(rt) = &method.return_type.clone()
+                        && let Some(last_expr) = method.body.last()
+                        && let Some(actual) = self.infer_type(last_expr)
+                        && !types_compatible(&actual, rt) 
+                    {
+                        self.errors.push(TypeCheckError {
+                            message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
+                        });
                     }
+
                     self.pop_scope();
                     self.current_return_type = saved;
                 }
@@ -231,17 +225,16 @@ impl TypeChecker {
                     if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
                 }
                 for s in body { self.check_expr(s); }
-                if let Some(rt) = return_type {
-                    if let Some(last_expr) = body.last() {
-                        if let Some(actual) = self.infer_type(last_expr) {
-                            if !types_compatible(&actual, rt) {
-                                self.errors.push(TypeCheckError {
-                                    message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
-                                });
-                            }
-                        }
-                    }
+                if let Some(rt) = return_type
+                    && let Some(last_expr) = body.last()
+                    && let Some(actual) = self.infer_type(last_expr)
+                    && !types_compatible(&actual, rt)
+                {
+                    self.errors.push(TypeCheckError {
+                        message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
+                    });
                 }
+
                 self.pop_scope();
                 self.current_return_type = saved;
             }
@@ -261,31 +254,27 @@ impl TypeChecker {
             Expr::Get { object, name: method_name } => {
                 self.check_expr(object);
                 if method_name == "new" {
-                    if let Expr::Variable(class_name) = object.as_ref() {
-                        if let Some(cls) = self.classes.get(class_name).cloned() {
-                            for arg in args {
-                                if let Some(fname) = &arg.name {
-                                    if let Some(fd) = cls.fields.iter().find(|f| &f.name == fname) {
-                                        if let Some(te) = &fd.type_ann {
-                                            if let Some(actual) = self.infer_type(&arg.value) {
-                                                if !types_compatible(&actual, te) {
-                                                    self.errors.push(TypeCheckError {
-                                                        message: format!("field '{}' expected {}, got {}", fname, te_name(te), te_name(&actual)),
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                    if let Expr::Variable(class_name) = object.as_ref()
+                        && let Some(cls) = self.classes.get(class_name).cloned()
+                    {
+                        for arg in args {
+                            if let Some(fname) = &arg.name
+                                && let Some(fd) = cls.fields.iter().find(|f| &f.name == fname)
+                                && let Some(te) = &fd.type_ann
+                                && let Some(actual) = self.infer_type(&arg.value)
+                                && !types_compatible(&actual, te)
+                            {
+                                self.errors.push(TypeCheckError {
+                                    message: format!("field '{}' expected {}, got {}", fname, te_name(te), te_name(&actual)),
+                                });
                             }
                         }
                     }
-                } else if let Some(TypeExpr::Named(class_name)) = self.infer_type(object) {
-                    if let Some(cls) = self.classes.get(&class_name).cloned() {
-                        if let Some(sig) = cls.methods.get(method_name).cloned() {
-                            self.check_args(&sig.params, args, method_name);
-                        }
-                    }
+                } else if let Some(TypeExpr::Named(class_name)) = self.infer_type(object)
+                    && let Some(cls) = self.classes.get(&class_name).cloned()
+                    && let Some(sig) = cls.methods.get(method_name).cloned()
+                {
+                    self.check_args(&sig.params, args, method_name);
                 }
             }
             _ => self.check_expr(callee),
@@ -294,14 +283,13 @@ impl TypeChecker {
 
     fn check_args(&mut self, params: &[ParamDef], args: &[CallArg], fn_name: &str) {
         for (param, arg) in params.iter().zip(args.iter()) {
-            if let Some(te) = &param.type_ann {
-                if let Some(actual) = self.infer_type(&arg.value) {
-                    if !types_compatible(&actual, te) {
-                        self.errors.push(TypeCheckError {
-                            message: format!("argument '{}' to '{}' expected {}, got {}", param.name, fn_name, te_name(te), te_name(&actual)),
-                        });
-                    }
-                }
+            if let Some(te) = &param.type_ann
+                && let Some(actual) = self.infer_type(&arg.value)
+                && !types_compatible(&actual, te)
+            {
+                self.errors.push(TypeCheckError {
+                    message: format!("argument '{}' to '{}' expected {}, got {}", param.name, fn_name, te_name(te), te_name(&actual)),
+                });
             }
         }
     }
@@ -360,18 +348,19 @@ impl TypeChecker {
                     self.functions.get(name).and_then(|s| s.return_type.clone())
                 }
                 Expr::Get { object, name: method_name } => {
-                    if method_name == "new" {
-                        if let Expr::Variable(cn) = object.as_ref() {
-                            if self.classes.contains_key(cn) {
-                                return Some(TypeExpr::Named(cn.clone()));
-                            }
-                        }
+                    if method_name == "new"
+                        && let Expr::Variable(cn) = object.as_ref()
+                        && self.classes.contains_key(cn)
+                    {
+                        return Some(TypeExpr::Named(cn.clone()));
                     }
-                    if let Some(TypeExpr::Named(cn)) = self.infer_type(object) {
-                        if let Some(cls) = self.classes.get(&cn) {
-                            return cls.methods.get(method_name).and_then(|s| s.return_type.clone());
-                        }
+
+                    if let Some(TypeExpr::Named(cn)) = self.infer_type(object)
+                        && let Some(cls) = self.classes.get(&cn)
+                    {
+                        return cls.methods.get(method_name).and_then(|s| s.return_type.clone());
                     }
+
                     None
                 }
                 _ => None,

@@ -206,7 +206,7 @@ impl Parser {
                 }),
             }
         }
-        Ok(self.logical()?)
+        self.logical()
     }
 
     fn class_def(&mut self) -> Result<Expr, SapphireError> {
@@ -904,13 +904,12 @@ impl Parser {
             }
         }
         // bare identifier followed by a block: `each { |x| ... }` → implicit-self call
-        if self.allow_trailing_block {
-            if let Expr::Variable(_) = &expr {
-                if self.is_block_start() {
-                    let block = self.parse_block()?;
-                    expr = Expr::Call { callee: Box::new(expr), args: Vec::new(), block };
-                }
-            }
+        if self.allow_trailing_block
+            && let Expr::Variable(_) = &expr
+            && self.is_block_start()
+        {
+            let block = self.parse_block()?;
+            expr = Expr::Call { callee: Box::new(expr), args: Vec::new(), block };
         }
         Ok(expr)
     }
@@ -986,15 +985,15 @@ impl Parser {
 
     fn parse_arg(&mut self) -> Result<CallArg, SapphireError> {
         // Named arg: identifier ':' expr
-        if let TokenKind::Identifier(name) = self.peek().kind.clone() {
-            if self.current + 1 < self.tokens.len()
-                && self.tokens[self.current + 1].kind == TokenKind::Colon
-            {
-                self.advance(); // consume identifier
-                self.advance(); // consume ':'
-                return Ok(CallArg { name: Some(name), value: self.logical()? });
-            }
+        if let TokenKind::Identifier(name) = self.peek().kind.clone()
+            && self.current + 1 < self.tokens.len()
+            && self.tokens[self.current + 1].kind == TokenKind::Colon
+        {
+            self.advance(); // consume identifier
+            self.advance(); // consume ':'
+            return Ok(CallArg { name: Some(name), value: self.logical()? });
         }
+
         Ok(CallArg { name: None, value: self.logical()? })
     }
 

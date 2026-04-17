@@ -868,26 +868,24 @@ impl Vm {
                     }
 
                     // Lambda `.call(args)` — invoke the closure as a new frame.
-                    if method_name == "call" {
-                        if let VmValue::Closure { function, upvalues } = self.stack[recv_slot].clone() {
-                            if function.arity != arg_count {
-                                return Err(VmError::TypeError {
-                                    message: format!(
-                                        "lambda expects {} argument(s), got {}",
-                                        function.arity, arg_count
-                                    ),
-                                    line,
-                                });
-                            }
-                            self.frames.push(CallFrame {
-                                function,
-                                upvalues,
-                                ip: 0, base: recv_slot,
-                                block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
-                                class_name: None,
+                    if method_name == "call" && let VmValue::Closure { function, upvalues } = self.stack[recv_slot].clone() {
+                        if function.arity != arg_count {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "lambda expects {} argument(s), got {}",
+                                    function.arity, arg_count
+                                ),
+                                line,
                             });
-                            continue;
                         }
+                        self.frames.push(CallFrame {
+                            function,
+                            upvalues,
+                            ip: 0, base: recv_slot,
+                            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                            class_name: None,
+                        });
+                        continue;
                     }
 
                     // Class method dispatch: receiver is a Class value.
@@ -1675,11 +1673,9 @@ impl Vm {
     fn close_upvalues_above(&mut self, first_slot: usize) {
         for uv in &self.open_upvalues {
             let mut state = uv.0.borrow_mut();
-            if let UpvalueState::Open(idx) = *state {
-                if idx >= first_slot {
-                    let val = self.stack[idx].clone();
-                    *state = UpvalueState::Closed(val);
-                }
+            if let UpvalueState::Open(idx) = *state && idx >= first_slot {
+                let val = self.stack[idx].clone();
+                *state = UpvalueState::Closed(val);
             }
         }
         self.open_upvalues
@@ -2236,7 +2232,7 @@ fn dispatch_list_method(
             }
             "sort"     if args.is_empty() => {
                 let mut v: Vec<VmValue> = elems.borrow().clone();
-                v.sort_by(|a, b| vm_value_partial_cmp(a, b));
+                v.sort_by(vm_value_partial_cmp);
                 Ok(VmValue::List(Rc::new(RefCell::new(v))))
             }
             "include?" if args.len() == 1 => Ok(VmValue::Bool(elems.borrow().contains(&args[0]))),
@@ -2327,7 +2323,7 @@ fn dispatch_map_method(
             "empty?"   if args.is_empty() => Ok(VmValue::Bool(map.borrow().is_empty())),
             "keys"     if args.is_empty() => {
                 let mut keys: Vec<VmValue> = map.borrow().keys().map(|k| VmValue::Str(k.clone())).collect();
-                keys.sort_by(|a, b| vm_value_partial_cmp(a, b));
+                keys.sort_by(vm_value_partial_cmp);
                 Ok(VmValue::List(Rc::new(RefCell::new(keys))))
             }
             "values"   if args.is_empty() => {

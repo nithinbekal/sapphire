@@ -39,7 +39,7 @@ impl Lexer {
             let kind = match c {
                 '\n' => {
                     self.line += 1;
-                    if last_kind.as_ref().map_or(false, Self::ends_statement) {
+                    if last_kind.as_ref().is_some_and(Self::ends_statement) {
                         TokenKind::Newline
                     } else {
                         continue
