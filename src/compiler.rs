@@ -810,13 +810,12 @@ impl Compiler {
         let depth = self.states.len() - 1;
         for stmt in body {
             match stmt {
-                Expr::Assign { name, .. } => {
+                Expr::Assign { name, .. }
                     if self.resolve_local(depth, name).is_none()
-                        && !self.would_be_upvalue(depth, name)
-                    {
-                        self.emit(OpCode::Nil);
-                        self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
-                    }
+                        && !self.would_be_upvalue(depth, name) =>
+                {
+                    self.emit(OpCode::Nil);
+                    self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
                 }
                 Expr::MultiAssign { names, .. } => {
                     for name in names {
