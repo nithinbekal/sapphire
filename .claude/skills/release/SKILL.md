@@ -35,7 +35,8 @@ The version to release is provided as the argument to this skill (e.g. `0.3.0`).
 
    This will:
    - Bump the version in `Cargo.toml`
-   - Commit `Cargo.toml` and `CHANGELOG.md`
+   - Run `cargo build` to update `Cargo.lock`
+   - Commit `Cargo.toml`, `Cargo.lock`, and `CHANGELOG.md`
    - Create the git tag `v<version>`
    - Push the commit and tag (which triggers the GitHub Actions release workflow)
 

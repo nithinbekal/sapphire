@@ -10,8 +10,11 @@ fi
 # Bump version in Cargo.toml
 sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
 
+# Regenerate Cargo.lock
+cargo build
+
 # Commit and tag
-git add Cargo.toml CHANGELOG.md
+git add Cargo.toml Cargo.lock CHANGELOG.md
 git commit -m "chore: release v$VERSION"
 git tag "v$VERSION"
 
