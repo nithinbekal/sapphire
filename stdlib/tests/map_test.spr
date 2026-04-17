@@ -1,0 +1,63 @@
+class MapTest < Test {
+  def test_select_keeps_matching_pairs {
+    m = { a: 1, b: 2, c: 3 }
+    result = m.select { |k, v| v > 1 }
+    self.assert_equal(2, result.length)
+    self.assert(result.has_key?("b"))
+    self.assert(result.has_key?("c"))
+  }
+
+  def test_select_empty_when_none_match {
+    m = { a: 1, b: 2 }
+    result = m.select { |k, v| v > 9 }
+    self.assert_equal(0, result.length)
+  }
+
+  def test_select_all_when_all_match {
+    m = { a: 1, b: 2 }
+    result = m.select { |k, v| v > 0 }
+    self.assert_equal(2, result.length)
+  }
+
+  def test_any_true_when_one_pair_matches {
+    m = { a: 1, b: 2 }
+    self.assert(m.any? { |k, v| v > 1 })
+  }
+
+  def test_any_false_when_no_pair_matches {
+    m = { a: 1, b: 2 }
+    self.assert(!m.any? { |k, v| v > 9 })
+  }
+
+  def test_any_false_for_empty_map {
+    self.assert(!{}.any? { |k, v| v > 0 })
+  }
+
+  def test_all_true_when_all_pairs_match {
+    m = { a: 1, b: 2 }
+    self.assert(m.all? { |k, v| v > 0 })
+  }
+
+  def test_all_false_when_one_pair_fails {
+    m = { a: 1, b: 2 }
+    self.assert(!m.all? { |k, v| v > 1 })
+  }
+
+  def test_all_true_for_empty_map {
+    self.assert({}.all? { |k, v| v > 0 })
+  }
+
+  def test_none_true_when_no_pair_matches {
+    m = { a: 1, b: 2 }
+    self.assert(m.none? { |k, v| v > 9 })
+  }
+
+  def test_none_false_when_one_pair_matches {
+    m = { a: 1, b: 2 }
+    self.assert(!m.none? { |k, v| v > 1 })
+  }
+
+  def test_none_true_for_empty_map {
+    self.assert({}.none? { |k, v| v > 0 })
+  }
+}
