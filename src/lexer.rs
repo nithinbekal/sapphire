@@ -133,10 +133,22 @@ impl Lexer {
                 ':' => TokenKind::Colon,
                 ';' => TokenKind::Semicolon,
                 ',' => TokenKind::Comma,
-                '"' => match self.string() {
-                    Some(s) => s,
-                    None => continue,
-                },
+                '"' => {
+                    if self.current + 1 < self.source.len()
+                        && self.source[self.current] == '"'
+                        && self.source[self.current + 1] == '"'
+                    {
+                        match self.heredoc() {
+                            Some(s) => s,
+                            None => continue,
+                        }
+                    } else {
+                        match self.string() {
+                            Some(s) => s,
+                            None => continue,
+                        }
+                    }
+                }
                 '#' => {
                     while !self.is_at_end() && self.source[self.current] != '\n' {
                         self.current += 1;
@@ -234,6 +246,139 @@ impl Lexer {
             return None; // unterminated string
         }
         self.advance(); // consume closing '"'
+
+        if !has_interp {
+            return Some(TokenKind::StringLit(current));
+        }
+        if !current.is_empty() {
+            parts.push((current, false));
+        }
+        Some(TokenKind::StringInterp(parts))
+    }
+
+    fn heredoc(&mut self) -> Option<TokenKind> {
+        self.current += 2; // consume the other two '"' to complete """
+
+        // Opening """ must be followed only by optional whitespace then a newline
+        while !self.is_at_end() && self.source[self.current] != '\n' {
+            let c = self.source[self.current];
+            if c != ' ' && c != '\t' && c != '\r' {
+                return None;
+            }
+            self.current += 1;
+        }
+        if self.is_at_end() {
+            return None;
+        }
+        self.current += 1; // consume the newline after opening """
+        self.line += 1;
+
+        // Collect raw lines until we find a line whose only content is optional indent + """
+        let mut raw_lines: Vec<String> = Vec::new();
+        let closing_indent;
+
+        loop {
+            if self.is_at_end() {
+                return None; // unterminated heredoc
+            }
+
+            let mut line = String::new();
+            while !self.is_at_end() && self.source[self.current] != '\n' {
+                let c = self.source[self.current];
+                self.current += 1;
+                if c == '\r' {
+                    continue;
+                }
+                line.push(c);
+            }
+
+            // Check if this line is the closing """
+            let indent_len = line
+                .chars()
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .map(|c| c.len_utf8())
+                .sum::<usize>();
+            let rest = &line[indent_len..];
+            if rest == "\"\"\"" {
+                closing_indent = line[..indent_len].to_string();
+                // Leave the newline after closing """ for the main scan loop
+                break;
+            }
+
+            raw_lines.push(line);
+            if self.is_at_end() {
+                return None; // no closing """ found
+            }
+            self.current += 1; // consume the newline
+            self.line += 1;
+        }
+
+        // Strip closing_indent prefix from each content line
+        let stripped: Vec<String> = raw_lines
+            .iter()
+            .map(|line| {
+                if line.starts_with(&closing_indent) {
+                    line[closing_indent.len()..].to_string()
+                } else {
+                    line.clone()
+                }
+            })
+            .collect();
+
+        let raw_content = stripped.join("\n");
+
+        // Process escape sequences and #{} interpolation on the joined content
+        let mut parts: Vec<(String, bool)> = Vec::new();
+        let mut current = String::new();
+        let mut has_interp = false;
+        let chars: Vec<char> = raw_content.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            if chars[i] == '#' && i + 1 < chars.len() && chars[i + 1] == '{' {
+                has_interp = true;
+                parts.push((current.clone(), false));
+                current.clear();
+                i += 2; // skip #{
+                let mut depth = 1usize;
+                while i < chars.len() && depth > 0 {
+                    match chars[i] {
+                        '{' => {
+                            depth += 1;
+                            current.push(chars[i]);
+                        }
+                        '}' => {
+                            depth -= 1;
+                            if depth > 0 {
+                                current.push(chars[i]);
+                            }
+                        }
+                        _ => current.push(chars[i]),
+                    }
+                    i += 1;
+                }
+                parts.push((current.clone(), true));
+                current.clear();
+            } else if chars[i] == '\\' && i + 1 < chars.len() {
+                i += 1;
+                match chars[i] {
+                    'n' => current.push('\n'),
+                    't' => current.push('\t'),
+                    'r' => current.push('\r'),
+                    '\\' => current.push('\\'),
+                    '"' => current.push('"'),
+                    '#' => current.push('#'),
+                    c => {
+                        current.push('\\');
+                        current.push(c);
+                    }
+                }
+                i += 1;
+            } else {
+                current.push(chars[i]);
+                i += 1;
+            }
+        }
 
         if !has_interp {
             return Some(TokenKind::StringLit(current));
@@ -497,6 +642,76 @@ mod tests {
         assert_eq!(
             scan(r#""\z""#),
             vec![TokenKind::StringLit("\\z".into()), TokenKind::Eof]
+        );
+    }
+
+    #[test]
+    fn test_heredoc_basic() {
+        let src = "\"\"\"\n    hello\n    world\n    \"\"\"";
+        assert_eq!(
+            scan(src),
+            vec![TokenKind::StringLit("hello\nworld".into()), TokenKind::Eof]
+        );
+    }
+
+    #[test]
+    fn test_heredoc_no_indent() {
+        let src = "\"\"\"\nhello\nworld\n\"\"\"";
+        assert_eq!(
+            scan(src),
+            vec![TokenKind::StringLit("hello\nworld".into()), TokenKind::Eof]
+        );
+    }
+
+    #[test]
+    fn test_heredoc_single_line() {
+        let src = "\"\"\"\n    hello\n    \"\"\"";
+        assert_eq!(
+            scan(src),
+            vec![TokenKind::StringLit("hello".into()), TokenKind::Eof]
+        );
+    }
+
+    #[test]
+    fn test_heredoc_interpolation() {
+        let src = "\"\"\"\n    hello #{name}\n    \"\"\"";
+        assert_eq!(
+            scan(src),
+            vec![
+                TokenKind::StringInterp(vec![
+                    ("hello ".into(), false),
+                    ("name".into(), true),
+                ]),
+                TokenKind::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_heredoc_empty_line_preserved() {
+        let src = "\"\"\"\n    hello\n\n    world\n    \"\"\"";
+        assert_eq!(
+            scan(src),
+            vec![TokenKind::StringLit("hello\n\nworld".into()), TokenKind::Eof]
+        );
+    }
+
+    #[test]
+    fn test_heredoc_escape_sequences() {
+        let src = "\"\"\"\n    tab:\\there\n    \"\"\"";
+        assert_eq!(
+            scan(src),
+            vec![TokenKind::StringLit("tab:\there".into()), TokenKind::Eof]
+        );
+    }
+
+    #[test]
+    fn test_heredoc_trailing_newline() {
+        // Explicit trailing newline before closing """ is preserved
+        let src = "\"\"\"\n    hello\n    \n    \"\"\"";
+        assert_eq!(
+            scan(src),
+            vec![TokenKind::StringLit("hello\n".into()), TokenKind::Eof]
         );
     }
 }
