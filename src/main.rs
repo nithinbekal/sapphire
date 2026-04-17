@@ -91,10 +91,10 @@ fn collect_test_files_recursive(dir: &std::path::Path, out: &mut Vec<std::path::
         let path = entry.path();
         if path.is_dir() {
             collect_test_files_recursive(&path, out);
-        } else if path.extension().map_or(false, |e| e == "spr")
+        } else if path.extension().is_some_and(|e| e == "spr")
             && path.file_name()
                 .and_then(|n| n.to_str())
-                .map_or(false, |n| n.ends_with("_test.spr"))
+                .is_some_and(|n| n.ends_with("_test.spr"))
         {
             out.push(path);
         }

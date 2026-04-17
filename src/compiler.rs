@@ -887,7 +887,7 @@ impl Compiler {
 
         // Check BEFORE compiling body: is_new_local_assign checks whether the name is already
         // registered — after body compilation it would be, giving a false negative.
-        let body_creates_new_local_result = body.last().map_or(false, |e| self.is_new_local_assign(e));
+        let body_creates_new_local_result = body.last().is_some_and(|e| self.is_new_local_assign(e));
 
         let begin_idx = self.emit_begin_rescue(rescue_var_slot);
 
