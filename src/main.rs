@@ -1,13 +1,13 @@
-use sapphire::{compiler, lexer, parser, token::TokenKind, typechecker, vm};
 use rustyline::{DefaultEditor, error::ReadlineError};
+use sapphire::{compiler, lexer, parser, token::TokenKind, typechecker, vm};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.as_slice() {
-        [_, cmd, path] if cmd == "run"       => run_file(path),
+        [_, cmd, path] if cmd == "run" => run_file(path),
         [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
-        [_, cmd, path] if cmd == "test"      => run_tests(path),
-        [_, cmd] if cmd == "test"    => run_tests("."),
+        [_, cmd, path] if cmd == "test" => run_tests(path),
+        [_, cmd] if cmd == "test" => run_tests("."),
         [_, cmd] if cmd == "console" => run_repl(),
         [_, cmd] if cmd == "version" => println!("sapphire {}", env!("CARGO_PKG_VERSION")),
         _ => {
@@ -26,16 +26,25 @@ fn main() {
 fn run_file(path: &str) {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
-        Err(e) => { eprintln!("error reading '{}': {}", path, e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading '{}': {}", path, e);
+            std::process::exit(1);
+        }
     };
     let tokens = lexer::Lexer::new(&source).scan_tokens();
     let exprs = match parser::Parser::new(tokens).parse() {
         Ok(s) => s,
-        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
     };
     let func = match compiler::compile(&exprs) {
         Ok(f) => f,
-        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
     };
     let current_dir = std::path::Path::new(path)
         .canonicalize()
@@ -57,17 +66,25 @@ fn run_file(path: &str) {
 fn typecheck_file(path: &str) {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
-        Err(e) => { eprintln!("error reading '{}': {}", path, e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error reading '{}': {}", path, e);
+            std::process::exit(1);
+        }
     };
     let tokens = lexer::Lexer::new(&source).scan_tokens();
     match parser::Parser::new(tokens).parse() {
-        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
         Ok(exprs) => {
             let errors = typechecker::TypeChecker::check(&exprs);
             if errors.is_empty() {
                 println!("No type errors found.");
             } else {
-                for e in &errors { eprintln!("{}", e); }
+                for e in &errors {
+                    eprintln!("{}", e);
+                }
                 std::process::exit(1);
             }
         }
@@ -86,13 +103,16 @@ fn collect_test_files(path: &str) -> Vec<std::path::PathBuf> {
 }
 
 fn collect_test_files_recursive(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             collect_test_files_recursive(&path, out);
         } else if path.extension().is_some_and(|e| e == "spr")
-            && path.file_name()
+            && path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .is_some_and(|n| n.ends_with("_test.spr"))
         {
@@ -123,11 +143,17 @@ fn run_tests(path: &str) {
         let tokens = lexer::Lexer::new(&source).scan_tokens();
         let exprs = match parser::Parser::new(tokens).parse() {
             Ok(s) => s,
-            Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
         };
         let func = match compiler::compile(&exprs) {
             Ok(f) => f,
-            Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
         };
         let current_dir = file_path
             .canonicalize()
@@ -174,7 +200,11 @@ fn run_tests(path: &str) {
         total,
         if total == 1 { "test" } else { "tests" },
         failures.len(),
-        if failures.len() == 1 { "failure" } else { "failures" },
+        if failures.len() == 1 {
+            "failure"
+        } else {
+            "failures"
+        },
     );
     if !failures.is_empty() {
         std::process::exit(1);
@@ -212,8 +242,14 @@ fn run_repl() {
         let first_line = match rl.readline("> ") {
             Ok(line) => line,
             Err(ReadlineError::Interrupted) => continue,
-            Err(ReadlineError::Eof) => { println!(); break; }
-            Err(e) => { eprintln!("error: {}", e); break; }
+            Err(ReadlineError::Eof) => {
+                println!();
+                break;
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                break;
+            }
         };
 
         if first_line.trim().is_empty() {
@@ -224,7 +260,10 @@ fn run_repl() {
 
         while !is_input_complete(&source) {
             match rl.readline(".. ") {
-                Ok(line) => { source.push('\n'); source.push_str(&line); }
+                Ok(line) => {
+                    source.push('\n');
+                    source.push_str(&line);
+                }
                 Err(_) => break,
             }
         }
@@ -234,11 +273,17 @@ fn run_repl() {
         let trimmed = source.trim();
         let tokens = lexer::Lexer::new(trimmed).scan_tokens();
         let exprs = match parser::Parser::new(tokens).parse() {
-            Err(e) => { eprintln!("{}", e); continue; }
+            Err(e) => {
+                eprintln!("{}", e);
+                continue;
+            }
             Ok(e) => e,
         };
         let func = match compiler::compile_repl(&exprs) {
-            Err(e) => { eprintln!("{}", e); continue; }
+            Err(e) => {
+                eprintln!("{}", e);
+                continue;
+            }
             Ok(f) => f,
         };
         match vm.eval(func) {

@@ -13,8 +13,8 @@ pub trait Trace {
 /// After each collection the threshold is set to `max(live * 2, 256)` so
 /// that allocation cost amortises over object lifetime.
 pub struct GcHeap<T: Trace> {
-    objects:   Vec<Option<T>>,
-    marks:     Vec<bool>,
+    objects: Vec<Option<T>>,
+    marks: Vec<bool>,
     free_list: Vec<u32>,
     allocated: usize,
     threshold: usize,
@@ -29,8 +29,8 @@ impl<T: Trace> Default for GcHeap<T> {
 impl<T: Trace> GcHeap<T> {
     pub fn new() -> Self {
         GcHeap {
-            objects:   Vec::new(),
-            marks:     Vec::new(),
+            objects: Vec::new(),
+            marks: Vec::new(),
             free_list: Vec::new(),
             allocated: 0,
             threshold: 256,
@@ -42,7 +42,7 @@ impl<T: Trace> GcHeap<T> {
         self.allocated += 1;
         if let Some(slot) = self.free_list.pop() {
             self.objects[slot as usize] = Some(obj);
-            self.marks[slot as usize]   = false;
+            self.marks[slot as usize] = false;
             slot
         } else {
             let slot = self.objects.len() as u32;

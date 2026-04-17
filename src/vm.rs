@@ -1,10 +1,10 @@
+use crate::chunk::{Constant, Function, OpCode};
+use crate::gc::{GcHeap, GcRef, Trace};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::cell::RefCell;
-use crate::chunk::{Constant, Function, OpCode};
-use crate::gc::{GcHeap, GcRef, Trace};
 
 // ── GC heap objects ───────────────────────────────────────────────────────────
 
@@ -19,8 +19,8 @@ pub enum HeapObject {
 impl Trace for HeapObject {
     fn trace(&self, out: &mut Vec<GcRef>) {
         match self {
-            HeapObject::List(v)   => v.iter().for_each(|val| collect_refs(val, out)),
-            HeapObject::Map(m)    => m.values().for_each(|val| collect_refs(val, out)),
+            HeapObject::List(v) => v.iter().for_each(|val| collect_refs(val, out)),
+            HeapObject::Map(m) => m.values().for_each(|val| collect_refs(val, out)),
             HeapObject::Fields(f) => f.values().for_each(|val| collect_refs(val, out)),
         }
     }
@@ -30,29 +30,47 @@ impl Trace for HeapObject {
 fn collect_refs(val: &VmValue, out: &mut Vec<GcRef>) {
     match val {
         VmValue::List(r) | VmValue::Map(r) => out.push(*r),
-        VmValue::Instance { fields, .. }   => out.push(*fields),
+        VmValue::Instance { fields, .. } => out.push(*fields),
         _ => {}
     }
 }
 
 impl GcHeap<HeapObject> {
     pub fn get_list(&self, r: GcRef) -> &Vec<VmValue> {
-        match self.get(r) { HeapObject::List(v) => v, _ => panic!("GcRef is not a List") }
+        match self.get(r) {
+            HeapObject::List(v) => v,
+            _ => panic!("GcRef is not a List"),
+        }
     }
     pub fn get_list_mut(&mut self, r: GcRef) -> &mut Vec<VmValue> {
-        match self.get_mut(r) { HeapObject::List(v) => v, _ => panic!("GcRef is not a List") }
+        match self.get_mut(r) {
+            HeapObject::List(v) => v,
+            _ => panic!("GcRef is not a List"),
+        }
     }
     pub fn get_map(&self, r: GcRef) -> &HashMap<String, VmValue> {
-        match self.get(r) { HeapObject::Map(m) => m, _ => panic!("GcRef is not a Map") }
+        match self.get(r) {
+            HeapObject::Map(m) => m,
+            _ => panic!("GcRef is not a Map"),
+        }
     }
     pub fn get_map_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> {
-        match self.get_mut(r) { HeapObject::Map(m) => m, _ => panic!("GcRef is not a Map") }
+        match self.get_mut(r) {
+            HeapObject::Map(m) => m,
+            _ => panic!("GcRef is not a Map"),
+        }
     }
     pub fn get_fields(&self, r: GcRef) -> &HashMap<String, VmValue> {
-        match self.get(r) { HeapObject::Fields(f) => f, _ => panic!("GcRef is not Fields") }
+        match self.get(r) {
+            HeapObject::Fields(f) => f,
+            _ => panic!("GcRef is not Fields"),
+        }
     }
     pub fn get_fields_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> {
-        match self.get_mut(r) { HeapObject::Fields(f) => f, _ => panic!("GcRef is not Fields") }
+        match self.get_mut(r) {
+            HeapObject::Fields(f) => f,
+            _ => panic!("GcRef is not Fields"),
+        }
     }
 }
 
@@ -60,20 +78,28 @@ impl GcHeap<HeapObject> {
 pub fn format_value_with_heap(heap: &GcHeap<HeapObject>, val: &VmValue) -> String {
     match val {
         VmValue::List(r) => {
-            let parts: Vec<String> = heap.get_list(*r).iter()
+            let parts: Vec<String> = heap
+                .get_list(*r)
+                .iter()
                 .map(|el| format_value_with_heap(heap, el))
                 .collect();
             format!("[{}]", parts.join(", "))
         }
         VmValue::Map(r) => {
-            let mut parts: Vec<String> = heap.get_map(*r).iter()
+            let mut parts: Vec<String> = heap
+                .get_map(*r)
+                .iter()
                 .map(|(k, v)| format!("{}: {}", k, format_value_with_heap(heap, v)))
                 .collect();
             parts.sort();
             format!("{{{}}}", parts.join(", "))
         }
-        VmValue::Instance { class_name, fields, .. } => {
-            let mut pairs: Vec<String> = heap.get_fields(*fields).iter()
+        VmValue::Instance {
+            class_name, fields, ..
+        } => {
+            let mut pairs: Vec<String> = heap
+                .get_fields(*fields)
+                .iter()
                 .map(|(k, v)| format!("{}={}", k, format_value_with_heap(heap, v)))
                 .collect();
             pairs.sort();
@@ -91,7 +117,7 @@ pub fn format_value_with_heap(heap: &GcHeap<HeapObject>, val: &VmValue) -> Strin
 /// "closed": the value is copied out of the stack into the cell itself.
 #[derive(Debug, Clone)]
 pub enum UpvalueState {
-    Open(usize),       // index into Vm::stack
+    Open(usize), // index into Vm::stack
     Closed(VmValue),
 }
 
@@ -105,7 +131,9 @@ impl Upvalue {
 }
 
 impl PartialEq for Upvalue {
-    fn eq(&self, other: &Self) -> bool { Rc::ptr_eq(&self.0, &other.0) }
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 // ── Runtime value ─────────────────────────────────────────────────────────────
@@ -129,23 +157,26 @@ pub enum VmValue {
     },
     List(GcRef),
     Map(GcRef),
-    Range { from: i64, to: i64 },
+    Range {
+        from: i64,
+        to: i64,
+    },
     /// A compiled class: holds the static field list (with defaults) and the method table.
     Class {
-        name:          String,
+        name: String,
         #[allow(dead_code)]
-        superclass:    Option<String>,
-        fields:        Vec<(String, VmValue)>,
-        methods:       Rc<HashMap<String, VmMethod>>,
+        superclass: Option<String>,
+        fields: Vec<(String, VmValue)>,
+        methods: Rc<HashMap<String, VmMethod>>,
         class_methods: Rc<HashMap<String, VmMethod>>,
         /// Nested class definitions, accessible as `Outer.Inner`.
-        namespace:     Rc<HashMap<String, VmValue>>,
+        namespace: Rc<HashMap<String, VmValue>>,
     },
     /// A live instance of a class.
     Instance {
         class_name: String,
-        fields:     GcRef,
-        methods:    Rc<HashMap<String, VmMethod>>,
+        fields: GcRef,
+        methods: Rc<HashMap<String, VmMethod>>,
     },
 }
 
@@ -153,30 +184,33 @@ pub enum VmValue {
 /// and the name of the class that originally defined it (used by `super`).
 #[derive(Debug, Clone)]
 pub struct VmMethod {
-    pub function:   Rc<Function>,
-    pub upvalues:   Vec<Upvalue>,
+    pub function: Rc<Function>,
+    pub upvalues: Vec<Upvalue>,
     /// Name of the class this method was defined in; empty for block closures.
     pub defined_in: String,
-    pub private:    bool,
+    pub private: bool,
 }
 
 impl PartialEq for VmValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (VmValue::Int(a),   VmValue::Int(b))   => a == b,
+            (VmValue::Int(a), VmValue::Int(b)) => a == b,
             (VmValue::Float(a), VmValue::Float(b)) => a == b,
-            (VmValue::Str(a),   VmValue::Str(b))   => a == b,
-            (VmValue::Bool(a),  VmValue::Bool(b))  => a == b,
-            (VmValue::Nil,      VmValue::Nil)      => true,
+            (VmValue::Str(a), VmValue::Str(b)) => a == b,
+            (VmValue::Bool(a), VmValue::Bool(b)) => a == b,
+            (VmValue::Nil, VmValue::Nil) => true,
             (VmValue::Function(a), VmValue::Function(b)) => Rc::ptr_eq(a, b),
-            (VmValue::Closure { function: f1, .. },
-             VmValue::Closure { function: f2, .. }) => Rc::ptr_eq(f1, f2),
-            (VmValue::List(a),  VmValue::List(b))  => a == b,
-            (VmValue::Map(a),   VmValue::Map(b))   => a == b,
-            (VmValue::Range { from: f1, to: t1 },
-             VmValue::Range { from: f2, to: t2 })  => f1 == f2 && t1 == t2,
-            (VmValue::Instance { fields: f1, .. },
-             VmValue::Instance { fields: f2, .. }) => f1 == f2,
+            (VmValue::Closure { function: f1, .. }, VmValue::Closure { function: f2, .. }) => {
+                Rc::ptr_eq(f1, f2)
+            }
+            (VmValue::List(a), VmValue::List(b)) => a == b,
+            (VmValue::Map(a), VmValue::Map(b)) => a == b,
+            (VmValue::Range { from: f1, to: t1 }, VmValue::Range { from: f2, to: t2 }) => {
+                f1 == f2 && t1 == t2
+            }
+            (VmValue::Instance { fields: f1, .. }, VmValue::Instance { fields: f2, .. }) => {
+                f1 == f2
+            }
             _ => false,
         }
     }
@@ -185,17 +219,17 @@ impl PartialEq for VmValue {
 impl fmt::Display for VmValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VmValue::Int(n)      => write!(f, "{}", n),
-            VmValue::Float(n)    => write!(f, "{}", n),
-            VmValue::Str(s)      => write!(f, "{}", s),
-            VmValue::Bool(b)     => write!(f, "{}", b),
-            VmValue::Nil         => write!(f, "nil"),
-            VmValue::Function(func)          => write!(f, "<fn {}>", func.name),
+            VmValue::Int(n) => write!(f, "{}", n),
+            VmValue::Float(n) => write!(f, "{}", n),
+            VmValue::Str(s) => write!(f, "{}", s),
+            VmValue::Bool(b) => write!(f, "{}", b),
+            VmValue::Nil => write!(f, "nil"),
+            VmValue::Function(func) => write!(f, "<fn {}>", func.name),
             VmValue::Closure { function, .. } => write!(f, "<fn {}>", function.name),
-            VmValue::List(_)  => write!(f, "<list>"),
-            VmValue::Map(_)   => write!(f, "<map>"),
+            VmValue::List(_) => write!(f, "<list>"),
+            VmValue::Map(_) => write!(f, "<map>"),
             VmValue::Range { from, to } => write!(f, "{}..{}", from, to),
-            VmValue::Class { name, .. }  => write!(f, "<class {}>", name),
+            VmValue::Class { name, .. } => write!(f, "<class {}>", name),
             VmValue::Instance { class_name, .. } => write!(f, "#<{}>", class_name),
         }
     }
@@ -204,11 +238,11 @@ impl fmt::Display for VmValue {
 impl From<&Constant> for VmValue {
     fn from(c: &Constant) -> Self {
         match c {
-            Constant::Int(n)         => VmValue::Int(*n),
-            Constant::Float(n)       => VmValue::Float(*n),
-            Constant::Str(s)         => VmValue::Str(s.clone()),
-            Constant::Function(func)    => VmValue::Function(func.clone()),
-            Constant::ClassDesc { .. }  => panic!("ClassDesc cannot be used as a stack value"),
+            Constant::Int(n) => VmValue::Int(*n),
+            Constant::Float(n) => VmValue::Float(*n),
+            Constant::Str(s) => VmValue::Str(s.clone()),
+            Constant::Function(func) => VmValue::Function(func.clone()),
+            Constant::ClassDesc { .. } => panic!("ClassDesc cannot be used as a stack value"),
         }
     }
 }
@@ -218,7 +252,10 @@ impl From<&Constant> for VmValue {
 #[derive(Debug, PartialEq)]
 pub enum VmError {
     StackUnderflow,
-    TypeError    { message: String, line: u32 },
+    TypeError {
+        message: String,
+        line: u32,
+    },
     /// `raise val` — propagates until caught by a `Begin` handler.
     Raised(VmValue),
     /// `break val` inside a block — unwinds to the enclosing call-with-block.
@@ -232,11 +269,12 @@ impl fmt::Display for VmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VmError::StackUnderflow => write!(f, "stack underflow"),
-            VmError::TypeError { message, line } =>
-                write!(f, "[line {}] type error: {}", line, message),
-            VmError::Raised(v)  => write!(f, "uncaught raise: {}", v),
-            VmError::Break(v)   => write!(f, "break outside block: {}", v),
-            VmError::Next(v)    => write!(f, "next outside block: {}", v),
+            VmError::TypeError { message, line } => {
+                write!(f, "[line {}] type error: {}", line, message)
+            }
+            VmError::Raised(v) => write!(f, "uncaught raise: {}", v),
+            VmError::Break(v) => write!(f, "break outside block: {}", v),
+            VmError::Next(v) => write!(f, "next outside block: {}", v),
         }
     }
 }
@@ -246,9 +284,9 @@ impl fmt::Display for VmError {
 /// Rescue handler registered by `BeginRescue`; popped by `PopRescue`.
 #[derive(Clone, Copy)]
 struct RescueInfo {
-    handler_ip:       usize,
-    rescue_var_slot:  usize, // usize::MAX means no variable
-    stack_height:     usize, // stack depth at BeginRescue time (for cleanup)
+    handler_ip: usize,
+    rescue_var_slot: usize, // usize::MAX means no variable
+    stack_height: usize,    // stack depth at BeginRescue time (for cleanup)
 }
 
 struct CallFrame {
@@ -256,10 +294,10 @@ struct CallFrame {
     /// The upvalues belonging to the closure that created this frame.
     upvalues: Vec<Upvalue>,
     /// Instruction pointer within this frame's chunk.
-    ip:       usize,
+    ip: usize,
     /// Index into the VM stack where slot 0 of this frame begins.
     /// The function value itself lives at `base`.
-    base:     usize,
+    base: usize,
     /// Block passed to this call (if any), stored off-stack so `yield` can
     /// reach it without disturbing the locals layout.
     block: Option<VmMethod>,
@@ -288,22 +326,22 @@ struct CallFrame {
 /// * `SuperInvoke` looks up `classes[super_name].methods` and gets the
 ///   correct merged map for that ancestor level.
 struct ClassEntry {
-    superclass:    Option<String>,
+    superclass: Option<String>,
     /// The merged (inherited + own) field list with default values.
-    fields:        Vec<(String, VmValue)>,
+    fields: Vec<(String, VmValue)>,
     /// Merged (inherited + own) instance methods.
-    methods:       Rc<HashMap<String, VmMethod>>,
+    methods: Rc<HashMap<String, VmMethod>>,
     /// Merged (inherited + own) class methods.
     class_methods: Rc<HashMap<String, VmMethod>>,
     /// Constants defined in the class body (e.g. `PI = 3.14`).
-    namespace:     Rc<HashMap<String, VmValue>>,
+    namespace: Rc<HashMap<String, VmValue>>,
 }
 
 pub struct Vm {
-    frames:        Vec<CallFrame>,
-    stack:         Vec<VmValue>,
+    frames: Vec<CallFrame>,
+    stack: Vec<VmValue>,
     /// GC-managed heap for List, Map, and instance field objects.
-    pub heap:      GcHeap<HeapObject>,
+    pub heap: GcHeap<HeapObject>,
     /// All upvalues that still point into the live stack (open upvalues),
     /// kept so we can close them when a frame exits.
     open_upvalues: Vec<Upvalue>,
@@ -322,8 +360,14 @@ pub struct Vm {
 impl Vm {
     pub fn new(function: Rc<Function>, current_dir: PathBuf) -> Self {
         let frame = CallFrame {
-            function, upvalues: vec![], ip: 0, base: 0,
-            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+            function,
+            upvalues: vec![],
+            ip: 0,
+            base: 0,
+            block: None,
+            is_block_caller: false,
+            is_native_block: false,
+            rescues: vec![],
             class_name: None,
         };
         Vm {
@@ -360,8 +404,14 @@ impl Vm {
         let base = self.stack.len();
         self.stack.push(VmValue::Function(func.clone()));
         self.frames.push(CallFrame {
-            function: func, upvalues: vec![], ip: 0, base,
-            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+            function: func,
+            upvalues: vec![],
+            ip: 0,
+            base,
+            block: None,
+            is_block_caller: false,
+            is_native_block: false,
+            rescues: vec![],
             class_name: None,
         });
         let result = self.run_inner(min_depth);
@@ -379,8 +429,14 @@ impl Vm {
         let base = self.stack.len();
         self.stack.push(VmValue::Function(func.clone()));
         self.frames.push(CallFrame {
-            function: func, upvalues: vec![], ip: 0, base,
-            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+            function: func,
+            upvalues: vec![],
+            ip: 0,
+            base,
+            block: None,
+            is_block_caller: false,
+            is_native_block: false,
+            rescues: vec![],
             class_name: None,
         });
         self.run_inner(min_depth)?;
@@ -390,12 +446,24 @@ impl Vm {
 
     // ── Heap helpers ──────────────────────────────────────────────────────────
 
-    fn get_list(&self, r: GcRef) -> &Vec<VmValue>              { self.heap.get_list(r) }
-    fn get_list_mut(&mut self, r: GcRef) -> &mut Vec<VmValue>  { self.heap.get_list_mut(r) }
-    fn get_map(&self, r: GcRef) -> &HashMap<String, VmValue>   { self.heap.get_map(r) }
-    fn get_map_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> { self.heap.get_map_mut(r) }
-    fn get_fields(&self, r: GcRef) -> &HashMap<String, VmValue> { self.heap.get_fields(r) }
-    fn get_fields_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> { self.heap.get_fields_mut(r) }
+    fn get_list(&self, r: GcRef) -> &Vec<VmValue> {
+        self.heap.get_list(r)
+    }
+    fn get_list_mut(&mut self, r: GcRef) -> &mut Vec<VmValue> {
+        self.heap.get_list_mut(r)
+    }
+    fn get_map(&self, r: GcRef) -> &HashMap<String, VmValue> {
+        self.heap.get_map(r)
+    }
+    fn get_map_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> {
+        self.heap.get_map_mut(r)
+    }
+    fn get_fields(&self, r: GcRef) -> &HashMap<String, VmValue> {
+        self.heap.get_fields(r)
+    }
+    fn get_fields_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> {
+        self.heap.get_fields_mut(r)
+    }
 
     fn alloc_list(&mut self, v: Vec<VmValue>) -> VmValue {
         self.maybe_gc();
@@ -416,8 +484,12 @@ impl Vm {
 
     fn gc_roots(&self) -> Vec<GcRef> {
         let mut out = Vec::new();
-        for v in &self.stack          { collect_refs(v, &mut out); }
-        for v in self.globals.values(){ collect_refs(v, &mut out); }
+        for v in &self.stack {
+            collect_refs(v, &mut out);
+        }
+        for v in self.globals.values() {
+            collect_refs(v, &mut out);
+        }
         for frame in &self.frames {
             for uv in &frame.upvalues {
                 if let UpvalueState::Closed(v) = &*uv.0.borrow() {
@@ -445,24 +517,31 @@ impl Vm {
     pub fn load_stdlib(&mut self) -> Result<(), VmError> {
         const SOURCES: &[(&str, &str)] = &[
             ("stdlib/object.spr", include_str!("../stdlib/object.spr")),
-            ("stdlib/nil.spr",    include_str!("../stdlib/nil.spr")),
-            ("stdlib/num.spr",    include_str!("../stdlib/num.spr")),
-            ("stdlib/int.spr",    include_str!("../stdlib/int.spr")),
-            ("stdlib/float.spr",  include_str!("../stdlib/float.spr")),
+            ("stdlib/nil.spr", include_str!("../stdlib/nil.spr")),
+            ("stdlib/num.spr", include_str!("../stdlib/num.spr")),
+            ("stdlib/int.spr", include_str!("../stdlib/int.spr")),
+            ("stdlib/float.spr", include_str!("../stdlib/float.spr")),
             ("stdlib/string.spr", include_str!("../stdlib/string.spr")),
-            ("stdlib/bool.spr",   include_str!("../stdlib/bool.spr")),
-            ("stdlib/list.spr",   include_str!("../stdlib/list.spr")),
-            ("stdlib/map.spr",    include_str!("../stdlib/map.spr")),
-            ("stdlib/test.spr",   include_str!("../stdlib/test.spr")),
-            ("stdlib/file.spr",   include_str!("../stdlib/file.spr")),
-            ("stdlib/math.spr",   include_str!("../stdlib/math.spr")),
+            ("stdlib/bool.spr", include_str!("../stdlib/bool.spr")),
+            ("stdlib/list.spr", include_str!("../stdlib/list.spr")),
+            ("stdlib/map.spr", include_str!("../stdlib/map.spr")),
+            ("stdlib/test.spr", include_str!("../stdlib/test.spr")),
+            ("stdlib/file.spr", include_str!("../stdlib/file.spr")),
+            ("stdlib/math.spr", include_str!("../stdlib/math.spr")),
         ];
         for (name, src) in SOURCES {
             let tokens = crate::lexer::Lexer::new(src).scan_tokens();
-            let stmts = crate::parser::Parser::new(tokens).parse()
-                .map_err(|e| VmError::TypeError { message: format!("{}: {}", name, e), line: 0 })?;
-            let func = crate::compiler::compile(&stmts)
-                .map_err(|e| VmError::TypeError { message: format!("{}: {}", name, e), line: 0 })?;
+            let stmts =
+                crate::parser::Parser::new(tokens)
+                    .parse()
+                    .map_err(|e| VmError::TypeError {
+                        message: format!("{}: {}", name, e),
+                        line: 0,
+                    })?;
+            let func = crate::compiler::compile(&stmts).map_err(|e| VmError::TypeError {
+                message: format!("{}: {}", name, e),
+                line: 0,
+            })?;
             self.run_extra(func)?;
         }
         // Expose all stdlib classes as globals so user code can reference them
@@ -471,12 +550,12 @@ impl Vm {
         for cname in class_names {
             let entry = &self.classes[&cname];
             let val = VmValue::Class {
-                name:          cname.clone(),
-                superclass:    entry.superclass.clone(),
-                fields:        entry.fields.clone(),
-                methods:       entry.methods.clone(),
+                name: cname.clone(),
+                superclass: entry.superclass.clone(),
+                fields: entry.fields.clone(),
+                methods: entry.methods.clone(),
                 class_methods: entry.class_methods.clone(),
-                namespace:     entry.namespace.clone(),
+                namespace: entry.namespace.clone(),
             };
             self.globals.insert(cname, val);
         }
@@ -491,7 +570,7 @@ impl Vm {
             // Fetch the next instruction from the current frame, then release the borrow.
             let (op, line) = {
                 let frame = self.frames.last_mut().unwrap();
-                let op   = frame.function.chunk.code[frame.ip].clone();
+                let op = frame.function.chunk.code[frame.ip].clone();
                 let line = frame.function.chunk.lines[frame.ip];
                 frame.ip += 1;
                 (op, line)
@@ -499,9 +578,8 @@ impl Vm {
 
             match op {
                 OpCode::Constant(idx) => {
-                    let val = VmValue::from(
-                        &self.frames.last().unwrap().function.chunk.constants[idx]
-                    );
+                    let val =
+                        VmValue::from(&self.frames.last().unwrap().function.chunk.constants[idx]);
                     self.stack.push(val);
                 }
 
@@ -513,7 +591,8 @@ impl Vm {
                     };
                     // Collect upvalue descriptors into a plain vec so we can call
                     // &mut self methods without holding a borrow on the frame.
-                    let defs: Vec<(bool, usize)> = func.upvalue_defs
+                    let defs: Vec<(bool, usize)> = func
+                        .upvalue_defs
                         .iter()
                         .map(|d| (d.is_local, d.index))
                         .collect();
@@ -527,24 +606,29 @@ impl Vm {
                         };
                         upvalues.push(uv);
                     }
-                    self.stack.push(VmValue::Closure { function: func, upvalues });
+                    self.stack.push(VmValue::Closure {
+                        function: func,
+                        upvalues,
+                    });
                 }
 
-                OpCode::True  => self.stack.push(VmValue::Bool(true)),
+                OpCode::True => self.stack.push(VmValue::Bool(true)),
                 OpCode::False => self.stack.push(VmValue::Bool(false)),
-                OpCode::Nil   => self.stack.push(VmValue::Nil),
+                OpCode::Nil => self.stack.push(VmValue::Nil),
 
-                OpCode::Pop => { self.pop()?; }
+                OpCode::Pop => {
+                    self.pop()?;
+                }
 
                 // Local slots are relative to the current frame's base.
                 OpCode::GetLocal(slot) => {
                     let base = self.frames.last().unwrap().base;
-                    let val  = self.stack[base + slot].clone();
+                    let val = self.stack[base + slot].clone();
                     self.stack.push(val);
                 }
                 OpCode::SetLocal(slot) => {
                     let base = self.frames.last().unwrap().base;
-                    let val  = self.stack.last().ok_or(VmError::StackUnderflow)?.clone();
+                    let val = self.stack.last().ok_or(VmError::StackUnderflow)?.clone();
                     self.stack[base + slot] = val;
                 }
 
@@ -552,16 +636,20 @@ impl Vm {
                     let uv = self.frames.last().unwrap().upvalues[idx].clone();
                     let val = match &*uv.0.borrow() {
                         UpvalueState::Open(stack_idx) => self.stack[*stack_idx].clone(),
-                        UpvalueState::Closed(val)     => val.clone(),
+                        UpvalueState::Closed(val) => val.clone(),
                     };
                     self.stack.push(val);
                 }
                 OpCode::SetUpvalue(idx) => {
-                    let uv  = self.frames.last().unwrap().upvalues[idx].clone();
+                    let uv = self.frames.last().unwrap().upvalues[idx].clone();
                     let val = self.stack.last().ok_or(VmError::StackUnderflow)?.clone();
                     match &mut *uv.0.borrow_mut() {
-                        UpvalueState::Open(stack_idx) => { self.stack[*stack_idx] = val; }
-                        UpvalueState::Closed(v)       => { *v = val; }
+                        UpvalueState::Open(stack_idx) => {
+                            self.stack[*stack_idx] = val;
+                        }
+                        UpvalueState::Closed(v) => {
+                            *v = val;
+                        }
                     }
                 }
                 OpCode::CloseUpvalue => {
@@ -603,14 +691,22 @@ impl Vm {
                 }
 
                 OpCode::BuildString(n) => {
-                    let start = self.stack.len().checked_sub(n).ok_or(VmError::StackUnderflow)?;
+                    let start = self
+                        .stack
+                        .len()
+                        .checked_sub(n)
+                        .ok_or(VmError::StackUnderflow)?;
                     let vals: Vec<VmValue> = self.stack.drain(start..).collect();
                     let parts: Vec<String> = vals.iter().map(|v| self.format_value(v)).collect();
                     self.stack.push(VmValue::Str(parts.concat()));
                 }
 
                 OpCode::BuildList(n) => {
-                    let start = self.stack.len().checked_sub(n).ok_or(VmError::StackUnderflow)?;
+                    let start = self
+                        .stack
+                        .len()
+                        .checked_sub(n)
+                        .ok_or(VmError::StackUnderflow)?;
                     let elems: Vec<VmValue> = self.stack.drain(start..).collect();
                     let v = self.alloc_list(elems);
                     self.stack.push(v);
@@ -618,16 +714,22 @@ impl Vm {
 
                 OpCode::BuildMap(n) => {
                     // Stack layout: key0, val0, key1, val1, ... (2*n values)
-                    let start = self.stack.len().checked_sub(n * 2).ok_or(VmError::StackUnderflow)?;
+                    let start = self
+                        .stack
+                        .len()
+                        .checked_sub(n * 2)
+                        .ok_or(VmError::StackUnderflow)?;
                     let flat: Vec<VmValue> = self.stack.drain(start..).collect();
                     let mut map = HashMap::new();
                     for chunk in flat.chunks(2) {
                         let key = match &chunk[0] {
                             VmValue::Str(s) => s.clone(),
-                            other => return Err(VmError::TypeError {
-                                message: format!("map key must be a string, got {}", other),
-                                line,
-                            }),
+                            other => {
+                                return Err(VmError::TypeError {
+                                    message: format!("map key must be a string, got {}", other),
+                                    line,
+                                });
+                            }
                         };
                         map.insert(key, chunk[1].clone());
                     }
@@ -639,12 +741,20 @@ impl Vm {
                     let (a, b) = self.pop2()?;
                     match (&a, &b) {
                         (VmValue::Int(from), VmValue::Int(to)) => {
-                            self.stack.push(VmValue::Range { from: *from, to: *to });
+                            self.stack.push(VmValue::Range {
+                                from: *from,
+                                to: *to,
+                            });
                         }
-                        _ => return Err(VmError::TypeError {
-                            message: format!("range bounds must be integers, got {} and {}", a, b),
-                            line,
-                        }),
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "range bounds must be integers, got {} and {}",
+                                    a, b
+                                ),
+                                line,
+                            });
+                        }
                     }
                 }
 
@@ -657,7 +767,10 @@ impl Vm {
                             let i = if *i < 0 { len + i } else { *i };
                             if i < 0 || i >= len {
                                 return Err(VmError::TypeError {
-                                    message: format!("list index {} out of bounds (len {})", idx, len),
+                                    message: format!(
+                                        "list index {} out of bounds (len {})",
+                                        idx, len
+                                    ),
                                     line,
                                 });
                             }
@@ -665,7 +778,11 @@ impl Vm {
                             self.stack.push(v);
                         }
                         (VmValue::Map(r), VmValue::Str(key)) => {
-                            let val = self.get_map(r).get(key.as_str()).cloned().unwrap_or(VmValue::Nil);
+                            let val = self
+                                .get_map(r)
+                                .get(key.as_str())
+                                .cloned()
+                                .unwrap_or(VmValue::Nil);
                             self.stack.push(val);
                         }
                         (VmValue::Str(s), VmValue::Int(i)) => {
@@ -680,10 +797,12 @@ impl Vm {
                             }
                             self.stack.push(VmValue::Str(chars[i as usize].to_string()));
                         }
-                        (obj, _) => return Err(VmError::TypeError {
-                            message: format!("cannot index {} with {}", obj, idx),
-                            line,
-                        }),
+                        (obj, _) => {
+                            return Err(VmError::TypeError {
+                                message: format!("cannot index {} with {}", obj, idx),
+                                line,
+                            });
+                        }
                     }
                 }
 
@@ -706,33 +825,61 @@ impl Vm {
                         (VmValue::Map(r), VmValue::Str(key)) => {
                             self.get_map_mut(r).insert(key, val.clone());
                         }
-                        (obj, idx) => return Err(VmError::TypeError {
-                            message: format!("cannot index-assign {} with {}", obj, idx),
-                            line,
-                        }),
+                        (obj, idx) => {
+                            return Err(VmError::TypeError {
+                                message: format!("cannot index-assign {} with {}", obj, idx),
+                                line,
+                            });
+                        }
                     }
                     self.stack.push(val);
                 }
 
                 // ── Class opcodes ────────────────────────────────────────────
-
                 OpCode::DefClass(desc_idx) => {
-                    let (class_name, superclass_name, superclass_dynamic, own_fields,
-                         class_method_names, method_names, private_methods, nested_class_names) = {
+                    let (
+                        class_name,
+                        superclass_name,
+                        superclass_dynamic,
+                        own_fields,
+                        class_method_names,
+                        method_names,
+                        private_methods,
+                        nested_class_names,
+                    ) = {
                         let consts = &self.frames.last().unwrap().function.chunk.constants;
                         match &consts[desc_idx] {
                             Constant::ClassDesc {
-                                name, superclass, superclass_dynamic,
-                                field_names, field_defaults, method_names, private_methods,
-                                class_method_names, nested_class_names,
+                                name,
+                                superclass,
+                                superclass_dynamic,
+                                field_names,
+                                field_defaults,
+                                method_names,
+                                private_methods,
+                                class_method_names,
+                                nested_class_names,
                             } => {
-                                let own_fields: Vec<(String, VmValue)> = field_names.iter()
+                                let own_fields: Vec<(String, VmValue)> = field_names
+                                    .iter()
                                     .zip(field_defaults.iter())
-                                    .map(|(n, d)| (n.clone(), d.as_ref().map(VmValue::from).unwrap_or(VmValue::Nil)))
+                                    .map(|(n, d)| {
+                                        (
+                                            n.clone(),
+                                            d.as_ref().map(VmValue::from).unwrap_or(VmValue::Nil),
+                                        )
+                                    })
                                     .collect();
-                                (name.clone(), superclass.clone(), *superclass_dynamic, own_fields,
-                                 class_method_names.clone(), method_names.clone(),
-                                 private_methods.clone(), nested_class_names.clone())
+                                (
+                                    name.clone(),
+                                    superclass.clone(),
+                                    *superclass_dynamic,
+                                    own_fields,
+                                    class_method_names.clone(),
+                                    method_names.clone(),
+                                    private_methods.clone(),
+                                    nested_class_names.clone(),
+                                )
                             }
                             _ => panic!("DefClass: expected ClassDesc constant"),
                         }
@@ -742,19 +889,23 @@ impl Vm {
                     let dynamic_super: Option<String> = if superclass_dynamic {
                         match self.pop()? {
                             VmValue::Class { name, .. } => Some(name),
-                            other => return Err(VmError::TypeError {
-                                message: format!("superclass must be a class, got {}", other),
-                                line,
-                            }),
+                            other => {
+                                return Err(VmError::TypeError {
+                                    message: format!("superclass must be a class, got {}", other),
+                                    line,
+                                });
+                            }
                         }
                     } else {
                         None
                     };
                     // Drain class method closures, instance method closures, then nested
                     // class values from the stack (pushed in that order by the compiler).
-                    let n_class  = class_method_names.len();
+                    let n_class = class_method_names.len();
                     let n_nested = nested_class_names.len();
-                    let class_start = self.stack.len()
+                    let class_start = self
+                        .stack
+                        .len()
                         .checked_sub(n_class + method_names.len() + n_nested)
                         .ok_or(VmError::StackUnderflow)?;
                     let all_values: Vec<VmValue> = self.stack.drain(class_start..).collect();
@@ -765,10 +916,15 @@ impl Vm {
                     for (mname, closure) in class_method_names.iter().zip(class_closures) {
                         match closure {
                             VmValue::Closure { function, upvalues } => {
-                                own_class_methods.insert(mname.clone(), VmMethod {
-                                    function: function.clone(), upvalues: upvalues.clone(),
-                                    defined_in: class_name.clone(), private: false,
-                                });
+                                own_class_methods.insert(
+                                    mname.clone(),
+                                    VmMethod {
+                                        function: function.clone(),
+                                        upvalues: upvalues.clone(),
+                                        defined_in: class_name.clone(),
+                                        private: false,
+                                    },
+                                );
                             }
                             _ => panic!("DefClass: class method is not a closure"),
                         }
@@ -778,88 +934,113 @@ impl Vm {
                         match closure {
                             VmValue::Closure { function, upvalues } => {
                                 let private = private_methods.contains(mname);
-                                own_methods.insert(mname.clone(), VmMethod {
-                                    function: function.clone(), upvalues: upvalues.clone(),
-                                    defined_in: class_name.clone(), private,
-                                });
+                                own_methods.insert(
+                                    mname.clone(),
+                                    VmMethod {
+                                        function: function.clone(),
+                                        upvalues: upvalues.clone(),
+                                        defined_in: class_name.clone(),
+                                        private,
+                                    },
+                                );
                             }
                             _ => panic!("DefClass: method is not a closure"),
                         }
                     }
                     // Build namespace from nested class values.
-                    let namespace: HashMap<String, VmValue> = nested_class_names.iter()
+                    let namespace: HashMap<String, VmValue> = nested_class_names
+                        .iter()
                         .zip(nested_values.iter())
                         .map(|(n, v)| (n.clone(), v.clone()))
                         .collect();
                     // Resolve the effective superclass name.
-                    let effective_super = dynamic_super
-                        .or(superclass_name)
-                        .or_else(|| {
-                            if class_name != "Object" && self.classes.contains_key("Object") {
-                                Some("Object".to_string())
-                            } else {
-                                None
-                            }
-                        });
-                    // Merge inherited fields, instance methods, and class methods.
-                    let (merged_fields, merged_methods, merged_class_methods) = if let Some(ref sname) = effective_super {
-                        let (parent_fields, parent_methods, parent_class_methods) = match self.classes.get(sname) {
-                            Some(entry) => (entry.fields.clone(), (*entry.methods).clone(), (*entry.class_methods).clone()),
-                            None => return Err(VmError::TypeError {
-                                message: format!("superclass '{}' not found", sname),
-                                line,
-                            }),
-                        };
-                        let mut mf = parent_fields;
-                        mf.extend(own_fields);
-                        let mut mm = parent_methods;
-                        mm.extend(own_methods);
-                        let mut mc = parent_class_methods;
-                        mc.extend(own_class_methods);
-                        (mf, mm, mc)
-                    } else {
-                        (own_fields, own_methods, own_class_methods)
-                    };
-                    let merged_rc         = Rc::new(merged_methods);
-                    let merged_class_rc   = Rc::new(merged_class_methods);
-                    let namespace_rc = Rc::new(namespace);
-                    self.classes.insert(class_name.clone(), ClassEntry {
-                        superclass:    effective_super.clone(),
-                        fields:        merged_fields.clone(),
-                        methods:       merged_rc.clone(),
-                        class_methods: merged_class_rc.clone(),
-                        namespace:     namespace_rc.clone(),
+                    let effective_super = dynamic_super.or(superclass_name).or_else(|| {
+                        if class_name != "Object" && self.classes.contains_key("Object") {
+                            Some("Object".to_string())
+                        } else {
+                            None
+                        }
                     });
+                    // Merge inherited fields, instance methods, and class methods.
+                    let (merged_fields, merged_methods, merged_class_methods) =
+                        if let Some(ref sname) = effective_super {
+                            let (parent_fields, parent_methods, parent_class_methods) =
+                                match self.classes.get(sname) {
+                                    Some(entry) => (
+                                        entry.fields.clone(),
+                                        (*entry.methods).clone(),
+                                        (*entry.class_methods).clone(),
+                                    ),
+                                    None => {
+                                        return Err(VmError::TypeError {
+                                            message: format!("superclass '{}' not found", sname),
+                                            line,
+                                        });
+                                    }
+                                };
+                            let mut mf = parent_fields;
+                            mf.extend(own_fields);
+                            let mut mm = parent_methods;
+                            mm.extend(own_methods);
+                            let mut mc = parent_class_methods;
+                            mc.extend(own_class_methods);
+                            (mf, mm, mc)
+                        } else {
+                            (own_fields, own_methods, own_class_methods)
+                        };
+                    let merged_rc = Rc::new(merged_methods);
+                    let merged_class_rc = Rc::new(merged_class_methods);
+                    let namespace_rc = Rc::new(namespace);
+                    self.classes.insert(
+                        class_name.clone(),
+                        ClassEntry {
+                            superclass: effective_super.clone(),
+                            fields: merged_fields.clone(),
+                            methods: merged_rc.clone(),
+                            class_methods: merged_class_rc.clone(),
+                            namespace: namespace_rc.clone(),
+                        },
+                    );
                     self.stack.push(VmValue::Class {
-                        name:          class_name,
-                        superclass:    effective_super,
-                        fields:        merged_fields,
-                        methods:       merged_rc,
+                        name: class_name,
+                        superclass: effective_super,
+                        fields: merged_fields,
+                        methods: merged_rc,
                         class_methods: merged_class_rc,
-                        namespace:     namespace_rc,
+                        namespace: namespace_rc,
                     });
                 }
 
                 OpCode::NewInstance(n_pairs) => {
                     // Stack: [class, name0, val0, …, nameN, valN]
-                    let base = self.stack.len()
+                    let base = self
+                        .stack
+                        .len()
                         .checked_sub(1 + n_pairs * 2)
                         .ok_or(VmError::StackUnderflow)?;
                     let (class_name, field_decls, methods) = match &self.stack[base] {
-                        VmValue::Class { name, fields, methods, .. } =>
-                            (name.clone(), fields.clone(), methods.clone()),
-                        other => return Err(VmError::TypeError {
-                            message: format!("'{}' is not a class", other),
-                            line,
-                        }),
+                        VmValue::Class {
+                            name,
+                            fields,
+                            methods,
+                            ..
+                        } => (name.clone(), fields.clone(), methods.clone()),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("'{}' is not a class", other),
+                                line,
+                            });
+                        }
                     };
                     // Initialise fields to their declared defaults (or nil if none).
-                    let mut instance_fields: HashMap<String, VmValue> =
-                        field_decls.iter().map(|(n, default)| (n.clone(), default.clone())).collect();
+                    let mut instance_fields: HashMap<String, VmValue> = field_decls
+                        .iter()
+                        .map(|(n, default)| (n.clone(), default.clone()))
+                        .collect();
                     // Apply named constructor arguments.
                     for i in 0..n_pairs {
                         let name_val = self.stack[base + 1 + i * 2].clone();
-                        let val      = self.stack[base + 2 + i * 2].clone();
+                        let val = self.stack[base + 2 + i * 2].clone();
                         match name_val {
                             VmValue::Str(ref n) if !n.is_empty() => {
                                 instance_fields.insert(n.clone(), val);
@@ -884,23 +1065,34 @@ impl Vm {
                     let obj = self.pop()?;
                     match obj {
                         VmValue::Instance { fields, .. } => {
-                            let val = self.get_fields(fields).get(&name).cloned().unwrap_or(VmValue::Nil);
+                            let val = self
+                                .get_fields(fields)
+                                .get(&name)
+                                .cloned()
+                                .unwrap_or(VmValue::Nil);
                             self.stack.push(val);
                         }
                         // Namespace lookup: `Outer.Inner` where `Inner` is a nested class.
-                        VmValue::Class { ref namespace, .. } => {
-                            match namespace.get(&name) {
-                                Some(val) => { self.stack.push(val.clone()); }
-                                None => return Err(VmError::TypeError {
-                                    message: format!("class has no nested class or attribute '{}'", name),
-                                    line,
-                                }),
+                        VmValue::Class { ref namespace, .. } => match namespace.get(&name) {
+                            Some(val) => {
+                                self.stack.push(val.clone());
                             }
-                        }
+                            None => {
+                                return Err(VmError::TypeError {
+                                    message: format!(
+                                        "class has no nested class or attribute '{}'",
+                                        name
+                                    ),
+                                    line,
+                                });
+                            }
+                        },
                         // For primitives, treat `obj.name` as a zero-arg method call.
                         ref other => {
                             match try_native_method(&mut self.heap, other, &name, &[], line) {
-                                Some(Ok(result)) => { self.stack.push(result); }
+                                Some(Ok(result)) => {
+                                    self.stack.push(result);
+                                }
                                 Some(Err(e)) => return Err(e),
                                 None => {
                                     // Try compiled stdlib methods from class registry.
@@ -913,16 +1105,26 @@ impl Vm {
                                             self.stack.push(other.clone());
                                             let class_name = Some(m.defined_in.clone());
                                             self.frames.push(CallFrame {
-                                                function: m.function, upvalues: m.upvalues,
-                                                ip: 0, base: recv_slot,
-                                                block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                                                function: m.function,
+                                                upvalues: m.upvalues,
+                                                ip: 0,
+                                                base: recv_slot,
+                                                block: None,
+                                                is_block_caller: false,
+                                                is_native_block: false,
+                                                rescues: vec![],
                                                 class_name,
                                             });
                                         }
-                                        None => return Err(VmError::TypeError {
-                                            message: format!("cannot get field '{}' on {}", name, other),
-                                            line,
-                                        }),
+                                        None => {
+                                            return Err(VmError::TypeError {
+                                                message: format!(
+                                                    "cannot get field '{}' on {}",
+                                                    name, other
+                                                ),
+                                                line,
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -941,13 +1143,19 @@ impl Vm {
                             self.stack.push(VmValue::Nil);
                         }
                         VmValue::Instance { fields, .. } => {
-                            let val = self.get_fields(fields).get(&name).cloned().unwrap_or(VmValue::Nil);
+                            let val = self
+                                .get_fields(fields)
+                                .get(&name)
+                                .cloned()
+                                .unwrap_or(VmValue::Nil);
                             self.stack.push(val);
                         }
-                        other => return Err(VmError::TypeError {
-                            message: format!("cannot get field '{}' on {}", name, other),
-                            line,
-                        }),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("cannot get field '{}' on {}", name, other),
+                                line,
+                            });
+                        }
                     }
                 }
 
@@ -963,19 +1171,24 @@ impl Vm {
                             self.get_fields_mut(fields).insert(name, val.clone());
                             self.stack.push(val);
                         }
-                        other => return Err(VmError::TypeError {
-                            message: format!("cannot set field '{}' on {}", name, other),
-                            line,
-                        }),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("cannot set field '{}' on {}", name, other),
+                                line,
+                            });
+                        }
                     }
                 }
 
                 OpCode::Invoke(name_idx, arg_count) => {
-                    let method_name = match &self.frames.last().unwrap().function.chunk.constants[name_idx] {
-                        Constant::Str(s) => s.clone(),
-                        _ => panic!("Invoke: expected Str constant for method name"),
-                    };
-                    let recv_slot = self.stack.len()
+                    let method_name =
+                        match &self.frames.last().unwrap().function.chunk.constants[name_idx] {
+                            Constant::Str(s) => s.clone(),
+                            _ => panic!("Invoke: expected Str constant for method name"),
+                        };
+                    let recv_slot = self
+                        .stack
+                        .len()
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
 
@@ -989,7 +1202,10 @@ impl Vm {
                     }
 
                     // Lambda `.call(args)` — invoke the closure as a new frame.
-                    if method_name == "call" && let VmValue::Closure { function, upvalues } = self.stack[recv_slot].clone() {
+                    if method_name == "call"
+                        && let VmValue::Closure { function, upvalues } =
+                            self.stack[recv_slot].clone()
+                    {
                         if function.arity != arg_count {
                             return Err(VmError::TypeError {
                                 message: format!(
@@ -1002,15 +1218,25 @@ impl Vm {
                         self.frames.push(CallFrame {
                             function,
                             upvalues,
-                            ip: 0, base: recv_slot,
-                            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                            ip: 0,
+                            base: recv_slot,
+                            block: None,
+                            is_block_caller: false,
+                            is_native_block: false,
+                            rescues: vec![],
                             class_name: None,
                         });
                         continue;
                     }
 
                     // Class method dispatch: receiver is a Class value.
-                    if let VmValue::Class { ref class_methods, ref namespace, ref name, .. } = self.stack[recv_slot].clone() {
+                    if let VmValue::Class {
+                        ref class_methods,
+                        ref namespace,
+                        ref name,
+                        ..
+                    } = self.stack[recv_slot].clone()
+                    {
                         let method_opt = class_methods.get(&method_name).cloned();
                         if let Some(method) = method_opt {
                             if method.function.arity != arg_count {
@@ -1023,16 +1249,21 @@ impl Vm {
                                 });
                             }
                             self.frames.push(CallFrame {
-                                function:  method.function,
-                                upvalues:  method.upvalues,
-                                ip: 0, base: recv_slot,
-                                block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                                function: method.function,
+                                upvalues: method.upvalues,
+                                ip: 0,
+                                base: recv_slot,
+                                block: None,
+                                is_block_caller: false,
+                                is_native_block: false,
+                                rescues: vec![],
                                 class_name: Some(method.defined_in),
                             });
                         } else if name == "File" {
                             // Native File class method dispatch.
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                            let result = match dispatch_file_class_method(&method_name, &args, line) {
+                            let result = match dispatch_file_class_method(&method_name, &args, line)
+                            {
                                 Ok(val) => val,
                                 Err(VmError::Raised(val)) => {
                                     self.stack.truncate(recv_slot);
@@ -1050,10 +1281,12 @@ impl Vm {
                                     self.stack.truncate(recv_slot);
                                     self.stack.push(val.clone());
                                 }
-                                None => return Err(VmError::TypeError {
-                                    message: format!("unknown class method '{}'", method_name),
-                                    line,
-                                }),
+                                None => {
+                                    return Err(VmError::TypeError {
+                                        message: format!("unknown class method '{}'", method_name),
+                                        line,
+                                    });
+                                }
                             }
                         } else {
                             return Err(VmError::TypeError {
@@ -1086,10 +1319,17 @@ impl Vm {
                         match method {
                             Some(m) => {
                                 if m.private {
-                                    let caller_class = self.frames.last().and_then(|f| f.class_name.as_deref()).unwrap_or("");
+                                    let caller_class = self
+                                        .frames
+                                        .last()
+                                        .and_then(|f| f.class_name.as_deref())
+                                        .unwrap_or("");
                                     if caller_class != m.defined_in {
                                         return Err(VmError::TypeError {
-                                            message: format!("private method '{}' called from outside class", method_name),
+                                            message: format!(
+                                                "private method '{}' called from outside class",
+                                                method_name
+                                            ),
                                             line,
                                         });
                                     }
@@ -1109,16 +1349,22 @@ impl Vm {
                                 self.frames.push(CallFrame {
                                     function: m.function,
                                     upvalues: m.upvalues,
-                                    ip: 0, base: recv_slot,
-                                    block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                                    ip: 0,
+                                    base: recv_slot,
+                                    block: None,
+                                    is_block_caller: false,
+                                    is_native_block: false,
+                                    rescues: vec![],
                                     class_name,
                                 });
                                 continue;
                             }
-                            None => return Err(VmError::TypeError {
-                                message: format!("'{}' has no method '{}'", recv, method_name),
-                                line,
-                            }),
+                            None => {
+                                return Err(VmError::TypeError {
+                                    message: format!("'{}' has no method '{}'", recv, method_name),
+                                    line,
+                                });
+                            }
                         }
                     }
 
@@ -1128,10 +1374,17 @@ impl Vm {
                     };
                     if let Some(method) = method_opt {
                         if method.private {
-                            let caller_class = self.frames.last().and_then(|f| f.class_name.as_deref()).unwrap_or("");
+                            let caller_class = self
+                                .frames
+                                .last()
+                                .and_then(|f| f.class_name.as_deref())
+                                .unwrap_or("");
                             if caller_class != method.defined_in {
                                 return Err(VmError::TypeError {
-                                    message: format!("private method '{}' called from outside class", method_name),
+                                    message: format!(
+                                        "private method '{}' called from outside class",
+                                        method_name
+                                    ),
                                     line,
                                 });
                             }
@@ -1149,8 +1402,12 @@ impl Vm {
                         self.frames.push(CallFrame {
                             function: method.function,
                             upvalues: method.upvalues,
-                            ip: 0, base: recv_slot,
-                            block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                            ip: 0,
+                            base: recv_slot,
+                            block: None,
+                            is_block_caller: false,
+                            is_native_block: false,
+                            rescues: vec![],
                             class_name,
                         });
                     } else if arg_count == 0 {
@@ -1167,10 +1424,15 @@ impl Vm {
                                 self.stack.truncate(recv_slot);
                                 self.stack.push(val);
                             }
-                            None => return Err(VmError::TypeError {
-                                message: format!("undefined method or field '{}' not found", method_name),
-                                line,
-                            }),
+                            None => {
+                                return Err(VmError::TypeError {
+                                    message: format!(
+                                        "undefined method or field '{}' not found",
+                                        method_name
+                                    ),
+                                    line,
+                                });
+                            }
                         }
                     } else {
                         return Err(VmError::TypeError {
@@ -1181,34 +1443,63 @@ impl Vm {
                 }
 
                 OpCode::SuperInvoke(name_idx, arg_count) => {
-                    let method_name = match &self.frames.last().unwrap().function.chunk.constants[name_idx] {
-                        Constant::Str(s) => s.clone(),
-                        _ => panic!("SuperInvoke: expected Str constant"),
-                    };
-                    let current_class = self.frames.last().unwrap().class_name.clone()
-                        .ok_or_else(|| VmError::TypeError {
-                            message: "super used outside of a method".into(), line,
-                        })?;
+                    let method_name =
+                        match &self.frames.last().unwrap().function.chunk.constants[name_idx] {
+                            Constant::Str(s) => s.clone(),
+                            _ => panic!("SuperInvoke: expected Str constant"),
+                        };
+                    let current_class =
+                        self.frames
+                            .last()
+                            .unwrap()
+                            .class_name
+                            .clone()
+                            .ok_or_else(|| VmError::TypeError {
+                                message: "super used outside of a method".into(),
+                                line,
+                            })?;
                     let super_name = match self.classes.get(&current_class) {
-                        Some(ClassEntry { superclass: Some(s), .. }) => s.clone(),
-                        Some(ClassEntry { superclass: None,    .. }) => return Err(VmError::TypeError {
-                            message: format!("'{}' has no superclass", current_class), line,
-                        }),
-                        None => return Err(VmError::TypeError {
-                            message: format!("class '{}' not in registry", current_class), line,
-                        }),
+                        Some(ClassEntry {
+                            superclass: Some(s),
+                            ..
+                        }) => s.clone(),
+                        Some(ClassEntry {
+                            superclass: None, ..
+                        }) => {
+                            return Err(VmError::TypeError {
+                                message: format!("'{}' has no superclass", current_class),
+                                line,
+                            });
+                        }
+                        None => {
+                            return Err(VmError::TypeError {
+                                message: format!("class '{}' not in registry", current_class),
+                                line,
+                            });
+                        }
                     };
                     let method = match self.classes.get(&super_name) {
-                        Some(entry) => entry.methods.get(&method_name).cloned()
-                            .ok_or_else(|| VmError::TypeError {
-                                message: format!("superclass '{}' has no method '{}'", super_name, method_name),
+                        Some(entry) => {
+                            entry.methods.get(&method_name).cloned().ok_or_else(|| {
+                                VmError::TypeError {
+                                    message: format!(
+                                        "superclass '{}' has no method '{}'",
+                                        super_name, method_name
+                                    ),
+                                    line,
+                                }
+                            })?
+                        }
+                        None => {
+                            return Err(VmError::TypeError {
+                                message: format!("superclass '{}' not in registry", super_name),
                                 line,
-                            })?,
-                        None => return Err(VmError::TypeError {
-                            message: format!("superclass '{}' not in registry", super_name), line,
-                        }),
+                            });
+                        }
                     };
-                    let recv_slot = self.stack.len()
+                    let recv_slot = self
+                        .stack
+                        .len()
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
                     if method.function.arity != arg_count {
@@ -1225,42 +1516,57 @@ impl Vm {
                     self.frames.push(CallFrame {
                         function: method.function,
                         upvalues: method.upvalues,
-                        ip: 0, base: recv_slot,
-                        block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                        ip: 0,
+                        base: recv_slot,
+                        block: None,
+                        is_block_caller: false,
+                        is_native_block: false,
+                        rescues: vec![],
                         class_name: Some(super_name),
                     });
                 }
 
                 OpCode::GetSelf => {
                     let base = self.frames.last().unwrap().base;
-                    let val  = self.stack[base].clone();
+                    let val = self.stack[base].clone();
                     self.stack.push(val);
                 }
 
                 // ── Block opcodes ─────────────────────────────────────────────
-
                 OpCode::CallWithBlock(arg_count) => {
                     // Stack: [..., fn_or_closure, arg0, …, argN-1, block_closure]
                     let block_val = self.pop()?;
                     let block = match block_val {
-                        VmValue::Closure { function, upvalues } =>
-                            Some(VmMethod { function, upvalues, defined_in: String::new(), private: false }),
-                        VmValue::Nil => None,
-                        other => return Err(VmError::TypeError {
-                            message: format!("block must be a closure, got {}", other),
-                            line,
+                        VmValue::Closure { function, upvalues } => Some(VmMethod {
+                            function,
+                            upvalues,
+                            defined_in: String::new(),
+                            private: false,
                         }),
+                        VmValue::Nil => None,
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("block must be a closure, got {}", other),
+                                line,
+                            });
+                        }
                     };
-                    let fn_slot = self.stack.len()
+                    let fn_slot = self
+                        .stack
+                        .len()
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
                     let (function, upvalues) = match &self.stack[fn_slot] {
-                        VmValue::Function(f)  => (f.clone(), vec![]),
-                        VmValue::Closure { function, upvalues } =>
-                            (function.clone(), upvalues.clone()),
-                        other => return Err(VmError::TypeError {
-                            message: format!("'{}' is not callable", other), line,
-                        }),
+                        VmValue::Function(f) => (f.clone(), vec![]),
+                        VmValue::Closure { function, upvalues } => {
+                            (function.clone(), upvalues.clone())
+                        }
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("'{}' is not callable", other),
+                                line,
+                            });
+                        }
                     };
                     if function.arity != arg_count {
                         return Err(VmError::TypeError {
@@ -1272,8 +1578,14 @@ impl Vm {
                         });
                     }
                     self.frames.push(CallFrame {
-                        function, upvalues, ip: 0, base: fn_slot,
-                        block, is_block_caller: true, is_native_block: false, rescues: vec![],
+                        function,
+                        upvalues,
+                        ip: 0,
+                        base: fn_slot,
+                        block,
+                        is_block_caller: true,
+                        is_native_block: false,
+                        rescues: vec![],
                         class_name: None,
                     });
                 }
@@ -1282,19 +1594,28 @@ impl Vm {
                     // Stack: [..., receiver, arg0, …, argN-1, block_closure]
                     let block_val = self.pop()?;
                     let block = match block_val {
-                        VmValue::Closure { function, upvalues } =>
-                            Some(VmMethod { function, upvalues, defined_in: String::new(), private: false }),
-                        VmValue::Nil => None,
-                        other => return Err(VmError::TypeError {
-                            message: format!("block must be a closure, got {}", other),
-                            line,
+                        VmValue::Closure { function, upvalues } => Some(VmMethod {
+                            function,
+                            upvalues,
+                            defined_in: String::new(),
+                            private: false,
                         }),
+                        VmValue::Nil => None,
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("block must be a closure, got {}", other),
+                                line,
+                            });
+                        }
                     };
-                    let method_name = match &self.frames.last().unwrap().function.chunk.constants[name_idx] {
-                        Constant::Str(s) => s.clone(),
-                        _ => panic!("InvokeWithBlock: expected Str constant"),
-                    };
-                    let recv_slot = self.stack.len()
+                    let method_name =
+                        match &self.frames.last().unwrap().function.chunk.constants[name_idx] {
+                            Constant::Str(s) => s.clone(),
+                            _ => panic!("InvokeWithBlock: expected Str constant"),
+                        };
+                    let recv_slot = self
+                        .stack
+                        .len()
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
 
@@ -1306,7 +1627,11 @@ impl Vm {
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
                         // Peek at whether native dispatch handles this method.
                         let native_result = self.dispatch_native_block_method(
-                            &recv, &method_name, &args, block.clone(), line,
+                            &recv,
+                            &method_name,
+                            &args,
+                            block.clone(),
+                            line,
                         );
                         let is_native_miss = matches!(&native_result,
                             Err(VmError::TypeError { message, .. })
@@ -1326,19 +1651,21 @@ impl Vm {
                                 // Stack is still [..., recv, args...]; leave it for the frame.
                                 let class_name = Some(m.defined_in.clone());
                                 self.frames.push(CallFrame {
-                                    function: m.function, upvalues: m.upvalues,
-                                    ip: 0, base: recv_slot,
-                                    block, is_block_caller: true, is_native_block: false, rescues: vec![],
+                                    function: m.function,
+                                    upvalues: m.upvalues,
+                                    ip: 0,
+                                    base: recv_slot,
+                                    block,
+                                    is_block_caller: true,
+                                    is_native_block: false,
+                                    rescues: vec![],
                                     class_name,
                                 });
                                 continue;
                             }
                             None => {
                                 return Err(VmError::TypeError {
-                                    message: format!(
-                                        "no method '{}' on {}",
-                                        method_name, recv
-                                    ),
+                                    message: format!("no method '{}' on {}", method_name, recv),
                                     line,
                                 });
                             }
@@ -1346,19 +1673,27 @@ impl Vm {
                     }
 
                     let method = match &self.stack[recv_slot] {
-                        VmValue::Instance { methods, .. } =>
-                            methods.get(&method_name).cloned()
-                                .ok_or_else(|| VmError::TypeError {
-                                    message: format!("method '{}' not found", method_name),
-                                    line,
-                                })?,
+                        VmValue::Instance { methods, .. } => methods
+                            .get(&method_name)
+                            .cloned()
+                            .ok_or_else(|| VmError::TypeError {
+                                message: format!("method '{}' not found", method_name),
+                                line,
+                            })?,
                         _ => unreachable!(),
                     };
                     if method.private {
-                        let caller_class = self.frames.last().and_then(|f| f.class_name.as_deref()).unwrap_or("");
+                        let caller_class = self
+                            .frames
+                            .last()
+                            .and_then(|f| f.class_name.as_deref())
+                            .unwrap_or("");
                         if caller_class != method.defined_in {
                             return Err(VmError::TypeError {
-                                message: format!("private method '{}' called from outside class", method_name),
+                                message: format!(
+                                    "private method '{}' called from outside class",
+                                    method_name
+                                ),
                                 line,
                             });
                         }
@@ -1376,8 +1711,12 @@ impl Vm {
                     self.frames.push(CallFrame {
                         function: method.function,
                         upvalues: method.upvalues,
-                        ip: 0, base: recv_slot,
-                        block, is_block_caller: true, is_native_block: false, rescues: vec![],
+                        ip: 0,
+                        base: recv_slot,
+                        block,
+                        is_block_caller: true,
+                        is_native_block: false,
+                        rescues: vec![],
                         class_name,
                     });
                 }
@@ -1385,10 +1724,14 @@ impl Vm {
                 OpCode::Yield(arg_count) => {
                     // Walk up the frame stack to find the nearest block — this allows
                     // `yield` inside an inner block to call back to the enclosing method's block.
-                    let block = self.frames.iter().rev()
+                    let block = self
+                        .frames
+                        .iter()
+                        .rev()
                         .find_map(|f| f.block.clone())
                         .ok_or_else(|| VmError::TypeError {
-                            message: "yield called without a block".into(), line,
+                            message: "yield called without a block".into(),
+                            line,
                         })?;
                     if block.function.arity != arg_count {
                         return Err(VmError::TypeError {
@@ -1404,22 +1747,27 @@ impl Vm {
                     // as slots 1..arg_count.  We need to insert the closure
                     // below the args already on the stack.
                     let args_start = self.stack.len() - arg_count;
-                    self.stack.insert(args_start, VmValue::Closure {
-                        function: block.function.clone(),
-                        upvalues: block.upvalues.clone(),
-                    });
+                    self.stack.insert(
+                        args_start,
+                        VmValue::Closure {
+                            function: block.function.clone(),
+                            upvalues: block.upvalues.clone(),
+                        },
+                    );
                     self.frames.push(CallFrame {
                         function: block.function,
                         upvalues: block.upvalues,
-                        ip:    0,
-                        base:  args_start,
-                        block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                        ip: 0,
+                        base: args_start,
+                        block: None,
+                        is_block_caller: false,
+                        is_native_block: false,
+                        rescues: vec![],
                         class_name: None,
                     });
                 }
 
                 // ── Exception-like control flow ───────────────────────────────
-
                 OpCode::Raise => {
                     let val = self.pop()?;
                     self.raise_value(val)?;
@@ -1433,9 +1781,9 @@ impl Vm {
                     // propagate as an error so the native dispatch can catch it.
                     loop {
                         if let Some(frame) = self.frames.last() {
-                            let is_caller        = frame.is_block_caller;
-                            let is_native_block  = frame.is_native_block;
-                            let base             = frame.base;
+                            let is_caller = frame.is_block_caller;
+                            let is_native_block = frame.is_native_block;
+                            let base = frame.base;
                             self.close_upvalues_above(base);
                             self.frames.pop();
                             self.stack.truncate(base);
@@ -1456,7 +1804,7 @@ impl Vm {
 
                 OpCode::Next => {
                     // Return from the current (block) frame immediately with `val`.
-                    let val   = self.pop()?;
+                    let val = self.pop()?;
                     let frame = self.frames.pop().unwrap();
                     self.close_upvalues_above(frame.base);
                     if self.frames.is_empty() {
@@ -1466,11 +1814,16 @@ impl Vm {
                     self.stack.push(val);
                 }
 
-                OpCode::BeginRescue { handler_offset, rescue_var_slot } => {
-                    let handler_ip   = self.frames.last().unwrap().ip + handler_offset;
+                OpCode::BeginRescue {
+                    handler_offset,
+                    rescue_var_slot,
+                } => {
+                    let handler_ip = self.frames.last().unwrap().ip + handler_offset;
                     let stack_height = self.stack.len();
                     self.frames.last_mut().unwrap().rescues.push(RescueInfo {
-                        handler_ip, rescue_var_slot, stack_height,
+                        handler_ip,
+                        rescue_var_slot,
+                        stack_height,
                     });
                 }
 
@@ -1487,29 +1840,49 @@ impl Vm {
                 OpCode::GetGlobal(idx) => {
                     let name = match &self.frames.last().unwrap().function.chunk.constants[idx] {
                         Constant::Str(s) => s.clone(),
-                        _ => return Err(VmError::TypeError { message: "GetGlobal: expected string constant".to_string(), line }),
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: "GetGlobal: expected string constant".to_string(),
+                                line,
+                            });
+                        }
                     };
-                    let val = self.globals.get(&name).cloned().ok_or_else(|| VmError::TypeError {
-                        message: format!("undefined variable '{}'", name),
-                        line,
-                    })?;
+                    let val =
+                        self.globals
+                            .get(&name)
+                            .cloned()
+                            .ok_or_else(|| VmError::TypeError {
+                                message: format!("undefined variable '{}'", name),
+                                line,
+                            })?;
                     self.stack.push(val);
                 }
 
                 OpCode::SetGlobal(idx) => {
                     let name = match &self.frames.last().unwrap().function.chunk.constants[idx] {
                         Constant::Str(s) => s.clone(),
-                        _ => return Err(VmError::TypeError { message: "SetGlobal: expected string constant".to_string(), line }),
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: "SetGlobal: expected string constant".to_string(),
+                                line,
+                            });
+                        }
                     };
                     let val = self.stack.last().ok_or(VmError::StackUnderflow)?.clone();
                     self.globals.insert(name, val);
                 }
 
                 OpCode::Import(path_idx) => {
-                    let path_str = match &self.frames.last().unwrap().function.chunk.constants[path_idx] {
-                        Constant::Str(s) => s.clone(),
-                        _ => return Err(VmError::TypeError { message: "import: expected string constant".into(), line }),
-                    };
+                    let path_str =
+                        match &self.frames.last().unwrap().function.chunk.constants[path_idx] {
+                            Constant::Str(s) => s.clone(),
+                            _ => {
+                                return Err(VmError::TypeError {
+                                    message: "import: expected string constant".into(),
+                                    line,
+                                });
+                            }
+                        };
                     if self.current_dir == PathBuf::new() {
                         return Err(VmError::TypeError {
                             message: "import is not supported in the REPL".into(),
@@ -1524,20 +1897,35 @@ impl Vm {
                     if !self.imported.contains(&canonical) {
                         self.imported.insert(canonical.clone());
                         let saved_dir = self.current_dir.clone();
-                        self.current_dir = canonical.parent()
+                        self.current_dir = canonical
+                            .parent()
                             .map(|p| p.to_path_buf())
                             .unwrap_or_else(|| PathBuf::from("."));
-                        let source = std::fs::read_to_string(&canonical).map_err(|e| VmError::TypeError {
-                            message: format!("import: could not read {}: {}", canonical.display(), e),
-                            line,
+                        let source = std::fs::read_to_string(&canonical).map_err(|e| {
+                            VmError::TypeError {
+                                message: format!(
+                                    "import: could not read {}: {}",
+                                    canonical.display(),
+                                    e
+                                ),
+                                line,
+                            }
                         })?;
                         let tokens = crate::lexer::Lexer::new(&source).scan_tokens();
-                        let stmts = crate::parser::Parser::new(tokens).parse()
-                            .map_err(|e| VmError::TypeError { message: format!("import {}: {}", canonical.display(), e), line: 0 })?;
+                        let stmts = crate::parser::Parser::new(tokens).parse().map_err(|e| {
+                            VmError::TypeError {
+                                message: format!("import {}: {}", canonical.display(), e),
+                                line: 0,
+                            }
+                        })?;
                         // Compile in global mode so imported classes/functions are
                         // stored as globals and remain accessible after the frame exits.
-                        let func = crate::compiler::compile_repl(&stmts)
-                            .map_err(|e| VmError::TypeError { message: format!("import {}: {}", canonical.display(), e), line: 0 })?;
+                        let func = crate::compiler::compile_repl(&stmts).map_err(|e| {
+                            VmError::TypeError {
+                                message: format!("import {}: {}", canonical.display(), e),
+                                line: 0,
+                            }
+                        })?;
                         self.run_extra(func)?;
                         self.current_dir = saved_dir;
                     }
@@ -1545,7 +1933,9 @@ impl Vm {
 
                 OpCode::Call(arg_count) => {
                     // Stack: [..., fn_or_closure, arg0, …, argN-1]
-                    let fn_slot = self.stack.len()
+                    let fn_slot = self
+                        .stack
+                        .len()
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
 
@@ -1554,10 +1944,12 @@ impl Vm {
                         VmValue::Closure { function, upvalues } => {
                             (function.clone(), upvalues.clone())
                         }
-                        other => return Err(VmError::TypeError {
-                            message: format!("'{}' is not callable", other),
-                            line,
-                        }),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("'{}' is not callable", other),
+                                line,
+                            });
+                        }
                     };
                     if function.arity != arg_count {
                         return Err(VmError::TypeError {
@@ -1572,15 +1964,21 @@ impl Vm {
                     // Slot 1..arity are the arguments.
                     let base = fn_slot;
                     self.frames.push(CallFrame {
-                        function, upvalues, ip: 0, base,
-                        block: None, is_block_caller: false, is_native_block: false, rescues: vec![],
+                        function,
+                        upvalues,
+                        ip: 0,
+                        base,
+                        block: None,
+                        is_block_caller: false,
+                        is_native_block: false,
+                        rescues: vec![],
                         class_name: None,
                     });
                 }
 
                 OpCode::Return => {
                     let return_val = self.stack.pop();
-                    let frame      = self.frames.pop().unwrap();
+                    let frame = self.frames.pop().unwrap();
 
                     // Close every upvalue that points into the returning frame.
                     self.close_upvalues_above(frame.base);
@@ -1615,12 +2013,14 @@ impl Vm {
                 OpCode::Negate => {
                     let v = self.pop()?;
                     self.stack.push(match v {
-                        VmValue::Int(n)   => VmValue::Int(-n),
+                        VmValue::Int(n) => VmValue::Int(-n),
                         VmValue::Float(n) => VmValue::Float(-n),
-                        other => return Err(VmError::TypeError {
-                            message: format!("cannot negate {}", other),
-                            line,
-                        }),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("cannot negate {}", other),
+                                line,
+                            });
+                        }
                     });
                 }
                 OpCode::Not => {
@@ -1639,87 +2039,171 @@ impl Vm {
                 }
                 OpCode::Sub => {
                     let (a, b) = self.pop2()?;
-                    self.stack.push(numeric_binop(&a, &b, line, "subtract", |x, y| x - y, |x, y| x - y)?);
+                    self.stack.push(numeric_binop(
+                        &a,
+                        &b,
+                        line,
+                        "subtract",
+                        |x, y| x - y,
+                        |x, y| x - y,
+                    )?);
                 }
                 OpCode::Mul => {
                     let (a, b) = self.pop2()?;
-                    self.stack.push(numeric_binop(&a, &b, line, "multiply", |x, y| x * y, |x, y| x * y)?);
+                    self.stack.push(numeric_binop(
+                        &a,
+                        &b,
+                        line,
+                        "multiply",
+                        |x, y| x * y,
+                        |x, y| x * y,
+                    )?);
                 }
                 OpCode::Div => {
                     let (a, b) = self.pop2()?;
-                    let is_zero = matches!(&b, VmValue::Int(0)) || matches!(&b, VmValue::Float(f) if *f == 0.0);
+                    let is_zero = matches!(&b, VmValue::Int(0))
+                        || matches!(&b, VmValue::Float(f) if *f == 0.0);
                     if is_zero {
                         self.raise_value(VmValue::Str("division by zero".into()))?;
                         continue;
                     }
-                    self.stack.push(numeric_binop(&a, &b, line, "divide", |x, y| x / y, |x, y| x / y)?);
+                    self.stack.push(numeric_binop(
+                        &a,
+                        &b,
+                        line,
+                        "divide",
+                        |x, y| x / y,
+                        |x, y| x / y,
+                    )?);
                 }
                 OpCode::Mod => {
                     let (a, b) = self.pop2()?;
-                    let is_zero = matches!(&b, VmValue::Int(0)) || matches!(&b, VmValue::Float(f) if *f == 0.0);
+                    let is_zero = matches!(&b, VmValue::Int(0))
+                        || matches!(&b, VmValue::Float(f) if *f == 0.0);
                     if is_zero {
                         self.raise_value(VmValue::Str("division by zero".into()))?;
                         continue;
                     }
-                    self.stack.push(numeric_binop(&a, &b, line, "modulo", |x, y| x % y, |x, y| x % y)?);
+                    self.stack.push(numeric_binop(
+                        &a,
+                        &b,
+                        line,
+                        "modulo",
+                        |x, y| x % y,
+                        |x, y| x % y,
+                    )?);
                 }
 
                 OpCode::BitAnd => {
                     let (a, b) = self.pop2()?;
                     match (&a, &b) {
                         (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x & y)),
-                        _ => return Err(VmError::TypeError { message: format!("bitwise AND requires integers, got {} and {}", a, b), line }),
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "bitwise AND requires integers, got {} and {}",
+                                    a, b
+                                ),
+                                line,
+                            });
+                        }
                     }
                 }
                 OpCode::BitOr => {
                     let (a, b) = self.pop2()?;
                     match (&a, &b) {
                         (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x | y)),
-                        _ => return Err(VmError::TypeError { message: format!("bitwise OR requires integers, got {} and {}", a, b), line }),
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "bitwise OR requires integers, got {} and {}",
+                                    a, b
+                                ),
+                                line,
+                            });
+                        }
                     }
                 }
                 OpCode::BitXor => {
                     let (a, b) = self.pop2()?;
                     match (&a, &b) {
                         (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x ^ y)),
-                        _ => return Err(VmError::TypeError { message: format!("bitwise XOR requires integers, got {} and {}", a, b), line }),
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "bitwise XOR requires integers, got {} and {}",
+                                    a, b
+                                ),
+                                line,
+                            });
+                        }
                     }
                 }
                 OpCode::BitNot => {
                     let v = self.pop()?;
                     match v {
                         VmValue::Int(n) => self.stack.push(VmValue::Int(!n)),
-                        other => return Err(VmError::TypeError { message: format!("bitwise NOT requires an integer, got {}", other), line }),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("bitwise NOT requires an integer, got {}", other),
+                                line,
+                            });
+                        }
                     }
                 }
                 OpCode::Shl => {
                     let (a, b) = self.pop2()?;
                     match (&a, &b) {
                         (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x << y)),
-                        _ => return Err(VmError::TypeError { message: format!("left shift requires integers, got {} and {}", a, b), line }),
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "left shift requires integers, got {} and {}",
+                                    a, b
+                                ),
+                                line,
+                            });
+                        }
                     }
                 }
                 OpCode::Shr => {
                     let (a, b) = self.pop2()?;
                     match (&a, &b) {
                         (VmValue::Int(x), VmValue::Int(y)) => self.stack.push(VmValue::Int(x >> y)),
-                        _ => return Err(VmError::TypeError { message: format!("right shift requires integers, got {} and {}", a, b), line }),
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "right shift requires integers, got {} and {}",
+                                    a, b
+                                ),
+                                line,
+                            });
+                        }
                     }
                 }
 
-                OpCode::Equal    => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a == b)); }
-                OpCode::NotEqual => { let (a, b) = self.pop2()?; self.stack.push(VmValue::Bool(a != b)); }
+                OpCode::Equal => {
+                    let (a, b) = self.pop2()?;
+                    self.stack.push(VmValue::Bool(a == b));
+                }
+                OpCode::NotEqual => {
+                    let (a, b) = self.pop2()?;
+                    self.stack.push(VmValue::Bool(a != b));
+                }
 
                 OpCode::Len => {
                     let val = self.pop()?;
                     let n = match &val {
                         VmValue::List(r) => self.get_list(*r).len() as i64,
-                        VmValue::Map(r)  => self.get_map(*r).len() as i64,
-                        VmValue::Str(s)  => s.chars().count() as i64,
+                        VmValue::Map(r) => self.get_map(*r).len() as i64,
+                        VmValue::Str(s) => s.chars().count() as i64,
                         VmValue::Range { from, to } => (to - from).max(0),
-                        other => return Err(VmError::TypeError {
-                            message: format!("len() not supported for {}", other), line,
-                        }),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("len() not supported for {}", other),
+                                line,
+                            });
+                        }
                     };
                     self.stack.push(VmValue::Int(n));
                 }
@@ -1728,9 +2212,12 @@ impl Vm {
                     let val = self.pop()?;
                     let mut keys = match val {
                         VmValue::Map(r) => self.get_map(r).keys().cloned().collect::<Vec<_>>(),
-                        other => return Err(VmError::TypeError {
-                            message: format!("map_keys() not supported for {}", other), line,
-                        }),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("map_keys() not supported for {}", other),
+                                line,
+                            });
+                        }
                     };
                     keys.sort();
                     let list = keys.into_iter().map(VmValue::Str).collect();
@@ -1742,9 +2229,12 @@ impl Vm {
                     let val = self.pop()?;
                     match val {
                         VmValue::Range { from, .. } => self.stack.push(VmValue::Int(from)),
-                        other => return Err(VmError::TypeError {
-                            message: format!("range_from() not supported for {}", other), line,
-                        }),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("range_from() not supported for {}", other),
+                                line,
+                            });
+                        }
                     }
                 }
 
@@ -1752,27 +2242,34 @@ impl Vm {
                     let val = self.pop()?;
                     match val {
                         VmValue::Range { to, .. } => self.stack.push(VmValue::Int(to)),
-                        other => return Err(VmError::TypeError {
-                            message: format!("range_to() not supported for {}", other), line,
-                        }),
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("range_to() not supported for {}", other),
+                                line,
+                            });
+                        }
                     }
                 }
 
                 OpCode::Less => {
                     let (a, b) = self.pop2()?;
-                    self.stack.push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x < y)?));
+                    self.stack
+                        .push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x < y)?));
                 }
                 OpCode::LessEqual => {
                     let (a, b) = self.pop2()?;
-                    self.stack.push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x <= y)?));
+                    self.stack
+                        .push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x <= y)?));
                 }
                 OpCode::Greater => {
                     let (a, b) = self.pop2()?;
-                    self.stack.push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x > y)?));
+                    self.stack
+                        .push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x > y)?));
                 }
                 OpCode::GreaterEqual => {
                     let (a, b) = self.pop2()?;
-                    self.stack.push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x >= y)?));
+                    self.stack
+                        .push(VmValue::Bool(numeric_cmp(&a, &b, line, |x, y| x >= y)?));
                 }
             }
         }
@@ -1783,9 +2280,11 @@ impl Vm {
     /// Return an open upvalue for `stack_idx`, reusing an existing one if
     /// present (so all closures that capture the same slot share one cell).
     fn capture_upvalue(&mut self, stack_idx: usize) -> Upvalue {
-        if let Some(uv) = self.open_upvalues.iter().find(|uv| {
-            matches!(*uv.0.borrow(), UpvalueState::Open(i) if i == stack_idx)
-        }) {
+        if let Some(uv) = self
+            .open_upvalues
+            .iter()
+            .find(|uv| matches!(*uv.0.borrow(), UpvalueState::Open(i) if i == stack_idx))
+        {
             return uv.clone();
         }
         let uv = Upvalue::new_open(stack_idx);
@@ -1798,7 +2297,9 @@ impl Vm {
     fn close_upvalues_above(&mut self, first_slot: usize) {
         for uv in &self.open_upvalues {
             let mut state = uv.0.borrow_mut();
-            if let UpvalueState::Open(idx) = *state && idx >= first_slot {
+            if let UpvalueState::Open(idx) = *state
+                && idx >= first_slot
+            {
                 let val = self.stack[idx].clone();
                 *state = UpvalueState::Closed(val);
             }
@@ -1823,8 +2324,12 @@ impl Vm {
         self.frames.push(CallFrame {
             function: block.function.clone(),
             upvalues: block.upvalues.clone(),
-            ip: 0, base,
-            block: None, is_block_caller: false, is_native_block: true, rescues: vec![],
+            ip: 0,
+            base,
+            block: None,
+            is_block_caller: false,
+            is_native_block: true,
+            rescues: vec![],
             class_name: None,
         });
         // run_inner stops when the block's frame returns (frames.len() drops to min_depth)
@@ -1851,121 +2356,126 @@ impl Vm {
             VmValue::List(r) => {
                 let r = *r;
                 match name {
-                "each" => {
-                    let items: Vec<VmValue> = self.get_list(r).clone();
-                    for item in items {
-                        match self.call_block(&blk, vec![item]) {
-                            Err(VmError::Next(_)) => continue,
-                            Err(VmError::Break(v)) => return Ok(v),
-                            Err(e) => return Err(e),
-                            Ok(_) => {}
+                    "each" => {
+                        let items: Vec<VmValue> = self.get_list(r).clone();
+                        for item in items {
+                            match self.call_block(&blk, vec![item]) {
+                                Err(VmError::Next(_)) => continue,
+                                Err(VmError::Break(v)) => return Ok(v),
+                                Err(e) => return Err(e),
+                                Ok(_) => {}
+                            }
                         }
+                        Ok(recv.clone())
                     }
-                    Ok(recv.clone())
-                }
-                "map" => {
-                    let items: Vec<VmValue> = self.get_list(r).clone();
-                    let mut out = Vec::with_capacity(items.len());
-                    for item in items {
-                        match self.call_block(&blk, vec![item]) {
-                            Err(VmError::Next(v)) => out.push(v),
-                            Err(VmError::Break(v)) => { out.push(v); break; }
-                            Err(e) => return Err(e),
-                            Ok(v) => out.push(v),
+                    "map" => {
+                        let items: Vec<VmValue> = self.get_list(r).clone();
+                        let mut out = Vec::with_capacity(items.len());
+                        for item in items {
+                            match self.call_block(&blk, vec![item]) {
+                                Err(VmError::Next(v)) => out.push(v),
+                                Err(VmError::Break(v)) => {
+                                    out.push(v);
+                                    break;
+                                }
+                                Err(e) => return Err(e),
+                                Ok(v) => out.push(v),
+                            }
                         }
+                        Ok(self.alloc_list(out))
                     }
-                    Ok(self.alloc_list(out))
-                }
-                "select" | "filter" => {
-                    let items: Vec<VmValue> = self.get_list(r).clone();
-                    let mut out = Vec::new();
-                    for item in items {
-                        match self.call_block(&blk, vec![item.clone()]) {
-                            Err(VmError::Break(_)) => break,
-                            Err(e) => return Err(e),
-                            Ok(v) if !is_falsy(&v) => out.push(item),
-                            Ok(_) => {}
+                    "select" | "filter" => {
+                        let items: Vec<VmValue> = self.get_list(r).clone();
+                        let mut out = Vec::new();
+                        for item in items {
+                            match self.call_block(&blk, vec![item.clone()]) {
+                                Err(VmError::Break(_)) => break,
+                                Err(e) => return Err(e),
+                                Ok(v) if !is_falsy(&v) => out.push(item),
+                                Ok(_) => {}
+                            }
                         }
+                        Ok(self.alloc_list(out))
                     }
-                    Ok(self.alloc_list(out))
-                }
-                "reject" => {
-                    let items: Vec<VmValue> = self.get_list(r).clone();
-                    let mut out = Vec::new();
-                    for item in items {
-                        match self.call_block(&blk, vec![item.clone()]) {
-                            Err(VmError::Break(_)) => break,
-                            Err(e) => return Err(e),
-                            Ok(v) if is_falsy(&v) => out.push(item),
-                            Ok(_) => {}
+                    "reject" => {
+                        let items: Vec<VmValue> = self.get_list(r).clone();
+                        let mut out = Vec::new();
+                        for item in items {
+                            match self.call_block(&blk, vec![item.clone()]) {
+                                Err(VmError::Break(_)) => break,
+                                Err(e) => return Err(e),
+                                Ok(v) if is_falsy(&v) => out.push(item),
+                                Ok(_) => {}
+                            }
                         }
+                        Ok(self.alloc_list(out))
                     }
-                    Ok(self.alloc_list(out))
-                }
-                "any?" => {
-                    let items: Vec<VmValue> = self.get_list(r).clone();
-                    for item in items {
-                        match self.call_block(&blk, vec![item]) {
-                            Err(VmError::Break(_)) => return Ok(VmValue::Bool(false)),
-                            Err(e) => return Err(e),
-                            Ok(v) if !is_falsy(&v) => return Ok(VmValue::Bool(true)),
-                            Ok(_) => {}
+                    "any?" => {
+                        let items: Vec<VmValue> = self.get_list(r).clone();
+                        for item in items {
+                            match self.call_block(&blk, vec![item]) {
+                                Err(VmError::Break(_)) => return Ok(VmValue::Bool(false)),
+                                Err(e) => return Err(e),
+                                Ok(v) if !is_falsy(&v) => return Ok(VmValue::Bool(true)),
+                                Ok(_) => {}
+                            }
                         }
+                        Ok(VmValue::Bool(false))
                     }
-                    Ok(VmValue::Bool(false))
-                }
-                "all?" => {
-                    let items: Vec<VmValue> = self.get_list(r).clone();
-                    for item in items {
-                        match self.call_block(&blk, vec![item]) {
-                            Err(VmError::Break(_)) => return Ok(VmValue::Bool(true)),
-                            Err(e) => return Err(e),
-                            Ok(v) if is_falsy(&v) => return Ok(VmValue::Bool(false)),
-                            Ok(_) => {}
+                    "all?" => {
+                        let items: Vec<VmValue> = self.get_list(r).clone();
+                        for item in items {
+                            match self.call_block(&blk, vec![item]) {
+                                Err(VmError::Break(_)) => return Ok(VmValue::Bool(true)),
+                                Err(e) => return Err(e),
+                                Ok(v) if is_falsy(&v) => return Ok(VmValue::Bool(false)),
+                                Ok(_) => {}
+                            }
                         }
+                        Ok(VmValue::Bool(true))
                     }
-                    Ok(VmValue::Bool(true))
-                }
-                "none?" => {
-                    let items: Vec<VmValue> = self.get_list(r).clone();
-                    for item in items {
-                        match self.call_block(&blk, vec![item]) {
-                            Err(VmError::Break(_)) => return Ok(VmValue::Bool(true)),
-                            Err(e) => return Err(e),
-                            Ok(v) if !is_falsy(&v) => return Ok(VmValue::Bool(false)),
-                            Ok(_) => {}
+                    "none?" => {
+                        let items: Vec<VmValue> = self.get_list(r).clone();
+                        for item in items {
+                            match self.call_block(&blk, vec![item]) {
+                                Err(VmError::Break(_)) => return Ok(VmValue::Bool(true)),
+                                Err(e) => return Err(e),
+                                Ok(v) if !is_falsy(&v) => return Ok(VmValue::Bool(false)),
+                                Ok(_) => {}
+                            }
                         }
+                        Ok(VmValue::Bool(true))
                     }
-                    Ok(VmValue::Bool(true))
-                }
-                "reduce" | "inject" => {
-                    let items: Vec<VmValue> = self.get_list(r).clone();
-                    let mut acc = if args.is_empty() {
-                        items.first().cloned().unwrap_or(VmValue::Nil)
-                    } else {
-                        args[0].clone()
-                    };
-                    let skip = if args.is_empty() { 1 } else { 0 };
-                    for item in items.into_iter().skip(skip) {
-                        acc = self.call_block(&blk, vec![acc, item])?;
-                    }
-                    Ok(acc)
-                }
-                "each_with_index" => {
-                    let items: Vec<VmValue> = self.get_list(r).clone();
-                    for (i, item) in items.into_iter().enumerate() {
-                        match self.call_block(&blk, vec![item, VmValue::Int(i as i64)]) {
-                            Err(VmError::Break(v)) => return Ok(v),
-                            Err(e) => return Err(e),
-                            Ok(_) => {}
+                    "reduce" | "inject" => {
+                        let items: Vec<VmValue> = self.get_list(r).clone();
+                        let mut acc = if args.is_empty() {
+                            items.first().cloned().unwrap_or(VmValue::Nil)
+                        } else {
+                            args[0].clone()
+                        };
+                        let skip = if args.is_empty() { 1 } else { 0 };
+                        for item in items.into_iter().skip(skip) {
+                            acc = self.call_block(&blk, vec![acc, item])?;
                         }
+                        Ok(acc)
                     }
-                    Ok(recv.clone())
+                    "each_with_index" => {
+                        let items: Vec<VmValue> = self.get_list(r).clone();
+                        for (i, item) in items.into_iter().enumerate() {
+                            match self.call_block(&blk, vec![item, VmValue::Int(i as i64)]) {
+                                Err(VmError::Break(v)) => return Ok(v),
+                                Err(e) => return Err(e),
+                                Ok(_) => {}
+                            }
+                        }
+                        Ok(recv.clone())
+                    }
+                    _ => Err(VmError::TypeError {
+                        message: format!("List has no block method '{}'", name),
+                        line,
+                    }),
                 }
-                _ => Err(VmError::TypeError {
-                    message: format!("List has no block method '{}'", name), line,
-                }),
-            }},
+            }
 
             VmValue::Range { from, to } => {
                 let (from, to) = (*from, *to);
@@ -1974,7 +2484,10 @@ impl Vm {
                         let mut i = from;
                         while i < to {
                             match self.call_block(&blk, vec![VmValue::Int(i)]) {
-                                Err(VmError::Next(_)) => { i += 1; continue; }
+                                Err(VmError::Next(_)) => {
+                                    i += 1;
+                                    continue;
+                                }
                                 Err(VmError::Break(v)) => return Ok(v),
                                 Err(e) => return Err(e),
                                 Ok(_) => {}
@@ -1991,7 +2504,8 @@ impl Vm {
                         Ok(self.alloc_list(out))
                     }
                     _ => Err(VmError::TypeError {
-                        message: format!("Range has no block method '{}'", name), line,
+                        message: format!("Range has no block method '{}'", name),
+                        line,
                     }),
                 }
             }
@@ -2013,7 +2527,12 @@ impl Vm {
                     let from = *n;
                     let to = match args.first() {
                         Some(VmValue::Int(t)) => *t,
-                        _ => return Err(VmError::TypeError { message: "upto expects an Int".into(), line }),
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: "upto expects an Int".into(),
+                                line,
+                            });
+                        }
                     };
                     for i in from..=to {
                         match self.call_block(&blk, vec![VmValue::Int(i)]) {
@@ -2025,40 +2544,47 @@ impl Vm {
                     Ok(recv.clone())
                 }
                 _ => Err(VmError::TypeError {
-                    message: format!("Int has no block method '{}'", name), line,
+                    message: format!("Int has no block method '{}'", name),
+                    line,
                 }),
             },
 
             VmValue::Map(r) => {
                 let r = *r;
                 match name {
-                "each" => {
-                    let pairs: Vec<(String, VmValue)> = self.get_map(r).iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect();
-                    for (k, v) in pairs {
-                        match self.call_block(&blk, vec![VmValue::Str(k), v]) {
-                            Err(VmError::Break(val)) => return Ok(val),
-                            Err(e) => return Err(e),
-                            Ok(_) => {}
+                    "each" => {
+                        let pairs: Vec<(String, VmValue)> = self
+                            .get_map(r)
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect();
+                        for (k, v) in pairs {
+                            match self.call_block(&blk, vec![VmValue::Str(k), v]) {
+                                Err(VmError::Break(val)) => return Ok(val),
+                                Err(e) => return Err(e),
+                                Ok(_) => {}
+                            }
                         }
+                        Ok(recv.clone())
                     }
-                    Ok(recv.clone())
-                }
-                "map" => {
-                    let pairs: Vec<(String, VmValue)> = self.get_map(r).iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect();
-                    let mut out = Vec::with_capacity(pairs.len());
-                    for (k, v) in pairs {
-                        out.push(self.call_block(&blk, vec![VmValue::Str(k), v])?);
+                    "map" => {
+                        let pairs: Vec<(String, VmValue)> = self
+                            .get_map(r)
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect();
+                        let mut out = Vec::with_capacity(pairs.len());
+                        for (k, v) in pairs {
+                            out.push(self.call_block(&blk, vec![VmValue::Str(k), v])?);
+                        }
+                        Ok(self.alloc_list(out))
                     }
-                    Ok(self.alloc_list(out))
+                    _ => Err(VmError::TypeError {
+                        message: format!("Map has no block method '{}'", name),
+                        line,
+                    }),
                 }
-                _ => Err(VmError::TypeError {
-                    message: format!("Map has no block method '{}'", name), line,
-                }),
-            }},
+            }
 
             other => Err(VmError::TypeError {
                 message: format!("'{}' does not support block method '{}'", other, name),
@@ -2115,13 +2641,20 @@ impl Vm {
         let mut names: Vec<&String> = self.classes.keys().collect();
         names.sort();
         for class_name in names {
-            if class_name == "Test" { continue; }
-            if !vm_is_subclass(&self.classes, class_name.clone(), "Test") { continue; }
+            if class_name == "Test" {
+                continue;
+            }
+            if !vm_is_subclass(&self.classes, class_name.clone(), "Test") {
+                continue;
+            }
             let entry = &self.classes[class_name];
-            let mut tests: Vec<(String, VmMethod)> = entry.methods
+            let mut tests: Vec<(String, VmMethod)> = entry
+                .methods
                 .iter()
                 .filter(|(name, _)| name.starts_with("test_"))
-                .map(|(name, method)| (name.trim_start_matches("test_").to_string(), method.clone()))
+                .map(|(name, method)| {
+                    (name.trim_start_matches("test_").to_string(), method.clone())
+                })
                 .collect();
             tests.sort_by(|a, b| a.0.cmp(&b.0));
             if !tests.is_empty() {
@@ -2167,10 +2700,13 @@ impl Vm {
         class_name: &str,
         test_method: &VmMethod,
     ) -> Result<(), String> {
-        let entry = self.classes.get(class_name)
+        let entry = self
+            .classes
+            .get(class_name)
             .ok_or_else(|| format!("class '{}' not found", class_name))?;
 
-        let fields_map: HashMap<String, VmValue> = entry.fields
+        let fields_map: HashMap<String, VmValue> = entry
+            .fields
             .iter()
             .map(|(name, val)| (name.clone(), val.clone()))
             .collect();
@@ -2216,7 +2752,9 @@ fn dispatch_native_method(
         VmValue::Nil => dispatch_nil_method(name, args, line),
         VmValue::List(r) => dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => dispatch_map_method(heap, *r, recv, name, args, line),
-        VmValue::Range { from, to } => dispatch_range_method(heap, *from, *to, recv, name, args, line),
+        VmValue::Range { from, to } => {
+            dispatch_range_method(heap, *from, *to, recv, name, args, line)
+        }
         other => Err(VmError::TypeError {
             message: format!("'{}' has no method '{}'", other, name),
             line,
@@ -2224,121 +2762,171 @@ fn dispatch_native_method(
     }
 }
 
-fn dispatch_int_method(n: i64, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+fn dispatch_int_method(
+    n: i64,
+    name: &str,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError {
+        message: msg.to_string(),
+        line,
+    };
     match (name, args) {
-        ("to_s",  [])                           => Ok(VmValue::Str(n.to_string())),
-        ("to_f",  [])                           => Ok(VmValue::Float(n as f64)),
-        ("pow",   [VmValue::Int(e)]) if *e >= 0 => Ok(VmValue::Int(n.pow(*e as u32))),
+        ("to_s", []) => Ok(VmValue::Str(n.to_string())),
+        ("to_f", []) => Ok(VmValue::Float(n as f64)),
+        ("pow", [VmValue::Int(e)]) if *e >= 0 => Ok(VmValue::Int(n.pow(*e as u32))),
         _ => Err(type_err(&format!("Int has no method '{}'", name))),
     }
 }
 
-fn dispatch_float_method(n: f64, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+fn dispatch_float_method(
+    n: f64,
+    name: &str,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError {
+        message: msg.to_string(),
+        line,
+    };
     match (name, args) {
-        ("to_s",  []) => Ok(VmValue::Str(if n.fract() == 0.0 {
+        ("to_s", []) => Ok(VmValue::Str(if n.fract() == 0.0 {
             format!("{}.0", n as i64)
         } else {
             format!("{}", n)
         })),
-        ("to_i",  []) => Ok(VmValue::Int(n as i64)),
+        ("to_i", []) => Ok(VmValue::Int(n as i64)),
         ("round", []) => Ok(VmValue::Int(n.round() as i64)),
         ("floor", []) => Ok(VmValue::Int(n.floor() as i64)),
-        ("ceil",  []) => Ok(VmValue::Int(n.ceil() as i64)),
-        ("sqrt",  []) => Ok(VmValue::Float(n.sqrt())),
-        ("nan?",  []) => Ok(VmValue::Bool(n.is_nan())),
+        ("ceil", []) => Ok(VmValue::Int(n.ceil() as i64)),
+        ("sqrt", []) => Ok(VmValue::Float(n.sqrt())),
+        ("nan?", []) => Ok(VmValue::Bool(n.is_nan())),
         ("infinite?", []) => Ok(VmValue::Bool(n.is_infinite())),
         _ => Err(type_err(&format!("Float has no method '{}'", name))),
     }
 }
 
-fn dispatch_str_method(heap: &mut GcHeap<HeapObject>, s: &str, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+fn dispatch_str_method(
+    heap: &mut GcHeap<HeapObject>,
+    s: &str,
+    name: &str,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError {
+        message: msg.to_string(),
+        line,
+    };
     match name {
-            "size" | "length" if args.is_empty() => Ok(VmValue::Int(s.chars().count() as i64)),
-            "upcase"   if args.is_empty() => Ok(VmValue::Str(s.to_uppercase())),
-            "downcase" if args.is_empty() => Ok(VmValue::Str(s.to_lowercase())),
-            "reverse"  if args.is_empty() => Ok(VmValue::Str(s.chars().rev().collect())),
-            "strip" | "trim" if args.is_empty() => Ok(VmValue::Str(s.trim().to_string())),
-            "chomp"    if args.is_empty() => Ok(VmValue::Str(s.trim_end_matches('\n').to_string())),
-            "to_i"     if args.is_empty() => Ok(VmValue::Int(s.trim().parse::<i64>().unwrap_or(0))),
-            "to_f"     if args.is_empty() => Ok(VmValue::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
-            "to_s"     if args.is_empty() => Ok(VmValue::Str(s.to_string())),
-            "empty?"   if args.is_empty() => Ok(VmValue::Bool(s.is_empty())),
-            "chars"    if args.is_empty() => {
-                let chars: Vec<VmValue> = s.chars().map(|c| VmValue::Str(c.to_string())).collect();
-                Ok(VmValue::List(heap.alloc(HeapObject::List(chars))))
+        "size" | "length" if args.is_empty() => Ok(VmValue::Int(s.chars().count() as i64)),
+        "upcase" if args.is_empty() => Ok(VmValue::Str(s.to_uppercase())),
+        "downcase" if args.is_empty() => Ok(VmValue::Str(s.to_lowercase())),
+        "reverse" if args.is_empty() => Ok(VmValue::Str(s.chars().rev().collect())),
+        "strip" | "trim" if args.is_empty() => Ok(VmValue::Str(s.trim().to_string())),
+        "chomp" if args.is_empty() => Ok(VmValue::Str(s.trim_end_matches('\n').to_string())),
+        "to_i" if args.is_empty() => Ok(VmValue::Int(s.trim().parse::<i64>().unwrap_or(0))),
+        "to_f" if args.is_empty() => Ok(VmValue::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
+        "to_s" if args.is_empty() => Ok(VmValue::Str(s.to_string())),
+        "empty?" if args.is_empty() => Ok(VmValue::Bool(s.is_empty())),
+        "chars" if args.is_empty() => {
+            let chars: Vec<VmValue> = s.chars().map(|c| VmValue::Str(c.to_string())).collect();
+            Ok(VmValue::List(heap.alloc(HeapObject::List(chars))))
+        }
+        "bytes" if args.is_empty() => {
+            let bytes: Vec<VmValue> = s.bytes().map(|b| VmValue::Int(b as i64)).collect();
+            Ok(VmValue::List(heap.alloc(HeapObject::List(bytes))))
+        }
+        "lines" if args.is_empty() => {
+            let lines: Vec<VmValue> = s.lines().map(|l| VmValue::Str(l.to_string())).collect();
+            Ok(VmValue::List(heap.alloc(HeapObject::List(lines))))
+        }
+        "include?" if args.len() == 1 => match &args[0] {
+            VmValue::Str(pat) => Ok(VmValue::Bool(s.contains(pat.as_str()))),
+            _ => Err(type_err("include? expects a String")),
+        },
+        "starts_with?" if args.len() == 1 => match &args[0] {
+            VmValue::Str(pat) => Ok(VmValue::Bool(s.starts_with(pat.as_str()))),
+            _ => Err(type_err("starts_with? expects a String")),
+        },
+        "ends_with?" if args.len() == 1 => match &args[0] {
+            VmValue::Str(pat) => Ok(VmValue::Bool(s.ends_with(pat.as_str()))),
+            _ => Err(type_err("ends_with? expects a String")),
+        },
+        "split" => match args {
+            [] => {
+                let parts: Vec<VmValue> = s
+                    .split_whitespace()
+                    .map(|p| VmValue::Str(p.to_string()))
+                    .collect();
+                Ok(VmValue::List(heap.alloc(HeapObject::List(parts))))
             }
-            "bytes"    if args.is_empty() => {
-                let bytes: Vec<VmValue> = s.bytes().map(|b| VmValue::Int(b as i64)).collect();
-                Ok(VmValue::List(heap.alloc(HeapObject::List(bytes))))
+            [VmValue::Str(sep)] => {
+                let parts: Vec<VmValue> = s
+                    .split(sep.as_str())
+                    .map(|p| VmValue::Str(p.to_string()))
+                    .collect();
+                Ok(VmValue::List(heap.alloc(HeapObject::List(parts))))
             }
-            "lines"    if args.is_empty() => {
-                let lines: Vec<VmValue> = s.lines().map(|l| VmValue::Str(l.to_string())).collect();
-                Ok(VmValue::List(heap.alloc(HeapObject::List(lines))))
+            _ => Err(type_err("split expects a String delimiter")),
+        },
+        "replace" if args.len() == 2 => match (&args[0], &args[1]) {
+            (VmValue::Str(from), VmValue::Str(to)) => {
+                Ok(VmValue::Str(s.replacen(from.as_str(), to.as_str(), 1)))
             }
-            "include?" if args.len() == 1 => match &args[0] {
-                VmValue::Str(pat) => Ok(VmValue::Bool(s.contains(pat.as_str()))),
-                _ => Err(type_err("include? expects a String")),
-            },
-            "starts_with?" if args.len() == 1 => match &args[0] {
-                VmValue::Str(pat) => Ok(VmValue::Bool(s.starts_with(pat.as_str()))),
-                _ => Err(type_err("starts_with? expects a String")),
-            },
-            "ends_with?" if args.len() == 1 => match &args[0] {
-                VmValue::Str(pat) => Ok(VmValue::Bool(s.ends_with(pat.as_str()))),
-                _ => Err(type_err("ends_with? expects a String")),
-            },
-            "split" => match args {
-                [] => {
-                    let parts: Vec<VmValue> = s.split_whitespace().map(|p| VmValue::Str(p.to_string())).collect();
-                    Ok(VmValue::List(heap.alloc(HeapObject::List(parts))))
-                }
-                [VmValue::Str(sep)] => {
-                    let parts: Vec<VmValue> = s.split(sep.as_str()).map(|p| VmValue::Str(p.to_string())).collect();
-                    Ok(VmValue::List(heap.alloc(HeapObject::List(parts))))
-                }
-                _ => Err(type_err("split expects a String delimiter")),
-            },
-            "replace" if args.len() == 2 => match (&args[0], &args[1]) {
-                (VmValue::Str(from), VmValue::Str(to)) => Ok(VmValue::Str(s.replacen(from.as_str(), to.as_str(), 1))),
-                _ => Err(type_err("replace expects two Strings")),
-            },
-            "replace_all" if args.len() == 2 => match (&args[0], &args[1]) {
-                (VmValue::Str(from), VmValue::Str(to)) => Ok(VmValue::Str(s.replace(from.as_str(), to.as_str()))),
-                _ => Err(type_err("replace_all expects two Strings")),
-            },
-            "slice" if args.len() == 2 => match (&args[0], &args[1]) {
-                (VmValue::Int(start), VmValue::Int(len)) => {
-                    let chars: Vec<char> = s.chars().collect();
-                    let n = chars.len() as i64;
-                    let start = if *start < 0 { (n + start).max(0) as usize } else { *start as usize };
-                    let len = *len as usize;
-                    let end = (start + len).min(chars.len());
-                    Ok(VmValue::Str(chars[start..end].iter().collect()))
-                }
-                _ => Err(type_err("slice expects (Int, Int)")),
-            },
+            _ => Err(type_err("replace expects two Strings")),
+        },
+        "replace_all" if args.len() == 2 => match (&args[0], &args[1]) {
+            (VmValue::Str(from), VmValue::Str(to)) => {
+                Ok(VmValue::Str(s.replace(from.as_str(), to.as_str())))
+            }
+            _ => Err(type_err("replace_all expects two Strings")),
+        },
+        "slice" if args.len() == 2 => match (&args[0], &args[1]) {
+            (VmValue::Int(start), VmValue::Int(len)) => {
+                let chars: Vec<char> = s.chars().collect();
+                let n = chars.len() as i64;
+                let start = if *start < 0 {
+                    (n + start).max(0) as usize
+                } else {
+                    *start as usize
+                };
+                let len = *len as usize;
+                let end = (start + len).min(chars.len());
+                Ok(VmValue::Str(chars[start..end].iter().collect()))
+            }
+            _ => Err(type_err("slice expects (Int, Int)")),
+        },
         _ => Err(type_err(&format!("String has no method '{}'", name))),
     }
 }
 
-fn dispatch_bool_method(b: bool, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+fn dispatch_bool_method(
+    b: bool,
+    name: &str,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    let type_err = |msg: &str| VmError::TypeError {
+        message: msg.to_string(),
+        line,
+    };
     match (name, args) {
-        ("to_s",   []) => Ok(VmValue::Str(b.to_string())),
-        ("nil?",   []) => Ok(VmValue::Bool(false)),
+        ("to_s", []) => Ok(VmValue::Str(b.to_string())),
+        ("nil?", []) => Ok(VmValue::Bool(false)),
         _ => Err(type_err(&format!("Bool has no method '{}'", name))),
     }
 }
 
 fn dispatch_nil_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    let type_err = |msg: &str| VmError::TypeError {
+        message: msg.to_string(),
+        line,
+    };
     match (name, args) {
-        ("to_s",   []) => Ok(VmValue::Str(String::new())),
-        ("nil?",   []) => Ok(VmValue::Bool(true)),
-        ("inspect",[]) => Ok(VmValue::Str("nil".to_string())),
+        ("to_s", []) => Ok(VmValue::Str(String::new())),
+        ("nil?", []) => Ok(VmValue::Bool(true)),
+        ("inspect", []) => Ok(VmValue::Str("nil".to_string())),
         _ => Err(type_err(&format!("Nil has no method '{}'", name))),
     }
 }
@@ -2351,99 +2939,124 @@ fn dispatch_list_method(
     args: &[VmValue],
     line: u32,
 ) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    let type_err = |msg: &str| VmError::TypeError {
+        message: msg.to_string(),
+        line,
+    };
     match name {
-            "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_list(r).len() as i64)),
-            "empty?"   if args.is_empty() => Ok(VmValue::Bool(heap.get_list(r).is_empty())),
-            "first"    if args.is_empty() => Ok(heap.get_list(r).first().cloned().unwrap_or(VmValue::Nil)),
-            "last"     if args.is_empty() => Ok(heap.get_list(r).last().cloned().unwrap_or(VmValue::Nil)),
-            "pop"      if args.is_empty() => Ok(heap.get_list_mut(r).pop().unwrap_or(VmValue::Nil)),
-            "reverse"  if args.is_empty() => {
-                let v: Vec<VmValue> = heap.get_list(r).iter().cloned().rev().collect();
-                Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-            }
-            "sort"     if args.is_empty() => {
-                let mut v: Vec<VmValue> = heap.get_list(r).clone();
-                v.sort_by(vm_value_partial_cmp);
-                Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-            }
-            "include?" if args.len() == 1 => Ok(VmValue::Bool(heap.get_list(r).contains(&args[0]))),
-            "push" | "append" if args.len() == 1 => {
-                heap.get_list_mut(r).push(args[0].clone());
+        "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_list(r).len() as i64)),
+        "empty?" if args.is_empty() => Ok(VmValue::Bool(heap.get_list(r).is_empty())),
+        "first" if args.is_empty() => Ok(heap.get_list(r).first().cloned().unwrap_or(VmValue::Nil)),
+        "last" if args.is_empty() => Ok(heap.get_list(r).last().cloned().unwrap_or(VmValue::Nil)),
+        "pop" if args.is_empty() => Ok(heap.get_list_mut(r).pop().unwrap_or(VmValue::Nil)),
+        "reverse" if args.is_empty() => {
+            let v: Vec<VmValue> = heap.get_list(r).iter().cloned().rev().collect();
+            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
+        }
+        "sort" if args.is_empty() => {
+            let mut v: Vec<VmValue> = heap.get_list(r).clone();
+            v.sort_by(vm_value_partial_cmp);
+            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
+        }
+        "include?" if args.len() == 1 => Ok(VmValue::Bool(heap.get_list(r).contains(&args[0]))),
+        "push" | "append" if args.len() == 1 => {
+            heap.get_list_mut(r).push(args[0].clone());
+            Ok(recv.clone())
+        }
+        "unshift" | "prepend" if args.len() == 1 => {
+            heap.get_list_mut(r).insert(0, args[0].clone());
+            Ok(recv.clone())
+        }
+        "concat" if args.len() == 1 => match &args[0] {
+            VmValue::List(other_r) => {
+                let other_items: Vec<VmValue> = heap.get_list(*other_r).clone();
+                heap.get_list_mut(r).extend(other_items);
                 Ok(recv.clone())
             }
-            "unshift" | "prepend" if args.len() == 1 => {
-                heap.get_list_mut(r).insert(0, args[0].clone());
-                Ok(recv.clone())
-            }
-            "concat" if args.len() == 1 => match &args[0] {
-                VmValue::List(other_r) => {
-                    let other_items: Vec<VmValue> = heap.get_list(*other_r).clone();
-                    heap.get_list_mut(r).extend(other_items);
-                    Ok(recv.clone())
+            _ => Err(type_err("concat expects a List")),
+        },
+        "join" => {
+            let sep = match args.first() {
+                Some(VmValue::Str(s)) => s.clone(),
+                None => String::new(),
+                _ => return Err(type_err("join expects a String")),
+            };
+            let s = heap
+                .get_list(r)
+                .iter()
+                .map(|v| format_value_with_heap(heap, v))
+                .collect::<Vec<_>>()
+                .join(&sep);
+            Ok(VmValue::Str(s))
+        }
+        "flatten" if args.is_empty() => {
+            fn flatten_list(heap: &GcHeap<HeapObject>, v: &VmValue) -> Vec<VmValue> {
+                match v {
+                    VmValue::List(inner) => heap
+                        .get_list(*inner)
+                        .iter()
+                        .flat_map(|el| flatten_list(heap, el))
+                        .collect(),
+                    other => vec![other.clone()],
                 }
-                _ => Err(type_err("concat expects a List")),
-            },
-            "join" => {
-                let sep = match args.first() {
-                    Some(VmValue::Str(s)) => s.clone(),
-                    None => String::new(),
-                    _ => return Err(type_err("join expects a String")),
+            }
+            let v: Vec<VmValue> = heap
+                .get_list(r)
+                .iter()
+                .flat_map(|el| flatten_list(heap, el))
+                .collect();
+            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
+        }
+        "uniq" if args.is_empty() => {
+            let mut seen = Vec::new();
+            for item in heap.get_list(r).iter() {
+                if !seen.contains(item) {
+                    seen.push(item.clone());
+                }
+            }
+            Ok(VmValue::List(heap.alloc(HeapObject::List(seen))))
+        }
+        "min" if args.is_empty() => {
+            let v = heap.get_list(r);
+            if v.is_empty() {
+                return Ok(VmValue::Nil);
+            }
+            let m = v
+                .iter()
+                .min_by(|a, b| vm_value_partial_cmp(a, b))
+                .cloned()
+                .unwrap();
+            Ok(m)
+        }
+        "max" if args.is_empty() => {
+            let v = heap.get_list(r);
+            if v.is_empty() {
+                return Ok(VmValue::Nil);
+            }
+            let m = v
+                .iter()
+                .max_by(|a, b| vm_value_partial_cmp(a, b))
+                .cloned()
+                .unwrap();
+            Ok(m)
+        }
+        "sum" if args.is_empty() => {
+            let items: Vec<VmValue> = heap.get_list(r).clone();
+            let mut acc = VmValue::Int(0);
+            for item in items.iter() {
+                acc = match (&acc, item) {
+                    (VmValue::Int(a), VmValue::Int(b)) => VmValue::Int(a + b),
+                    (VmValue::Float(a), VmValue::Float(b)) => VmValue::Float(a + b),
+                    (VmValue::Int(a), VmValue::Float(b)) => VmValue::Float(*a as f64 + b),
+                    (VmValue::Float(a), VmValue::Int(b)) => VmValue::Float(a + *b as f64),
+                    _ => return Err(type_err("sum: non-numeric element")),
                 };
-                let s = heap.get_list(r).iter()
-                    .map(|v| format_value_with_heap(heap, v))
-                    .collect::<Vec<_>>()
-                    .join(&sep);
-                Ok(VmValue::Str(s))
             }
-            "flatten" if args.is_empty() => {
-                fn flatten_list(heap: &GcHeap<HeapObject>, v: &VmValue) -> Vec<VmValue> {
-                    match v {
-                        VmValue::List(inner) => heap.get_list(*inner).iter()
-                            .flat_map(|el| flatten_list(heap, el)).collect(),
-                        other => vec![other.clone()],
-                    }
-                }
-                let v: Vec<VmValue> = heap.get_list(r).iter()
-                    .flat_map(|el| flatten_list(heap, el)).collect();
-                Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-            }
-            "uniq" if args.is_empty() => {
-                let mut seen = Vec::new();
-                for item in heap.get_list(r).iter() {
-                    if !seen.contains(item) { seen.push(item.clone()); }
-                }
-                Ok(VmValue::List(heap.alloc(HeapObject::List(seen))))
-            }
-            "min" if args.is_empty() => {
-                let v = heap.get_list(r);
-                if v.is_empty() { return Ok(VmValue::Nil); }
-                let m = v.iter().min_by(|a, b| vm_value_partial_cmp(a, b)).cloned().unwrap();
-                Ok(m)
-            }
-            "max" if args.is_empty() => {
-                let v = heap.get_list(r);
-                if v.is_empty() { return Ok(VmValue::Nil); }
-                let m = v.iter().max_by(|a, b| vm_value_partial_cmp(a, b)).cloned().unwrap();
-                Ok(m)
-            }
-            "sum" if args.is_empty() => {
-                let items: Vec<VmValue> = heap.get_list(r).clone();
-                let mut acc = VmValue::Int(0);
-                for item in items.iter() {
-                    acc = match (&acc, item) {
-                        (VmValue::Int(a), VmValue::Int(b)) => VmValue::Int(a + b),
-                        (VmValue::Float(a), VmValue::Float(b)) => VmValue::Float(a + b),
-                        (VmValue::Int(a), VmValue::Float(b)) => VmValue::Float(*a as f64 + b),
-                        (VmValue::Float(a), VmValue::Int(b)) => VmValue::Float(a + *b as f64),
-                        _ => return Err(type_err("sum: non-numeric element")),
-                    };
-                }
-                Ok(acc)
-            }
-            "any?" if args.is_empty() => Err(type_err("any? requires a block")),
-            "all?" if args.is_empty() => Err(type_err("all? requires a block")),
-            "to_s" if args.is_empty() => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
+            Ok(acc)
+        }
+        "any?" if args.is_empty() => Err(type_err("any? requires a block")),
+        "all?" if args.is_empty() => Err(type_err("all? requires a block")),
+        "to_s" if args.is_empty() => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
         _ => Err(type_err(&format!("List has no method '{}'", name))),
     }
 }
@@ -2456,52 +3069,70 @@ fn dispatch_map_method(
     args: &[VmValue],
     line: u32,
 ) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    let type_err = |msg: &str| VmError::TypeError {
+        message: msg.to_string(),
+        line,
+    };
     match name {
-            "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_map(r).len() as i64)),
-            "empty?"   if args.is_empty() => Ok(VmValue::Bool(heap.get_map(r).is_empty())),
-            "keys"     if args.is_empty() => {
-                let mut keys: Vec<VmValue> = heap.get_map(r).keys().map(|k| VmValue::Str(k.clone())).collect();
-                keys.sort_by(vm_value_partial_cmp);
-                Ok(VmValue::List(heap.alloc(HeapObject::List(keys))))
+        "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_map(r).len() as i64)),
+        "empty?" if args.is_empty() => Ok(VmValue::Bool(heap.get_map(r).is_empty())),
+        "keys" if args.is_empty() => {
+            let mut keys: Vec<VmValue> = heap
+                .get_map(r)
+                .keys()
+                .map(|k| VmValue::Str(k.clone()))
+                .collect();
+            keys.sort_by(vm_value_partial_cmp);
+            Ok(VmValue::List(heap.alloc(HeapObject::List(keys))))
+        }
+        "values" if args.is_empty() => {
+            let mut pairs: Vec<(String, VmValue)> = heap
+                .get_map(r)
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
+            let vals: Vec<VmValue> = pairs.into_iter().map(|(_, v)| v).collect();
+            Ok(VmValue::List(heap.alloc(HeapObject::List(vals))))
+        }
+        "has_key?" if args.len() == 1 => match &args[0] {
+            VmValue::Str(k) => Ok(VmValue::Bool(heap.get_map(r).contains_key(k.as_str()))),
+            _ => Err(type_err("has_key? expects a String")),
+        },
+        "get" if args.len() == 1 => match &args[0] {
+            VmValue::Str(k) => Ok(heap
+                .get_map(r)
+                .get(k.as_str())
+                .cloned()
+                .unwrap_or(VmValue::Nil)),
+            _ => Err(type_err("get expects a String key")),
+        },
+        "set" if args.len() == 2 => match &args[0] {
+            VmValue::Str(k) => {
+                let (k, v) = (k.clone(), args[1].clone());
+                heap.get_map_mut(r).insert(k, v);
+                Ok(args[1].clone())
             }
-            "values"   if args.is_empty() => {
-                let mut pairs: Vec<(String, VmValue)> = heap.get_map(r).iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
-                let vals: Vec<VmValue> = pairs.into_iter().map(|(_, v)| v).collect();
-                Ok(VmValue::List(heap.alloc(HeapObject::List(vals))))
+            _ => Err(type_err("set expects a String key")),
+        },
+        "delete" if args.len() == 1 => match &args[0] {
+            VmValue::Str(k) => Ok(heap
+                .get_map_mut(r)
+                .remove(k.as_str())
+                .unwrap_or(VmValue::Nil)),
+            _ => Err(type_err("delete expects a String key")),
+        },
+        "merge" if args.len() == 1 => match &args[0] {
+            VmValue::Map(other_r) => {
+                let mut new_map = heap.get_map(r).clone();
+                for (k, v) in heap.get_map(*other_r).iter() {
+                    new_map.insert(k.clone(), v.clone());
+                }
+                Ok(VmValue::Map(heap.alloc(HeapObject::Map(new_map))))
             }
-            "has_key?" if args.len() == 1 => match &args[0] {
-                VmValue::Str(k) => Ok(VmValue::Bool(heap.get_map(r).contains_key(k.as_str()))),
-                _ => Err(type_err("has_key? expects a String")),
-            },
-            "get" if args.len() == 1 => match &args[0] {
-                VmValue::Str(k) => Ok(heap.get_map(r).get(k.as_str()).cloned().unwrap_or(VmValue::Nil)),
-                _ => Err(type_err("get expects a String key")),
-            },
-            "set" if args.len() == 2 => match &args[0] {
-                VmValue::Str(k) => {
-                    let (k, v) = (k.clone(), args[1].clone());
-                    heap.get_map_mut(r).insert(k, v);
-                    Ok(args[1].clone())
-                }
-                _ => Err(type_err("set expects a String key")),
-            },
-            "delete" if args.len() == 1 => match &args[0] {
-                VmValue::Str(k) => Ok(heap.get_map_mut(r).remove(k.as_str()).unwrap_or(VmValue::Nil)),
-                _ => Err(type_err("delete expects a String key")),
-            },
-            "merge" if args.len() == 1 => match &args[0] {
-                VmValue::Map(other_r) => {
-                    let mut new_map = heap.get_map(r).clone();
-                    for (k, v) in heap.get_map(*other_r).iter() {
-                        new_map.insert(k.clone(), v.clone());
-                    }
-                    Ok(VmValue::Map(heap.alloc(HeapObject::Map(new_map))))
-                }
-                _ => Err(type_err("merge expects a Map")),
-            },
-            "to_s" if args.is_empty() => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
+            _ => Err(type_err("merge expects a Map")),
+        },
+        "to_s" if args.is_empty() => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
         _ => Err(type_err(&format!("Map has no method '{}'", name))),
     }
 }
@@ -2515,23 +3146,29 @@ fn dispatch_range_method(
     args: &[VmValue],
     line: u32,
 ) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
+    let type_err = |msg: &str| VmError::TypeError {
+        message: msg.to_string(),
+        line,
+    };
     match name {
-            "size" | "length" if args.is_empty() => Ok(VmValue::Int((to - from).max(0))),
-            "to_a" if args.is_empty() => {
-                let v: Vec<VmValue> = (from..to).map(VmValue::Int).collect();
-                Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-            }
-            "include?" if args.len() == 1 => match &args[0] {
-                VmValue::Int(n) => Ok(VmValue::Bool(n >= &from && n < &to)),
-                _ => Err(type_err("include? expects an Int")),
-            },
-            "first" if args.is_empty() => Ok(VmValue::Int(from)),
-            "last"  if args.is_empty() => Ok(VmValue::Int(to - 1)),
-            "min"   if args.is_empty() => Ok(VmValue::Int(from)),
-            "max"   if args.is_empty() => Ok(VmValue::Int(to - 1)),
-            "to_s"  if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
-        _ => Err(VmError::TypeError { message: format!("Range has no method '{}'", name), line }),
+        "size" | "length" if args.is_empty() => Ok(VmValue::Int((to - from).max(0))),
+        "to_a" if args.is_empty() => {
+            let v: Vec<VmValue> = (from..to).map(VmValue::Int).collect();
+            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
+        }
+        "include?" if args.len() == 1 => match &args[0] {
+            VmValue::Int(n) => Ok(VmValue::Bool(n >= &from && n < &to)),
+            _ => Err(type_err("include? expects an Int")),
+        },
+        "first" if args.is_empty() => Ok(VmValue::Int(from)),
+        "last" if args.is_empty() => Ok(VmValue::Int(to - 1)),
+        "min" if args.is_empty() => Ok(VmValue::Int(from)),
+        "max" if args.is_empty() => Ok(VmValue::Int(to - 1)),
+        "to_s" if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
+        _ => Err(VmError::TypeError {
+            message: format!("Range has no method '{}'", name),
+            line,
+        }),
     }
 }
 
@@ -2557,40 +3194,58 @@ fn dispatch_file_class_method(name: &str, args: &[VmValue], line: u32) -> Result
         "read" => {
             let path = match args {
                 [VmValue::Str(s)] => s.clone(),
-                [_] => return Err(VmError::TypeError {
-                    message: "File.read: path must be a string".to_string(), line,
-                }),
-                _ => return Err(VmError::TypeError {
-                    message: format!("File.read expects 1 argument, got {}", args.len()), line,
-                }),
+                [_] => {
+                    return Err(VmError::TypeError {
+                        message: "File.read: path must be a string".to_string(),
+                        line,
+                    });
+                }
+                _ => {
+                    return Err(VmError::TypeError {
+                        message: format!("File.read expects 1 argument, got {}", args.len()),
+                        line,
+                    });
+                }
             };
-            std::fs::read_to_string(&path).map(VmValue::Str).map_err(|e| {
-                VmError::Raised(VmValue::Str(format!("{}: {}", path, e)))
-            })
+            std::fs::read_to_string(&path)
+                .map(VmValue::Str)
+                .map_err(|e| VmError::Raised(VmValue::Str(format!("{}: {}", path, e))))
         }
         "write" => {
             let (path, content) = match args {
                 [VmValue::Str(p), VmValue::Str(c)] => (p.clone(), c.clone()),
-                [_, _] => return Err(VmError::TypeError {
-                    message: "File.write: path and content must be strings".to_string(), line,
-                }),
-                _ => return Err(VmError::TypeError {
-                    message: format!("File.write expects 2 arguments, got {}", args.len()), line,
-                }),
+                [_, _] => {
+                    return Err(VmError::TypeError {
+                        message: "File.write: path and content must be strings".to_string(),
+                        line,
+                    });
+                }
+                _ => {
+                    return Err(VmError::TypeError {
+                        message: format!("File.write expects 2 arguments, got {}", args.len()),
+                        line,
+                    });
+                }
             };
-            std::fs::write(&path, content).map(|_| VmValue::Nil).map_err(|e| {
-                VmError::Raised(VmValue::Str(format!("{}: {}", path, e)))
-            })
+            std::fs::write(&path, content)
+                .map(|_| VmValue::Nil)
+                .map_err(|e| VmError::Raised(VmValue::Str(format!("{}: {}", path, e))))
         }
         "exist?" => {
             let path = match args {
                 [VmValue::Str(s)] => s.clone(),
-                [_] => return Err(VmError::TypeError {
-                    message: "File.exist?: path must be a string".to_string(), line,
-                }),
-                _ => return Err(VmError::TypeError {
-                    message: format!("File.exist? expects 1 argument, got {}", args.len()), line,
-                }),
+                [_] => {
+                    return Err(VmError::TypeError {
+                        message: "File.exist?: path must be a string".to_string(),
+                        line,
+                    });
+                }
+                _ => {
+                    return Err(VmError::TypeError {
+                        message: format!("File.exist? expects 1 argument, got {}", args.len()),
+                        line,
+                    });
+                }
             };
             Ok(VmValue::Bool(std::path::Path::new(&path).exists()))
         }
@@ -2605,32 +3260,32 @@ fn dispatch_file_class_method(name: &str, args: &[VmValue], line: u32) -> Result
 /// compiled stdlib methods in the class registry.
 fn primitive_class_name(val: &VmValue) -> Option<&'static str> {
     match val {
-        VmValue::Int(_)   => Some("Int"),
+        VmValue::Int(_) => Some("Int"),
         VmValue::Float(_) => Some("Float"),
-        VmValue::Str(_)   => Some("String"),
-        VmValue::Bool(_)  => Some("Bool"),
-        VmValue::Nil      => Some("Nil"),
-        VmValue::List(_)  => Some("List"),
-        VmValue::Map(_)   => Some("Map"),
-        _                 => None,
+        VmValue::Str(_) => Some("String"),
+        VmValue::Bool(_) => Some("Bool"),
+        VmValue::Nil => Some("Nil"),
+        VmValue::List(_) => Some("List"),
+        VmValue::Map(_) => Some("Map"),
+        _ => None,
     }
 }
 
 /// Return the type name of a value for use in runtime type-checking error messages.
 fn value_type_name(val: &VmValue) -> &str {
     match val {
-        VmValue::Int(_)              => "Int",
-        VmValue::Float(_)            => "Float",
-        VmValue::Str(_)              => "String",
-        VmValue::Bool(_)             => "Bool",
-        VmValue::Nil                 => "Nil",
-        VmValue::List(_)             => "List",
-        VmValue::Map(_)              => "Map",
-        VmValue::Range { .. }        => "Range",
+        VmValue::Int(_) => "Int",
+        VmValue::Float(_) => "Float",
+        VmValue::Str(_) => "String",
+        VmValue::Bool(_) => "Bool",
+        VmValue::Nil => "Nil",
+        VmValue::List(_) => "List",
+        VmValue::Map(_) => "Map",
+        VmValue::Range { .. } => "Range",
         VmValue::Instance { class_name, .. } => class_name.as_str(),
-        VmValue::Class { name, .. }  => name.as_str(),
-        VmValue::Function(_)         => "Function",
-        VmValue::Closure { .. }      => "Function",
+        VmValue::Class { name, .. } => name.as_str(),
+        VmValue::Function(_) => "Function",
+        VmValue::Closure { .. } => "Function",
     }
 }
 
@@ -2642,7 +3297,11 @@ fn starting_class_name_for_is_a(recv: &VmValue) -> Option<String> {
 }
 
 /// True if `start` is `target` or a subclass of `target` per `classes` superclass links.
-fn vm_is_subclass(classes: &HashMap<String, ClassEntry>, mut current: String, target: &str) -> bool {
+fn vm_is_subclass(
+    classes: &HashMap<String, ClassEntry>,
+    mut current: String,
+    target: &str,
+) -> bool {
     loop {
         if current == target {
             return true;
@@ -2682,11 +3341,15 @@ fn invoke_is_a(
 fn vm_value_partial_cmp(a: &VmValue, b: &VmValue) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (a, b) {
-        (VmValue::Int(x),   VmValue::Int(y))   => x.cmp(y),
+        (VmValue::Int(x), VmValue::Int(y)) => x.cmp(y),
         (VmValue::Float(x), VmValue::Float(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (VmValue::Int(x),   VmValue::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal),
-        (VmValue::Float(x), VmValue::Int(y))   => x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal),
-        (VmValue::Str(x),   VmValue::Str(y))   => x.cmp(y),
+        (VmValue::Int(x), VmValue::Float(y)) => {
+            (*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal)
+        }
+        (VmValue::Float(x), VmValue::Int(y)) => {
+            x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal)
+        }
+        (VmValue::Str(x), VmValue::Str(y)) => x.cmp(y),
         _ => Ordering::Equal,
     }
 }
@@ -2704,10 +3367,10 @@ fn numeric_binop(
     float_op: impl Fn(f64, f64) -> f64,
 ) -> Result<VmValue, VmError> {
     match (a, b) {
-        (VmValue::Int(x),   VmValue::Int(y))   => Ok(VmValue::Int(int_op(*x, *y))),
+        (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(int_op(*x, *y))),
         (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(float_op(*x, *y))),
-        (VmValue::Int(x),   VmValue::Float(y)) => Ok(VmValue::Float(float_op(*x as f64, *y))),
-        (VmValue::Float(x), VmValue::Int(y))   => Ok(VmValue::Float(float_op(*x, *y as f64))),
+        (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(float_op(*x as f64, *y))),
+        (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(float_op(*x, *y as f64))),
         _ => Err(VmError::TypeError {
             message: format!("cannot {} {} and {}", verb, a, b),
             line,
@@ -2734,9 +3397,9 @@ fn numeric_cmp(
 
 fn to_float(v: &VmValue) -> Option<f64> {
     match v {
-        VmValue::Int(n)   => Some(*n as f64),
+        VmValue::Int(n) => Some(*n as f64),
         VmValue::Float(n) => Some(*n),
-        _                 => None,
+        _ => None,
     }
 }
 
@@ -2748,7 +3411,13 @@ mod tests {
     use crate::chunk::{Chunk, Constant, Function, OpCode};
 
     fn run(chunk: Chunk) -> Result<Option<VmValue>, VmError> {
-        let f = Rc::new(Function { name: String::new(), arity: 0, chunk, upvalue_defs: vec![], return_type: None });
+        let f = Rc::new(Function {
+            name: String::new(),
+            arity: 0,
+            chunk,
+            upvalue_defs: vec![],
+            return_type: None,
+        });
         Vm::new(f, PathBuf::new()).run()
     }
 
@@ -2838,7 +3507,10 @@ mod tests {
             c.write(OpCode::Add, 1);
             c.write(OpCode::Return, 1);
         });
-        assert_eq!(run(chunk).unwrap(), Some(VmValue::Str("hello world".into())));
+        assert_eq!(
+            run(chunk).unwrap(),
+            Some(VmValue::Str("hello world".into()))
+        );
     }
 
     #[test]

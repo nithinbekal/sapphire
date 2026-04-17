@@ -18,13 +18,23 @@ impl Lexer {
     }
 
     fn ends_statement(kind: &TokenKind) -> bool {
-        matches!(kind,
-            TokenKind::Identifier(_) | TokenKind::Number(_) | TokenKind::Float(_) |
-            TokenKind::End |
-            TokenKind::StringLit(_) | TokenKind::StringInterp(_) |
-            TokenKind::True | TokenKind::False | TokenKind::Nil |
-            TokenKind::SelfKw | TokenKind::SuperKw | TokenKind::Yield |
-            TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace
+        matches!(
+            kind,
+            TokenKind::Identifier(_)
+                | TokenKind::Number(_)
+                | TokenKind::Float(_)
+                | TokenKind::End
+                | TokenKind::StringLit(_)
+                | TokenKind::StringInterp(_)
+                | TokenKind::True
+                | TokenKind::False
+                | TokenKind::Nil
+                | TokenKind::SelfKw
+                | TokenKind::SuperKw
+                | TokenKind::Yield
+                | TokenKind::RightParen
+                | TokenKind::RightBracket
+                | TokenKind::RightBrace
         )
     }
 
@@ -42,42 +52,84 @@ impl Lexer {
                     if last_kind.as_ref().is_some_and(Self::ends_statement) {
                         TokenKind::Newline
                     } else {
-                        continue
+                        continue;
                     }
                 }
                 '\r' => continue,
                 '(' => TokenKind::LeftParen,
                 ')' => TokenKind::RightParen,
                 '+' => TokenKind::Plus,
-                '-' => if self.match_next('>') { TokenKind::Arrow } else { TokenKind::Minus },
+                '-' => {
+                    if self.match_next('>') {
+                        TokenKind::Arrow
+                    } else {
+                        TokenKind::Minus
+                    }
+                }
                 '*' => TokenKind::Star,
                 '/' => TokenKind::Slash,
                 '%' => TokenKind::Percent,
-                '!' => if self.match_next('=') { TokenKind::BangEq } else { TokenKind::Bang },
-                '=' => if self.match_next('=') { TokenKind::EqEq } else { TokenKind::Eq },
-                '&' => {
-                    if self.match_next('&') { TokenKind::AmpAmp }
-                    else if self.match_next('.') { TokenKind::AmpDot }
-                    else { TokenKind::Amp }
+                '!' => {
+                    if self.match_next('=') {
+                        TokenKind::BangEq
+                    } else {
+                        TokenKind::Bang
+                    }
                 }
-                '|' => if self.match_next('|') { TokenKind::PipePipe } else { TokenKind::Pipe },
+                '=' => {
+                    if self.match_next('=') {
+                        TokenKind::EqEq
+                    } else {
+                        TokenKind::Eq
+                    }
+                }
+                '&' => {
+                    if self.match_next('&') {
+                        TokenKind::AmpAmp
+                    } else if self.match_next('.') {
+                        TokenKind::AmpDot
+                    } else {
+                        TokenKind::Amp
+                    }
+                }
+                '|' => {
+                    if self.match_next('|') {
+                        TokenKind::PipePipe
+                    } else {
+                        TokenKind::Pipe
+                    }
+                }
                 '^' => TokenKind::Caret,
                 '~' => TokenKind::Tilde,
                 '<' => {
-                    if self.match_next('<') { TokenKind::LessLess }
-                    else if self.match_next('=') { TokenKind::LessEq }
-                    else { TokenKind::Less }
+                    if self.match_next('<') {
+                        TokenKind::LessLess
+                    } else if self.match_next('=') {
+                        TokenKind::LessEq
+                    } else {
+                        TokenKind::Less
+                    }
                 }
                 '>' => {
-                    if self.match_next('>') { TokenKind::GreaterGreater }
-                    else if self.match_next('=') { TokenKind::GreaterEq }
-                    else { TokenKind::Greater }
+                    if self.match_next('>') {
+                        TokenKind::GreaterGreater
+                    } else if self.match_next('=') {
+                        TokenKind::GreaterEq
+                    } else {
+                        TokenKind::Greater
+                    }
                 }
                 '{' => TokenKind::LeftBrace,
                 '}' => TokenKind::RightBrace,
                 '[' => TokenKind::LeftBracket,
                 ']' => TokenKind::RightBracket,
-                '.' => if self.match_next('.') { TokenKind::DotDot } else { TokenKind::Dot },
+                '.' => {
+                    if self.match_next('.') {
+                        TokenKind::DotDot
+                    } else {
+                        TokenKind::Dot
+                    }
+                }
                 ':' => TokenKind::Colon,
                 ';' => TokenKind::Semicolon,
                 ',' => TokenKind::Comma,
@@ -97,10 +149,16 @@ impl Lexer {
             };
 
             last_kind = Some(kind.clone());
-            tokens.push(Token { kind, line: self.line });
+            tokens.push(Token {
+                kind,
+                line: self.line,
+            });
         }
 
-        tokens.push(Token { kind: TokenKind::Eof, line: self.line });
+        tokens.push(Token {
+            kind: TokenKind::Eof,
+            line: self.line,
+        });
 
         tokens
     }
@@ -137,8 +195,16 @@ impl Lexer {
                 while !self.is_at_end() && depth > 0 {
                     let c = self.advance();
                     match c {
-                        '{' => { depth += 1; current.push(c); }
-                        '}' => { depth -= 1; if depth > 0 { current.push(c); } }
+                        '{' => {
+                            depth += 1;
+                            current.push(c);
+                        }
+                        '}' => {
+                            depth -= 1;
+                            if depth > 0 {
+                                current.push(c);
+                            }
+                        }
                         _ => current.push(c),
                     }
                 }
@@ -148,13 +214,16 @@ impl Lexer {
                 let c = self.advance();
                 if c == '\\' && !self.is_at_end() {
                     match self.advance() {
-                        'n'  => current.push('\n'),
-                        't'  => current.push('\t'),
-                        'r'  => current.push('\r'),
+                        'n' => current.push('\n'),
+                        't' => current.push('\t'),
+                        'r' => current.push('\r'),
                         '\\' => current.push('\\'),
-                        '"'  => current.push('"'),
-                        '#'  => current.push('#'),
-                        c    => { current.push('\\'); current.push(c); }
+                        '"' => current.push('"'),
+                        '#' => current.push('#'),
+                        c => {
+                            current.push('\\');
+                            current.push(c);
+                        }
                     }
                 } else {
                     current.push(c);
@@ -190,7 +259,9 @@ impl Lexer {
                         && self.source[self.current + 1].is_ascii_hexdigit()))
             {
                 let ch = self.advance();
-                if ch != '_' { hex.push(ch); }
+                if ch != '_' {
+                    hex.push(ch);
+                }
             }
             return TokenKind::Number(i64::from_str_radix(&hex, 16).unwrap());
         }
@@ -203,7 +274,9 @@ impl Lexer {
                     && self.source[self.current + 1].is_ascii_digit()))
         {
             let ch = self.advance();
-            if ch != '_' { s.push(ch); }
+            if ch != '_' {
+                s.push(ch);
+            }
         }
         // Consume `.digits` as the fractional part of a float.
         // Guard: next char is `.` AND the char after that is a digit (not `..`).
@@ -220,7 +293,9 @@ impl Lexer {
                         && self.source[self.current + 1].is_ascii_digit()))
             {
                 let ch = self.advance();
-                if ch != '_' { s.push(ch); }
+                if ch != '_' {
+                    s.push(ch);
+                }
             }
             TokenKind::Float(s.parse().unwrap())
         } else {
@@ -242,28 +317,28 @@ impl Lexer {
             s.push(self.advance());
         }
         match s.as_str() {
-            "true"  => TokenKind::True,
+            "true" => TokenKind::True,
             "false" => TokenKind::False,
-            "nil"   => TokenKind::Nil,
-            "if"    => TokenKind::If,
+            "nil" => TokenKind::Nil,
+            "if" => TokenKind::If,
             "elsif" => TokenKind::Elsif,
-            "else"  => TokenKind::Else,
+            "else" => TokenKind::Else,
             "while" => TokenKind::While,
-            "def"    => TokenKind::Def,
-            "defp"   => TokenKind::Defp,
+            "def" => TokenKind::Def,
+            "defp" => TokenKind::Defp,
             "return" => TokenKind::Return,
-            "break"  => TokenKind::Break,
-            "next"   => TokenKind::Next,
-            "class"  => TokenKind::Class,
-            "attr"   => TokenKind::Attr,
-            "self"   => TokenKind::SelfKw,
-            "super"  => TokenKind::SuperKw,
-            "yield"  => TokenKind::Yield,
-            "print"  => TokenKind::Print,
-            "raise"  => TokenKind::Raise,
-            "begin"  => TokenKind::Begin,
+            "break" => TokenKind::Break,
+            "next" => TokenKind::Next,
+            "class" => TokenKind::Class,
+            "attr" => TokenKind::Attr,
+            "self" => TokenKind::SelfKw,
+            "super" => TokenKind::SuperKw,
+            "yield" => TokenKind::Yield,
+            "print" => TokenKind::Print,
+            "raise" => TokenKind::Raise,
+            "begin" => TokenKind::Begin,
             "rescue" => TokenKind::Rescue,
-            "end"    => TokenKind::End,
+            "end" => TokenKind::End,
             "import" => TokenKind::Import,
             _ => TokenKind::Identifier(s),
         }
@@ -319,7 +394,12 @@ mod tests {
         assert_eq!(scan("# hello"), vec![TokenKind::Eof]);
         assert_eq!(
             scan("1 # comment\n2"),
-            vec![TokenKind::Number(1), TokenKind::Newline, TokenKind::Number(2), TokenKind::Eof]
+            vec![
+                TokenKind::Number(1),
+                TokenKind::Newline,
+                TokenKind::Number(2),
+                TokenKind::Eof
+            ]
         );
     }
 
@@ -374,23 +454,49 @@ mod tests {
         // `1..10` must lex as Number(1) DotDot Number(10), not as a float
         assert_eq!(
             scan("1..10"),
-            vec![TokenKind::Number(1), TokenKind::DotDot, TokenKind::Number(10), TokenKind::Eof]
+            vec![
+                TokenKind::Number(1),
+                TokenKind::DotDot,
+                TokenKind::Number(10),
+                TokenKind::Eof
+            ]
         );
     }
 
     #[test]
     fn test_string_escape_sequences() {
-        assert_eq!(scan(r#""\n""#), vec![TokenKind::StringLit("\n".into()), TokenKind::Eof]);
-        assert_eq!(scan(r#""\t""#), vec![TokenKind::StringLit("\t".into()), TokenKind::Eof]);
-        assert_eq!(scan(r#""\r""#), vec![TokenKind::StringLit("\r".into()), TokenKind::Eof]);
-        assert_eq!(scan(r#""\\""#), vec![TokenKind::StringLit("\\".into()), TokenKind::Eof]);
-        assert_eq!(scan(r#""\"""#), vec![TokenKind::StringLit("\"".into()), TokenKind::Eof]);
-        assert_eq!(scan(r#""\#""#), vec![TokenKind::StringLit("#".into()), TokenKind::Eof]);
+        assert_eq!(
+            scan(r#""\n""#),
+            vec![TokenKind::StringLit("\n".into()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan(r#""\t""#),
+            vec![TokenKind::StringLit("\t".into()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan(r#""\r""#),
+            vec![TokenKind::StringLit("\r".into()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan(r#""\\""#),
+            vec![TokenKind::StringLit("\\".into()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan(r#""\"""#),
+            vec![TokenKind::StringLit("\"".into()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan(r#""\#""#),
+            vec![TokenKind::StringLit("#".into()), TokenKind::Eof]
+        );
     }
 
     #[test]
     fn test_string_escape_unknown_passthrough() {
         // Unknown escape sequences pass through both characters
-        assert_eq!(scan(r#""\z""#), vec![TokenKind::StringLit("\\z".into()), TokenKind::Eof]);
+        assert_eq!(
+            scan(r#""\z""#),
+            vec![TokenKind::StringLit("\\z".into()), TokenKind::Eof]
+        );
     }
 }
