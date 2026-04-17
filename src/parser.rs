@@ -206,7 +206,7 @@ impl Parser {
                 }),
             }
         }
-        Ok(self.logical()?)
+        self.logical()
     }
 
     fn class_def(&mut self) -> Result<Expr, SapphireError> {
