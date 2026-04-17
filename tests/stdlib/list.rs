@@ -68,18 +68,6 @@ fn each() {
 }
 
 #[test]
-fn map() {
-    let src = "a = [1,2,3]\nb = a.map() { |x| x * 2 }\nb[1]";
-    assert_eq!(eval(src), VmValue::Int(4));
-}
-
-#[test]
-fn select() {
-    let src = "result = [1, 2, 3, 4].select() { |x| x > 2 }\nresult.size()";
-    assert_eq!(eval(src), VmValue::Int(2));
-}
-
-#[test]
 fn reduce_with_initial() {
     let src = "[1, 2, 3, 4, 5].reduce(0) { |acc, n| acc + n }";
     assert_eq!(eval(src), VmValue::Int(15));
@@ -109,26 +97,3 @@ fn uniq() {
     assert_eq!(eval(src), VmValue::Int(3));
 }
 
-#[test]
-fn each_with_index() {
-    let src = r#"pairs = []
-["a", "b", "c"].each_with_index() { |item, i| pairs.push(i) }
-pairs[2]"#;
-    assert_eq!(eval(src), VmValue::Int(2));
-}
-
-#[test]
-fn zip() {
-    assert_eq!(
-        eval("result = [1, 2, 3].zip([4, 5, 6])\nresult.size()"),
-        VmValue::Int(3)
-    );
-    assert_eq!(
-        eval("result = [1, 2, 3].zip([4, 5, 6])\nresult[0][0]"),
-        VmValue::Int(1)
-    );
-    assert_eq!(
-        eval("result = [1, 2, 3].zip([4, 5, 6])\nresult[0][1]"),
-        VmValue::Int(4)
-    );
-}

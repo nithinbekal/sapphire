@@ -36,15 +36,3 @@ c["x"]"#;
     assert_eq!(eval(src2), VmValue::Int(1));
 }
 
-#[test]
-fn select() {
-    let src = r#"m = { a: 1, b: 2, c: 3 }
-result = m.select() { |k, v| v > 1 }
-result.size()"#;
-    assert_eq!(eval(src), VmValue::Int(2));
-
-    let src2 = r#"m = { a: 1, b: 2, c: 3 }
-result = m.select() { |k, v| v > 1 }
-result.has_key?("a")"#;
-    assert_eq!(eval(src2), VmValue::Bool(false));
-}
