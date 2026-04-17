@@ -970,6 +970,7 @@ impl Compiler {
     /// `bind` — when `true` (normal top-level class), store the result in a
     /// named local/global slot.  When `false` (nested class), leave the value
     /// on the stack for the enclosing `DefClass` to pick up.
+    #[allow(clippy::too_many_arguments)]
     fn compile_class(
         &mut self,
         name:       &str,
