@@ -1,4 +1,4 @@
-use super::{eval, VmValue};
+use super::{VmValue, eval};
 
 #[test]
 fn size() {
@@ -27,8 +27,14 @@ fn include() {
 #[test]
 fn sort() {
     assert_eq!(eval("a = [3,1,2]\na.sort().first()"), VmValue::Int(1));
-    assert_eq!(eval("result = [3, 1, 4, 1, 5, 9, 2].sort()\nresult[0]"), VmValue::Int(1));
-    assert_eq!(eval("result = [3, 1, 4, 1, 5, 9, 2].sort()\nresult[6]"), VmValue::Int(9));
+    assert_eq!(
+        eval("result = [3, 1, 4, 1, 5, 9, 2].sort()\nresult[0]"),
+        VmValue::Int(1)
+    );
+    assert_eq!(
+        eval("result = [3, 1, 4, 1, 5, 9, 2].sort()\nresult[6]"),
+        VmValue::Int(9)
+    );
 }
 
 #[test]

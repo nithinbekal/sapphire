@@ -1,16 +1,16 @@
-use std::fmt;
-use std::rc::Rc;
-use crate::ast::{Block, Expr, StringPart, MethodDef, TypeExpr};
+use crate::ast::{Block, Expr, MethodDef, StringPart, TypeExpr};
 use crate::chunk::{Chunk, Constant, Function, OpCode, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
+use std::fmt;
+use std::rc::Rc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, PartialEq)]
 pub struct CompileError {
     pub message: String,
-    pub line:    u32,
+    pub line: u32,
 }
 
 impl fmt::Display for CompileError {
@@ -22,47 +22,47 @@ impl fmt::Display for CompileError {
 // ── Per-function compiler state ───────────────────────────────────────────────
 
 struct LocalInfo {
-    name:     String,
+    name: String,
     /// True once another closure has captured this local as an upvalue.
     captured: bool,
 }
 
 struct UpvalueInfo {
-    is_local: bool,   // local in the immediately enclosing scope
-    index:    usize,
+    is_local: bool, // local in the immediately enclosing scope
+    index: usize,
 }
 
 /// Tracks the context needed to compile `break`/`next` inside a while loop.
 struct LoopCtx {
     /// Instruction index of the loop condition check (target for `next`).
-    start:       usize,
+    start: usize,
     /// Indices of `Jump(0)` placeholders emitted for `break` — patched after the loop.
     break_jumps: Vec<usize>,
 }
 
 struct FunctionState {
-    chunk:        Chunk,
+    chunk: Chunk,
     current_line: u32,
-    locals:       Vec<LocalInfo>,
+    locals: Vec<LocalInfo>,
     upvalue_defs: Vec<UpvalueInfo>,
-    name:         String,
-    arity:        usize,
+    name: String,
+    arity: usize,
     /// Stack of active while-loop contexts, innermost last.
-    loop_stack:   Vec<LoopCtx>,
-    return_type:  Option<String>,
+    loop_stack: Vec<LoopCtx>,
+    return_type: Option<String>,
 }
 
 impl FunctionState {
     fn new(name: &str, arity: usize, line: u32) -> Self {
         FunctionState {
-            chunk:        Chunk::new(),
+            chunk: Chunk::new(),
             current_line: line,
-            locals:       Vec::new(),
+            locals: Vec::new(),
             upvalue_defs: Vec::new(),
-            name:         name.to_string(),
+            name: name.to_string(),
             arity,
-            loop_stack:   Vec::new(),
-            return_type:  None,
+            loop_stack: Vec::new(),
+            return_type: None,
         }
     }
 }
@@ -72,7 +72,7 @@ impl FunctionState {
 /// A stack of `FunctionState`s, one per nesting level.  The top of the stack
 /// is the function currently being compiled.
 struct Compiler {
-    states:      Vec<FunctionState>,
+    states: Vec<FunctionState>,
     /// When true (REPL mode), top-level variable assignments and definitions
     /// are stored as globals rather than stack slots.
     global_mode: bool,
@@ -84,15 +84,27 @@ struct Compiler {
 
 impl Compiler {
     fn new() -> Self {
-        Compiler { states: Vec::new(), global_mode: false, has_imports: false }
+        Compiler {
+            states: Vec::new(),
+            global_mode: false,
+            has_imports: false,
+        }
     }
 
     fn new_with_imports() -> Self {
-        Compiler { states: Vec::new(), global_mode: false, has_imports: true }
+        Compiler {
+            states: Vec::new(),
+            global_mode: false,
+            has_imports: true,
+        }
     }
 
     fn new_repl() -> Self {
-        Compiler { states: Vec::new(), global_mode: true, has_imports: false }
+        Compiler {
+            states: Vec::new(),
+            global_mode: true,
+            has_imports: false,
+        }
     }
 
     // ── Public entry points ───────────────────────────────────────────────────
@@ -100,7 +112,11 @@ impl Compiler {
     /// Compile a top-level program (arity 0, anonymous).
     pub fn compile(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
         let has_imports = exprs.iter().any(|e| matches!(e, Expr::Import { .. }));
-        let mut c = if has_imports { Compiler::new_with_imports() } else { Compiler::new() };
+        let mut c = if has_imports {
+            Compiler::new_with_imports()
+        } else {
+            Compiler::new()
+        };
         c.push_fn("", 0, 0);
         c.compile_body(exprs)?;
         Ok(c.pop_fn())
@@ -124,12 +140,16 @@ impl Compiler {
     fn pop_fn(&mut self) -> Rc<Function> {
         let state = self.states.pop().unwrap();
         Rc::new(Function {
-            name:  state.name,
+            name: state.name,
             arity: state.arity,
             chunk: state.chunk,
-            upvalue_defs: state.upvalue_defs
+            upvalue_defs: state
+                .upvalue_defs
                 .into_iter()
-                .map(|uv| UpvalueDef { is_local: uv.is_local, index: uv.index })
+                .map(|uv| UpvalueDef {
+                    is_local: uv.is_local,
+                    index: uv.index,
+                })
                 .collect(),
             return_type: state.return_type,
         })
@@ -159,7 +179,10 @@ impl Compiler {
         match last {
             Expr::Function { name, .. } => {
                 self.expr(last)?;
-                let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                let idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Str(name.clone()));
                 self.emit(OpCode::Constant(idx));
                 self.emit(OpCode::Return);
             }
@@ -231,7 +254,10 @@ impl Compiler {
                 self.expr(condition.as_ref())?;
                 let exit_jump = self.emit_jump(OpCode::JumpIfFalse(0));
 
-                self.state_mut().loop_stack.push(LoopCtx { start: loop_start, break_jumps: vec![] });
+                self.state_mut().loop_stack.push(LoopCtx {
+                    start: loop_start,
+                    break_jumps: vec![],
+                });
                 self.stmts(body)?;
                 let ctx = self.state_mut().loop_stack.pop().unwrap();
 
@@ -256,7 +282,12 @@ impl Compiler {
                     // Inside a while loop: discard the value, jump to after the loop.
                     self.emit(OpCode::Pop);
                     let jump_idx = self.emit_jump(OpCode::Jump(0));
-                    self.state_mut().loop_stack.last_mut().unwrap().break_jumps.push(jump_idx);
+                    self.state_mut()
+                        .loop_stack
+                        .last_mut()
+                        .unwrap()
+                        .break_jumps
+                        .push(jump_idx);
                 }
             }
 
@@ -275,7 +306,9 @@ impl Compiler {
             Expr::MultiAssign { names, values } => {
                 if names.len() != values.len() {
                     return Err(self.error(format!(
-                        "expected {} value(s), got {}", names.len(), values.len()
+                        "expected {} value(s), got {}",
+                        names.len(),
+                        values.len()
                     )));
                 }
                 // Resolve each name as an existing local/upvalue, or pre-allocate
@@ -291,7 +324,10 @@ impl Compiler {
                         // New variable: push nil as its stack slot, then register.
                         let slot = self.state().locals.len();
                         self.emit(OpCode::Nil);
-                        self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                        self.state_mut().locals.push(LocalInfo {
+                            name: name.clone(),
+                            captured: false,
+                        });
                         targets.push(Ok(slot));
                     }
                 }
@@ -315,7 +351,10 @@ impl Compiler {
             }
 
             Expr::Import { path } => {
-                let idx = self.state_mut().chunk.add_constant(Constant::Str(path.clone()));
+                let idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Str(path.clone()));
                 self.emit(OpCode::Import(idx));
             }
 
@@ -323,8 +362,8 @@ impl Compiler {
                 let is_new_local = self.is_new_local_assign(e);
                 // In global mode, function/class defs emit SetGlobal (peek) instead of
                 // leaving the value as a new local slot, so we must Pop afterwards.
-                let defines_binding = !self.global_mode
-                    && matches!(e, Expr::Function { .. } | Expr::Class { .. });
+                let defines_binding =
+                    !self.global_mode && matches!(e, Expr::Function { .. } | Expr::Class { .. });
                 self.expr(e)?;
                 if !is_new_local && !defines_binding {
                     self.emit(OpCode::Pop);
@@ -338,10 +377,7 @@ impl Compiler {
 
     fn expr(&mut self, expr: &Expr) -> Result<(), CompileError> {
         match expr {
-            Expr::Return(_)
-            | Expr::Break(_)
-            | Expr::Next(_)
-            | Expr::Raise(_) => self.stmt(expr),
+            Expr::Return(_) | Expr::Break(_) | Expr::Next(_) | Expr::Raise(_) => self.stmt(expr),
 
             Expr::While { .. } | Expr::MultiAssign { .. } | Expr::Import { .. } => {
                 self.stmt(expr)?;
@@ -358,7 +394,7 @@ impl Compiler {
                 self.expr(right)?;
                 match &op.kind {
                     TokenKind::Minus => self.emit(OpCode::Negate),
-                    TokenKind::Bang  => self.emit(OpCode::Not),
+                    TokenKind::Bang => self.emit(OpCode::Not),
                     TokenKind::Tilde => self.emit(OpCode::BitNot),
                     other => return Err(self.error(format!("unknown unary op: {:?}", other))),
                 }
@@ -390,22 +426,22 @@ impl Compiler {
                 self.expr(left)?;
                 self.expr(right)?;
                 match &op.kind {
-                    TokenKind::Plus           => self.emit(OpCode::Add),
-                    TokenKind::Minus          => self.emit(OpCode::Sub),
-                    TokenKind::Star           => self.emit(OpCode::Mul),
-                    TokenKind::Slash          => self.emit(OpCode::Div),
-                    TokenKind::Percent        => self.emit(OpCode::Mod),
-                    TokenKind::Amp            => self.emit(OpCode::BitAnd),
-                    TokenKind::Pipe           => self.emit(OpCode::BitOr),
-                    TokenKind::Caret          => self.emit(OpCode::BitXor),
-                    TokenKind::LessLess       => self.emit(OpCode::Shl),
+                    TokenKind::Plus => self.emit(OpCode::Add),
+                    TokenKind::Minus => self.emit(OpCode::Sub),
+                    TokenKind::Star => self.emit(OpCode::Mul),
+                    TokenKind::Slash => self.emit(OpCode::Div),
+                    TokenKind::Percent => self.emit(OpCode::Mod),
+                    TokenKind::Amp => self.emit(OpCode::BitAnd),
+                    TokenKind::Pipe => self.emit(OpCode::BitOr),
+                    TokenKind::Caret => self.emit(OpCode::BitXor),
+                    TokenKind::LessLess => self.emit(OpCode::Shl),
                     TokenKind::GreaterGreater => self.emit(OpCode::Shr),
-                    TokenKind::EqEq           => self.emit(OpCode::Equal),
-                    TokenKind::BangEq         => self.emit(OpCode::NotEqual),
-                    TokenKind::Less           => self.emit(OpCode::Less),
-                    TokenKind::LessEq         => self.emit(OpCode::LessEqual),
-                    TokenKind::Greater        => self.emit(OpCode::Greater),
-                    TokenKind::GreaterEq      => self.emit(OpCode::GreaterEqual),
+                    TokenKind::EqEq => self.emit(OpCode::Equal),
+                    TokenKind::BangEq => self.emit(OpCode::NotEqual),
+                    TokenKind::Less => self.emit(OpCode::Less),
+                    TokenKind::LessEq => self.emit(OpCode::LessEqual),
+                    TokenKind::Greater => self.emit(OpCode::Greater),
+                    TokenKind::GreaterEq => self.emit(OpCode::GreaterEqual),
                     other => return Err(self.error(format!("unknown binary op: {:?}", other))),
                 }
                 Ok(())
@@ -417,10 +453,14 @@ impl Compiler {
                     self.emit(OpCode::GetLocal(slot));
                 } else if let Some(idx) = self.resolve_upvalue(depth, name) {
                     self.emit(OpCode::GetUpvalue(idx));
-                } else if self.global_mode || self.has_imports
+                } else if self.global_mode
+                    || self.has_imports
                     || name.starts_with(|c: char| c.is_uppercase())
                 {
-                    let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                    let idx = self
+                        .state_mut()
+                        .chunk
+                        .add_constant(Constant::Str(name.clone()));
                     self.emit(OpCode::GetGlobal(idx));
                 } else {
                     return Err(self.error(format!("undefined variable '{}'", name)));
@@ -437,11 +477,17 @@ impl Compiler {
                     self.emit(OpCode::SetUpvalue(idx));
                 } else if self.global_mode && depth == 0 {
                     // REPL top-level: persist as a global (peek semantics — TOS stays).
-                    let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                    let idx = self
+                        .state_mut()
+                        .chunk
+                        .add_constant(Constant::Str(name.clone()));
                     self.emit(OpCode::SetGlobal(idx));
                 } else {
                     // First use of this name: allocate a new stack slot.
-                    self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                    self.state_mut().locals.push(LocalInfo {
+                        name: name.clone(),
+                        captured: false,
+                    });
                 }
                 Ok(())
             }
@@ -451,7 +497,11 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::Call { callee, args, block } => {
+            Expr::Call {
+                callee,
+                args,
+                block,
+            } => {
                 // Method call: `obj.method(args)` or `obj.method(args) { |x| ... }`
                 if let Expr::Get { object, name } = callee.as_ref() {
                     if name == "new" && block.is_none() {
@@ -470,7 +520,10 @@ impl Compiler {
                             self.expr(&arg.value)?;
                         }
                         self.compile_block(blk)?;
-                        let ni = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                        let ni = self
+                            .state_mut()
+                            .chunk
+                            .add_constant(Constant::Str(name.clone()));
                         self.emit(OpCode::InvokeWithBlock(ni, args.len()));
                     } else {
                         // Regular method invocation
@@ -478,7 +531,10 @@ impl Compiler {
                         for arg in args {
                             self.expr(&arg.value)?;
                         }
-                        let ni = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                        let ni = self
+                            .state_mut()
+                            .chunk
+                            .add_constant(Constant::Str(name.clone()));
                         self.emit(OpCode::Invoke(ni, args.len()));
                     }
                     return Ok(());
@@ -497,7 +553,10 @@ impl Compiler {
                         for arg in args {
                             self.expr(&arg.value)?;
                         }
-                        let ni = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                        let ni = self
+                            .state_mut()
+                            .chunk
+                            .add_constant(Constant::Str(name.clone()));
                         if let Some(blk) = block {
                             self.compile_block(blk)?;
                             self.emit(OpCode::InvokeWithBlock(ni, arg_count));
@@ -533,22 +592,35 @@ impl Compiler {
 
             Expr::Get { object, name } => {
                 self.expr(object)?;
-                let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                let idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Str(name.clone()));
                 self.emit(OpCode::GetField(idx));
                 Ok(())
             }
 
             Expr::SafeGet { object, name } => {
                 self.expr(object)?;
-                let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                let idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Str(name.clone()));
                 self.emit(OpCode::GetFieldSafe(idx));
                 Ok(())
             }
 
-            Expr::Set { object, name, value } => {
+            Expr::Set {
+                object,
+                name,
+                value,
+            } => {
                 self.expr(object)?;
                 self.expr(value)?;
-                let idx = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                let idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Str(name.clone()));
                 self.emit(OpCode::SetField(idx));
                 Ok(())
             }
@@ -565,7 +637,10 @@ impl Compiler {
             Expr::MapLit(pairs) => {
                 let n = pairs.len();
                 for (key, val_expr) in pairs {
-                    let idx = self.state_mut().chunk.add_constant(Constant::Str(key.clone()));
+                    let idx = self
+                        .state_mut()
+                        .chunk
+                        .add_constant(Constant::Str(key.clone()));
                     self.emit(OpCode::Constant(idx));
                     self.expr(val_expr)?;
                 }
@@ -587,7 +662,11 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::IndexSet { object, index, value } => {
+            Expr::IndexSet {
+                object,
+                index,
+                value,
+            } => {
                 self.expr(object)?;
                 self.expr(index)?;
                 self.expr(value)?;
@@ -600,7 +679,10 @@ impl Compiler {
                 for part in parts {
                     match part {
                         StringPart::Lit(s) => {
-                            let idx = self.state_mut().chunk.add_constant(Constant::Str(s.clone()));
+                            let idx = self
+                                .state_mut()
+                                .chunk
+                                .add_constant(Constant::Str(s.clone()));
                             self.emit(OpCode::Constant(idx));
                         }
                         StringPart::Expr(inner) => {
@@ -612,14 +694,21 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::Super { method, args, block: _ } => {
+            Expr::Super {
+                method,
+                args,
+                block: _,
+            } => {
                 // Push self (slot 0 of the current method frame).
                 self.emit(OpCode::GetSelf);
                 let arg_count = args.len();
                 for arg in args {
                     self.expr(&arg.value)?;
                 }
-                let name_idx = self.state_mut().chunk.add_constant(Constant::Str(method.clone()));
+                let name_idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Str(method.clone()));
                 self.emit(OpCode::SuperInvoke(name_idx, arg_count));
                 Ok(())
             }
@@ -630,40 +719,79 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::Class { name, superclass, fields, methods, nested, constants } => {
-                self.compile_class(name, superclass.as_deref(), fields, methods, nested, constants, true)?;
+            Expr::Class {
+                name,
+                superclass,
+                fields,
+                methods,
+                nested,
+                constants,
+            } => {
+                self.compile_class(
+                    name,
+                    superclass.as_deref(),
+                    fields,
+                    methods,
+                    nested,
+                    constants,
+                    true,
+                )?;
                 Ok(())
             }
 
-            Expr::Function { name, params, return_type, body } => {
-                let line  = self.state().current_line;
+            Expr::Function {
+                name,
+                params,
+                return_type,
+                body,
+            } => {
+                let line = self.state().current_line;
                 let arity = params.len();
 
                 self.push_fn(name, arity, line);
                 self.state_mut().return_type = type_expr_name(return_type.as_ref());
                 // Slot 0 = the function itself — enables direct recursion by name.
-                self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                self.state_mut().locals.push(LocalInfo {
+                    name: name.clone(),
+                    captured: false,
+                });
                 for p in params {
-                    self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
+                    self.state_mut().locals.push(LocalInfo {
+                        name: p.name.clone(),
+                        captured: false,
+                    });
                 }
                 self.compile_body(body)?;
                 let func = self.pop_fn();
 
-                let idx = self.state_mut().chunk.add_constant(Constant::Function(func));
+                let idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Function(func));
                 self.emit(OpCode::Closure(idx));
 
                 if self.global_mode && self.states.len() == 1 {
                     // REPL top-level: store in globals, don't allocate a stack slot.
-                    let ni = self.state_mut().chunk.add_constant(Constant::Str(name.clone()));
+                    let ni = self
+                        .state_mut()
+                        .chunk
+                        .add_constant(Constant::Str(name.clone()));
                     self.emit(OpCode::SetGlobal(ni));
                 } else {
                     // The closure value on the stack becomes this local's slot.
-                    self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                    self.state_mut().locals.push(LocalInfo {
+                        name: name.clone(),
+                        captured: false,
+                    });
                 }
                 Ok(())
             }
 
-            Expr::If { condition, then_branch, else_branch } => {
+            Expr::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 self.expr(condition)?;
                 let jif = self.emit_jump(OpCode::JumpIfFalse(0));
                 self.compile_branch(then_branch)?;
@@ -696,13 +824,22 @@ impl Compiler {
                 let arity = params.len();
                 self.push_fn("<lambda>", arity, line);
                 // Slot 0 = the closure itself (mirrors named-function convention).
-                self.state_mut().locals.push(LocalInfo { name: "<lambda>".to_string(), captured: false });
+                self.state_mut().locals.push(LocalInfo {
+                    name: "<lambda>".to_string(),
+                    captured: false,
+                });
                 for p in params {
-                    self.state_mut().locals.push(LocalInfo { name: p.clone(), captured: false });
+                    self.state_mut().locals.push(LocalInfo {
+                        name: p.clone(),
+                        captured: false,
+                    });
                 }
                 self.compile_body(body)?;
                 let func = self.pop_fn();
-                let idx = self.state_mut().chunk.add_constant(Constant::Function(func));
+                let idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Function(func));
                 self.emit(OpCode::Closure(idx));
                 Ok(())
             }
@@ -717,9 +854,18 @@ impl Compiler {
 
     fn literal(&mut self, val: &Value) -> Result<(), CompileError> {
         match val {
-            Value::Bool(true)  => { self.emit(OpCode::True);  Ok(()) }
-            Value::Bool(false) => { self.emit(OpCode::False); Ok(()) }
-            Value::Nil         => { self.emit(OpCode::Nil);   Ok(()) }
+            Value::Bool(true) => {
+                self.emit(OpCode::True);
+                Ok(())
+            }
+            Value::Bool(false) => {
+                self.emit(OpCode::False);
+                Ok(())
+            }
+            Value::Nil => {
+                self.emit(OpCode::Nil);
+                Ok(())
+            }
             Value::Int(n) => {
                 let idx = self.state_mut().chunk.add_constant(Constant::Int(*n));
                 self.emit(OpCode::Constant(idx));
@@ -731,7 +877,10 @@ impl Compiler {
                 Ok(())
             }
             Value::Str(s) => {
-                let idx = self.state_mut().chunk.add_constant(Constant::Str(s.clone()));
+                let idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Str(s.clone()));
                 self.emit(OpCode::Constant(idx));
                 Ok(())
             }
@@ -743,7 +892,10 @@ impl Compiler {
     /// Look up `name` as a local in the function at `depth` (index into `states`).
     /// Returns the stack slot index if found.
     fn resolve_local(&self, depth: usize, name: &str) -> Option<usize> {
-        self.states[depth].locals.iter().rposition(|l| l.name == name)
+        self.states[depth]
+            .locals
+            .iter()
+            .rposition(|l| l.name == name)
     }
 
     /// Resolve `name` as an upvalue visible from the function at `depth`.
@@ -771,14 +923,17 @@ impl Compiler {
 
     /// Add an upvalue descriptor to the function at `depth`, deduplicating.
     fn add_upvalue(&mut self, depth: usize, is_local: bool, index: usize) -> usize {
-        let existing = self.states[depth].upvalue_defs.iter().position(|uv| {
-            uv.is_local == is_local && uv.index == index
-        });
+        let existing = self.states[depth]
+            .upvalue_defs
+            .iter()
+            .position(|uv| uv.is_local == is_local && uv.index == index);
         if let Some(i) = existing {
             return i;
         }
         let i = self.states[depth].upvalue_defs.len();
-        self.states[depth].upvalue_defs.push(UpvalueInfo { is_local, index });
+        self.states[depth]
+            .upvalue_defs
+            .push(UpvalueInfo { is_local, index });
         i
     }
 
@@ -792,8 +947,7 @@ impl Compiler {
             return false;
         }
         if let Expr::Assign { name, .. } = expr {
-            self.resolve_local(depth, name).is_none()
-                && !self.would_be_upvalue(depth, name)
+            self.resolve_local(depth, name).is_none() && !self.would_be_upvalue(depth, name)
         } else {
             false
         }
@@ -815,7 +969,10 @@ impl Compiler {
                         && !self.would_be_upvalue(depth, name) =>
                 {
                     self.emit(OpCode::Nil);
-                    self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                    self.state_mut().locals.push(LocalInfo {
+                        name: name.clone(),
+                        captured: false,
+                    });
                 }
                 Expr::MultiAssign { names, .. } => {
                     for name in names {
@@ -823,7 +980,10 @@ impl Compiler {
                             && !self.would_be_upvalue(depth, name)
                         {
                             self.emit(OpCode::Nil);
-                            self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+                            self.state_mut().locals.push(LocalInfo {
+                                name: name.clone(),
+                                captured: false,
+                            });
                         }
                     }
                 }
@@ -834,7 +994,9 @@ impl Compiler {
 
     /// Pure (non-mutating) upvalue check used by `is_new_local_assign`.
     fn would_be_upvalue(&self, depth: usize, name: &str) -> bool {
-        if depth == 0 { return false; }
+        if depth == 0 {
+            return false;
+        }
         let parent = depth - 1;
         self.resolve_local(parent, name).is_some() || self.would_be_upvalue(parent, name)
     }
@@ -874,7 +1036,10 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         let rescue_var_slot = if let Some(name) = rescue_var {
             let slot = self.state().locals.len();
-            self.state_mut().locals.push(LocalInfo { name: name.clone(), captured: false });
+            self.state_mut().locals.push(LocalInfo {
+                name: name.clone(),
+                captured: false,
+            });
             self.emit(OpCode::Nil);
             slot
         } else {
@@ -886,7 +1051,8 @@ impl Compiler {
 
         // Check BEFORE compiling body: is_new_local_assign checks whether the name is already
         // registered — after body compilation it would be, giving a false negative.
-        let body_creates_new_local_result = body.last().is_some_and(|e| self.is_new_local_assign(e));
+        let body_creates_new_local_result =
+            body.last().is_some_and(|e| self.is_new_local_assign(e));
 
         let begin_idx = self.emit_begin_rescue(rescue_var_slot);
 
@@ -932,7 +1098,10 @@ impl Compiler {
 
     fn emit_begin_rescue(&mut self, rescue_var_slot: usize) -> usize {
         let idx = self.state().chunk.code.len();
-        self.emit(OpCode::BeginRescue { handler_offset: 0, rescue_var_slot });
+        self.emit(OpCode::BeginRescue {
+            handler_offset: 0,
+            rescue_var_slot,
+        });
         idx
     }
 
@@ -943,23 +1112,34 @@ impl Compiler {
     /// Compile a block literal into a closure and push it onto the stack.
     /// The block's params become local slots 1..n (slot 0 is the closure itself).
     fn compile_block(&mut self, block: &Block) -> Result<(), CompileError> {
-        let line  = self.state().current_line;
+        let line = self.state().current_line;
         let arity = block.params.len();
         self.push_fn("<block>", arity, line);
         // Slot 0 = closure (anonymous; blocks don't recurse by name).
-        self.state_mut().locals.push(LocalInfo { name: String::new(), captured: false });
+        self.state_mut().locals.push(LocalInfo {
+            name: String::new(),
+            captured: false,
+        });
         for p in &block.params {
-            self.state_mut().locals.push(LocalInfo { name: p.clone(), captured: false });
+            self.state_mut().locals.push(LocalInfo {
+                name: p.clone(),
+                captured: false,
+            });
         }
         self.compile_body(&block.body)?;
         let func = self.pop_fn();
-        let idx  = self.state_mut().chunk.add_constant(Constant::Function(func));
+        let idx = self
+            .state_mut()
+            .chunk
+            .add_constant(Constant::Function(func));
         self.emit(OpCode::Closure(idx));
         Ok(())
     }
 
     fn stmts(&mut self, exprs: &[Expr]) -> Result<(), CompileError> {
-        for e in exprs { self.stmt(e)?; }
+        for e in exprs {
+            self.stmt(e)?;
+        }
         Ok(())
     }
 
@@ -972,13 +1152,13 @@ impl Compiler {
     #[allow(clippy::too_many_arguments)]
     fn compile_class(
         &mut self,
-        name:       &str,
+        name: &str,
         superclass: Option<&Expr>,
-        fields:     &[crate::ast::FieldDef],
-        methods:    &[MethodDef],
-        nested:     &[Expr],
-        constants:  &[(String, Box<Expr>)],
-        bind:       bool,
+        fields: &[crate::ast::FieldDef],
+        methods: &[MethodDef],
+        nested: &[Expr],
+        constants: &[(String, Box<Expr>)],
+        bind: bool,
     ) -> Result<(), CompileError> {
         let line = self.state().current_line;
 
@@ -991,13 +1171,22 @@ impl Compiler {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
             self.state_mut().return_type = type_expr_name(method.return_type.as_ref());
-            self.state_mut().locals.push(LocalInfo { name: "self".into(), captured: false });
+            self.state_mut().locals.push(LocalInfo {
+                name: "self".into(),
+                captured: false,
+            });
             for p in &method.params {
-                self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
+                self.state_mut().locals.push(LocalInfo {
+                    name: p.name.clone(),
+                    captured: false,
+                });
             }
             self.compile_body(&method.body)?;
             let func = self.pop_fn();
-            let fi = self.state_mut().chunk.add_constant(Constant::Function(func));
+            let fi = self
+                .state_mut()
+                .chunk
+                .add_constant(Constant::Function(func));
             self.emit(OpCode::Closure(fi));
         }
 
@@ -1006,13 +1195,22 @@ impl Compiler {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
             self.state_mut().return_type = type_expr_name(method.return_type.as_ref());
-            self.state_mut().locals.push(LocalInfo { name: "self".into(), captured: false });
+            self.state_mut().locals.push(LocalInfo {
+                name: "self".into(),
+                captured: false,
+            });
             for p in &method.params {
-                self.state_mut().locals.push(LocalInfo { name: p.name.clone(), captured: false });
+                self.state_mut().locals.push(LocalInfo {
+                    name: p.name.clone(),
+                    captured: false,
+                });
             }
             self.compile_body(&method.body)?;
             let func = self.pop_fn();
-            let fi = self.state_mut().chunk.add_constant(Constant::Function(func));
+            let fi = self
+                .state_mut()
+                .chunk
+                .add_constant(Constant::Function(func));
             self.emit(OpCode::Closure(fi));
         }
 
@@ -1020,11 +1218,30 @@ impl Compiler {
         let mut nested_class_names: Vec<String> = Vec::new();
         for nested_expr in nested {
             match nested_expr {
-                Expr::Class { name: nname, superclass: nsuper, fields: nfields, methods: nmethods, nested: nnested, constants: nconsts } => {
+                Expr::Class {
+                    name: nname,
+                    superclass: nsuper,
+                    fields: nfields,
+                    methods: nmethods,
+                    nested: nnested,
+                    constants: nconsts,
+                } => {
                     nested_class_names.push(nname.clone());
-                    self.compile_class(nname, nsuper.as_deref(), nfields, nmethods, nnested, nconsts, false)?;
+                    self.compile_class(
+                        nname,
+                        nsuper.as_deref(),
+                        nfields,
+                        nmethods,
+                        nnested,
+                        nconsts,
+                        false,
+                    )?;
                 }
-                _ => return Err(self.error("nested class body must be a class expression".to_string())),
+                _ => {
+                    return Err(
+                        self.error("nested class body must be a class expression".to_string())
+                    );
+                }
             }
         }
 
@@ -1046,21 +1263,27 @@ impl Compiler {
             }
         };
 
-        let field_names:        Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-        let field_defaults: Vec<Option<Constant>> = fields.iter().map(|f| {
-            match &f.default {
-                Some(Expr::Literal(Value::Int(n)))   => Some(Constant::Int(*n)),
+        let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+        let field_defaults: Vec<Option<Constant>> = fields
+            .iter()
+            .map(|f| match &f.default {
+                Some(Expr::Literal(Value::Int(n))) => Some(Constant::Int(*n)),
                 Some(Expr::Literal(Value::Float(n))) => Some(Constant::Float(*n)),
-                Some(Expr::Literal(Value::Str(s)))   => Some(Constant::Str(s.clone())),
+                Some(Expr::Literal(Value::Str(s))) => Some(Constant::Str(s.clone())),
                 _ => None,
-            }
-        }).collect();
-        let method_names:       Vec<String> = instance_methods.iter().map(|m| m.name.clone()).collect();
-        let private_methods:    Vec<String> = instance_methods.iter().filter(|m| m.private).map(|m| m.name.clone()).collect();
-        let class_method_names: Vec<String> = class_methods.iter().map(|m| m.name.clone()).collect();
+            })
+            .collect();
+        let method_names: Vec<String> = instance_methods.iter().map(|m| m.name.clone()).collect();
+        let private_methods: Vec<String> = instance_methods
+            .iter()
+            .filter(|m| m.private)
+            .map(|m| m.name.clone())
+            .collect();
+        let class_method_names: Vec<String> =
+            class_methods.iter().map(|m| m.name.clone()).collect();
         let desc_idx = self.state_mut().chunk.add_constant(Constant::ClassDesc {
-            name:               name.to_string(),
-            superclass:         static_super.map(|s| s.to_string()),
+            name: name.to_string(),
+            superclass: static_super.map(|s| s.to_string()),
             superclass_dynamic,
             field_names,
             field_defaults,
@@ -1079,17 +1302,26 @@ impl Compiler {
 
         if self.global_mode && self.states.len() == 1 {
             // REPL top-level: store in globals, don't allocate a stack slot.
-            let ni = self.state_mut().chunk.add_constant(Constant::Str(name.to_string()));
+            let ni = self
+                .state_mut()
+                .chunk
+                .add_constant(Constant::Str(name.to_string()));
             self.emit(OpCode::SetGlobal(ni));
         } else {
             // Store the class value in a local slot named after the class.
-            self.state_mut().locals.push(LocalInfo { name: name.to_string(), captured: false });
+            self.state_mut().locals.push(LocalInfo {
+                name: name.to_string(),
+                captured: false,
+            });
         }
         Ok(())
     }
 
     fn error(&self, message: String) -> CompileError {
-        CompileError { message, line: self.state().current_line }
+        CompileError {
+            message,
+            line: self.state().current_line,
+        }
     }
 }
 

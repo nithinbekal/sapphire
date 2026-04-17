@@ -7,7 +7,10 @@ fn eval(src: &str) -> VmValue {
     let tokens = Lexer::new(src).scan_tokens();
     let stmts = Parser::new(tokens).parse().expect("parse error");
     let func = compile(&stmts).expect("compile error");
-    Vm::new(func, std::path::PathBuf::new()).run().expect("vm error").expect("empty stack")
+    Vm::new(func, std::path::PathBuf::new())
+        .run()
+        .expect("vm error")
+        .expect("empty stack")
 }
 
 fn eval_with_stdlib(src: &str) -> VmValue {
@@ -23,7 +26,9 @@ fn eval_err(src: &str) -> VmError {
     let tokens = Lexer::new(src).scan_tokens();
     let stmts = Parser::new(tokens).parse().expect("parse error");
     let func = compile(&stmts).expect("compile error");
-    Vm::new(func, std::path::PathBuf::new()).run().expect_err("expected vm error")
+    Vm::new(func, std::path::PathBuf::new())
+        .run()
+        .expect_err("expected vm error")
 }
 
 #[test]
@@ -69,21 +74,21 @@ fn not() {
 
 #[test]
 fn bitwise_and() {
-    assert_eq!(eval("12 & 10"), VmValue::Int(8));   // 1100 & 1010 = 1000
-    assert_eq!(eval("255 & 15"), VmValue::Int(15));  // 11111111 & 00001111 = 00001111
+    assert_eq!(eval("12 & 10"), VmValue::Int(8)); // 1100 & 1010 = 1000
+    assert_eq!(eval("255 & 15"), VmValue::Int(15)); // 11111111 & 00001111 = 00001111
     assert_eq!(eval("7 & 0"), VmValue::Int(0));
 }
 
 #[test]
 fn bitwise_or() {
-    assert_eq!(eval("12 | 10"), VmValue::Int(14));    // 1100 | 1010 = 1110
-    assert_eq!(eval("240 | 15"), VmValue::Int(255));  // 11110000 | 00001111 = 11111111
+    assert_eq!(eval("12 | 10"), VmValue::Int(14)); // 1100 | 1010 = 1110
+    assert_eq!(eval("240 | 15"), VmValue::Int(255)); // 11110000 | 00001111 = 11111111
     assert_eq!(eval("7 | 0"), VmValue::Int(7));
 }
 
 #[test]
 fn bitwise_xor() {
-    assert_eq!(eval("12 ^ 10"), VmValue::Int(6));    // 1100 ^ 1010 = 0110
+    assert_eq!(eval("12 ^ 10"), VmValue::Int(6)); // 1100 ^ 1010 = 0110
     assert_eq!(eval("255 ^ 255"), VmValue::Int(0));
     assert_eq!(eval("7 ^ 0"), VmValue::Int(7));
 }
@@ -147,7 +152,10 @@ fn comparisons() {
 
 #[test]
 fn string_concat() {
-    assert_eq!(eval(r#""hello" + " world""#), VmValue::Str("hello world".into()));
+    assert_eq!(
+        eval(r#""hello" + " world""#),
+        VmValue::Str("hello world".into())
+    );
 }
 
 #[test]
@@ -194,7 +202,10 @@ fn if_false_branch_skipped() {
 
 #[test]
 fn if_else_selects_branch() {
-    assert_eq!(eval("x = 0\nif false { x = 1 } else { x = 2 }\nx"), VmValue::Int(2));
+    assert_eq!(
+        eval("x = 0\nif false { x = 1 } else { x = 2 }\nx"),
+        VmValue::Int(2)
+    );
 }
 
 #[test]
@@ -543,8 +554,10 @@ fn list_index_write() {
 #[test]
 fn map_literal_and_lookup() {
     assert_eq!(
-        eval(r#"m = {x: 1, y: 2}
-m["x"]"#),
+        eval(
+            r#"m = {x: 1, y: 2}
+m["x"]"#
+        ),
         VmValue::Int(1)
     );
 }
@@ -552,8 +565,10 @@ m["x"]"#),
 #[test]
 fn map_missing_key_is_nil() {
     assert_eq!(
-        eval(r#"m = {a: 1}
-m["z"]"#),
+        eval(
+            r#"m = {a: 1}
+m["z"]"#
+        ),
         VmValue::Nil
     );
 }
@@ -571,8 +586,10 @@ fn string_interp_plain() {
 #[test]
 fn string_interp_with_expr() {
     assert_eq!(
-        eval(r#"x = 42
-"value is #{x}""#),
+        eval(
+            r#"x = 42
+"value is #{x}""#
+        ),
         VmValue::Str("value is 42".into())
     );
 }
@@ -580,9 +597,11 @@ fn string_interp_with_expr() {
 #[test]
 fn string_interp_multiple_parts() {
     assert_eq!(
-        eval(r##"a = 1
+        eval(
+            r##"a = 1
 b = 2
-"#{a} + #{b} = #{a + b}""##),
+"#{a} + #{b} = #{a + b}""##
+        ),
         VmValue::Str("1 + 2 = 3".into())
     );
 }
@@ -618,10 +637,7 @@ fn print_does_not_change_result_when_not_last_statement() {
 
 #[test]
 fn implicit_return_last_print_passes_printed_value() {
-    assert_eq!(
-        eval("def f() { print 42 }\nf()"),
-        VmValue::Int(42)
-    );
+    assert_eq!(eval("def f() { print 42 }\nf()"), VmValue::Int(42));
 }
 
 #[test]
@@ -789,7 +805,10 @@ fn lambda_no_params() {
 
 #[test]
 fn lambda_closure_capture() {
-    assert_eq!(eval("n = 10; f = def(x) { x + n }; f.call(3)"), VmValue::Int(13));
+    assert_eq!(
+        eval("n = 10; f = def(x) { x + n }; f.call(3)"),
+        VmValue::Int(13)
+    );
 }
 
 #[test]
@@ -1140,8 +1159,14 @@ fn range_include() {
     // VM ranges are exclusive upper bound
     assert_eq!(eval_with_stdlib("(1..10).include?(5)"), VmValue::Bool(true));
     assert_eq!(eval_with_stdlib("(1..10).include?(1)"), VmValue::Bool(true));
-    assert_eq!(eval_with_stdlib("(1..10).include?(10)"), VmValue::Bool(false));
-    assert_eq!(eval_with_stdlib("(1..10).include?(11)"), VmValue::Bool(false));
+    assert_eq!(
+        eval_with_stdlib("(1..10).include?(10)"),
+        VmValue::Bool(false)
+    );
+    assert_eq!(
+        eval_with_stdlib("(1..10).include?(11)"),
+        VmValue::Bool(false)
+    );
 }
 
 #[test]
@@ -1498,8 +1523,10 @@ fn typed_param_accepts_correct_type() {
 
 #[test]
 fn typed_param_rejects_wrong_type() {
-    let err = eval_err(r#"def add(a: Int, b: Int) { a + b }
-add("x", 2)"#);
+    let err = eval_err(
+        r#"def add(a: Int, b: Int) { a + b }
+add("x", 2)"#,
+    );
     assert!(matches!(err, VmError::TypeError { .. }));
 }
 
@@ -1509,14 +1536,11 @@ fn typed_return_accepts_correct_type() {
     assert_eq!(eval(src), VmValue::Int(42));
 }
 
-
-
 #[test]
 fn attr_type_accepted_on_constructor() {
     let src = "class P { attr x: Int }\nP.new(x: 42).x";
     assert_eq!(eval(src), VmValue::Int(42));
 }
-
 
 #[test]
 fn attr_type_accepted_on_set() {
@@ -1533,8 +1557,10 @@ greet("Alice")"#;
 
 #[test]
 fn method_typed_param_rejects_wrong_type() {
-    let err = eval_err(r#"class Calc { def double(n: Int) { n * 2 } }
-Calc.new().double("x")"#);
+    let err = eval_err(
+        r#"class Calc { def double(n: Int) { n * 2 } }
+Calc.new().double("x")"#,
+    );
     assert!(matches!(err, VmError::TypeError { .. }));
 }
 
@@ -1700,8 +1726,16 @@ fn return_type_annotation_wrong_type() {
     let err = eval_err("def greet() -> Int { \"hello\" }\ngreet()");
     match err {
         VmError::TypeError { message, .. } => {
-            assert!(message.contains("expected Int"), "unexpected message: {}", message);
-            assert!(message.contains("got String"), "unexpected message: {}", message);
+            assert!(
+                message.contains("expected Int"),
+                "unexpected message: {}",
+                message
+            );
+            assert!(
+                message.contains("got String"),
+                "unexpected message: {}",
+                message
+            );
         }
         other => panic!("expected TypeError, got {:?}", other),
     }
@@ -1712,7 +1746,11 @@ fn return_type_annotation_early_return_wrong() {
     let err = eval_err("def f() -> Int { return \"oops\" }\nf()");
     match err {
         VmError::TypeError { message, .. } => {
-            assert!(message.contains("expected Int"), "unexpected message: {}", message);
+            assert!(
+                message.contains("expected Int"),
+                "unexpected message: {}",
+                message
+            );
         }
         other => panic!("expected TypeError, got {:?}", other),
     }
@@ -1735,54 +1773,63 @@ fn return_type_annotation_num_accepts_float() {
 #[test]
 fn break_in_each_stops_iteration() {
     // break should stop iteration and execution continues after the each call
-    let result = eval_with_stdlib(r#"
+    let result = eval_with_stdlib(
+        r#"
 sum = 0
 [1, 2, 3, 4, 5].each { |n|
   break if n == 3
   sum = sum + n
 }
-sum"#);
+sum"#,
+    );
     assert_eq!(result, VmValue::Int(3)); // 1 + 2, stops before 3
 }
 
 #[test]
 fn break_in_each_execution_continues_after() {
     // code after the each call must still run
-    let result = eval_with_stdlib(r#"
+    let result = eval_with_stdlib(
+        r#"
 x = 0
 [1, 2, 3].each { |n| break if n == 2 }
 x = 99
-x"#);
+x"#,
+    );
     assert_eq!(result, VmValue::Int(99));
 }
 
 #[test]
 fn break_in_map_stops_early() {
     // map collects [10, 20] then hits break; result is a partial list
-    let result = eval_with_stdlib(r#"
+    let result = eval_with_stdlib(
+        r#"
 [1, 2, 3, 4].map { |n|
   break if n == 3
   n * 10
-}.length"#);
+}.length"#,
+    );
     assert_eq!(result, VmValue::Int(3)); // [10, 20, nil] — 2 mapped + the break value
 }
 
 #[test]
 fn next_in_each_skips_element() {
-    let result = eval_with_stdlib(r#"
+    let result = eval_with_stdlib(
+        r#"
 sum = 0
 [1, 2, 3, 4, 5].each { |n|
   next if n % 2 == 0
   sum = sum + n
 }
-sum"#);
+sum"#,
+    );
     assert_eq!(result, VmValue::Int(9)); // 1 + 3 + 5
 }
 
 #[test]
 fn break_in_nested_each_exits_inner_only() {
     // break inside the inner each should not affect the outer each
-    let result = eval_with_stdlib(r#"
+    let result = eval_with_stdlib(
+        r#"
 count = 0
 [1, 2, 3].each { |i|
   [10, 20, 30].each { |j|
@@ -1790,7 +1837,8 @@ count = 0
     count = count + 1
   }
 }
-count"#);
+count"#,
+    );
     assert_eq!(result, VmValue::Int(3)); // inner each runs once per outer iteration
 }
 

@@ -63,19 +63,12 @@ fn src_deep(depth: usize, n: usize) -> String {
     let mut src = String::new();
     for i in (1..=depth).rev() {
         if i == depth {
-            src.push_str(&format!(
-                "def f{i}(x: Int) -> Int {{ x + 1 }}\n"
-            ));
+            src.push_str(&format!("def f{i}(x: Int) -> Int {{ x + 1 }}\n"));
         } else {
-            src.push_str(&format!(
-                "def f{i}(x: Int) -> Int {{ f{}(x) }}\n",
-                i + 1
-            ));
+            src.push_str(&format!("def f{i}(x: Int) -> Int {{ f{}(x) }}\n", i + 1));
         }
     }
-    src.push_str(&format!(
-        "i = 0\nwhile i < {n} {{ f1(i)\ni = i + 1 }}\ni"
-    ));
+    src.push_str(&format!("i = 0\nwhile i < {n} {{ f1(i)\ni = i + 1 }}\ni"));
     src
 }
 

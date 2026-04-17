@@ -1,4 +1,4 @@
-use super::{eval, VmValue};
+use super::{VmValue, eval};
 
 #[test]
 fn size() {

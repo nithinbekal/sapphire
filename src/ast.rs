@@ -165,5 +165,7 @@ pub enum Expr {
         body: Vec<Expr>,
     },
     /// `import "./path"` — load and execute a relative file in the current scope.
-    Import { path: String },
+    Import {
+        path: String,
+    },
 }

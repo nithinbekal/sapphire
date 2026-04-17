@@ -1,4 +1,4 @@
-use super::{eval, VmValue};
+use super::{VmValue, eval};
 
 #[test]
 fn size() {
@@ -15,7 +15,10 @@ fn has_key() {
 #[test]
 fn delete() {
     assert_eq!(eval("m = {a: 1}\nm.delete(\"a\")"), VmValue::Int(1));
-    assert_eq!(eval("m = {a: 1}\nm.delete(\"a\")\nm.size()"), VmValue::Int(0));
+    assert_eq!(
+        eval("m = {a: 1}\nm.delete(\"a\")\nm.size()"),
+        VmValue::Int(0)
+    );
 }
 
 #[test]
@@ -25,7 +28,7 @@ b = { y: 2 }
 c = a.merge(b)
 c.size()"#;
     assert_eq!(eval(src), VmValue::Int(2));
-    
+
     let src2 = r#"a = { x: 1 }
 b = { y: 2 }
 c = a.merge(b)
@@ -39,7 +42,7 @@ fn select() {
 result = m.select() { |k, v| v > 1 }
 result.size()"#;
     assert_eq!(eval(src), VmValue::Int(2));
-    
+
     let src2 = r#"m = { a: 1, b: 2, c: 3 }
 result = m.select() { |k, v| v > 1 }
 result.has_key?("a")"#;
