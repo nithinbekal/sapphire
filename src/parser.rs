@@ -12,7 +12,11 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, current: 0, allow_trailing_block: true }
+        Self {
+            tokens,
+            current: 0,
+            allow_trailing_block: true,
+        }
     }
 
     fn peek(&self) -> &Token {
@@ -25,7 +29,9 @@ impl Parser {
     // { id: → map entry
     // other → block without params
     fn is_block_start(&self) -> bool {
-        if !self.check(&TokenKind::LeftBrace) { return false; }
+        if !self.check(&TokenKind::LeftBrace) {
+            return false;
+        }
         match self.tokens.get(self.current + 1).map(|t| &t.kind) {
             Some(TokenKind::Pipe) => true,
             Some(TokenKind::RightBrace) => false,
@@ -43,8 +49,14 @@ impl Parser {
         }
         self.advance(); // consume ':'
         match self.peek().kind.clone() {
-            TokenKind::Identifier(t) => { self.advance(); Ok(Some(TypeExpr::Named(t))) }
-            TokenKind::Nil => { self.advance(); Ok(Some(TypeExpr::Named("Nil".to_string()))) }
+            TokenKind::Identifier(t) => {
+                self.advance();
+                Ok(Some(TypeExpr::Named(t)))
+            }
+            TokenKind::Nil => {
+                self.advance();
+                Ok(Some(TypeExpr::Named("Nil".to_string())))
+            }
             _ => Err(SapphireError::ParseError {
                 message: "expected type name after ':'".into(),
                 line: self.peek().line,
@@ -58,8 +70,14 @@ impl Parser {
         }
         self.advance(); // consume '->'
         match self.peek().kind.clone() {
-            TokenKind::Identifier(t) => { self.advance(); Ok(Some(TypeExpr::Named(t))) }
-            TokenKind::Nil => { self.advance(); Ok(Some(TypeExpr::Named("Nil".to_string()))) }
+            TokenKind::Identifier(t) => {
+                self.advance();
+                Ok(Some(TypeExpr::Named(t)))
+            }
+            TokenKind::Nil => {
+                self.advance();
+                Ok(Some(TypeExpr::Named("Nil".to_string())))
+            }
             _ => Err(SapphireError::ParseError {
                 message: "expected return type after '->'".into(),
                 line: self.peek().line,
@@ -106,7 +124,9 @@ impl Parser {
         let mut exprs = Vec::new();
         loop {
             self.skip_terminators();
-            if self.is_at_end() { break; }
+            if self.is_at_end() {
+                break;
+            }
             exprs.push(self.statement()?);
         }
         Ok(exprs)
@@ -136,9 +156,12 @@ impl Parser {
         }
         if self.check(&TokenKind::Break) {
             self.advance();
-            let val = if self.check(&TokenKind::Newline) || self.check(&TokenKind::Semicolon)
-                || self.check(&TokenKind::If) || self.check(&TokenKind::RightBrace)
-                || self.is_at_end() {
+            let val = if self.check(&TokenKind::Newline)
+                || self.check(&TokenKind::Semicolon)
+                || self.check(&TokenKind::If)
+                || self.check(&TokenKind::RightBrace)
+                || self.is_at_end()
+            {
                 Expr::Literal(Value::Nil)
             } else {
                 self.logical()?
@@ -147,9 +170,12 @@ impl Parser {
         }
         if self.check(&TokenKind::Next) {
             self.advance();
-            let val = if self.check(&TokenKind::Newline) || self.check(&TokenKind::Semicolon)
-                || self.check(&TokenKind::If) || self.check(&TokenKind::RightBrace)
-                || self.is_at_end() {
+            let val = if self.check(&TokenKind::Newline)
+                || self.check(&TokenKind::Semicolon)
+                || self.check(&TokenKind::If)
+                || self.check(&TokenKind::RightBrace)
+                || self.is_at_end()
+            {
                 Expr::Literal(Value::Nil)
             } else {
                 self.logical()?
@@ -193,17 +219,22 @@ impl Parser {
                 TokenKind::StringLit(path) => {
                     if !path.starts_with("./") && !path.starts_with("../") {
                         return Err(SapphireError::ParseError {
-                            message: format!("import path must be relative (start with ./ or ../): {:?}", path),
+                            message: format!(
+                                "import path must be relative (start with ./ or ../): {:?}",
+                                path
+                            ),
                             line,
                         });
                     }
                     self.advance();
                     return Ok(Expr::Import { path });
                 }
-                _ => return Err(SapphireError::ParseError {
-                    message: "expected a string literal after 'import'".into(),
-                    line,
-                }),
+                _ => {
+                    return Err(SapphireError::ParseError {
+                        message: "expected a string literal after 'import'".into(),
+                        line,
+                    });
+                }
             }
         }
         self.logical()
@@ -212,32 +243,50 @@ impl Parser {
     fn class_def(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'class'
         let name = match self.peek().kind.clone() {
-            TokenKind::Identifier(n) => { self.advance(); n }
-            _ => return Err(SapphireError::ParseError {
-                message: "expected class name".into(),
-                line: self.peek().line,
-            }),
+            TokenKind::Identifier(n) => {
+                self.advance();
+                n
+            }
+            _ => {
+                return Err(SapphireError::ParseError {
+                    message: "expected class name".into(),
+                    line: self.peek().line,
+                });
+            }
         };
         let superclass = if self.check(&TokenKind::Less) {
             self.advance(); // consume '<'
             let first = match self.peek().kind.clone() {
-                TokenKind::Identifier(n) => { self.advance(); n }
-                _ => return Err(SapphireError::ParseError {
-                    message: "expected superclass name after '<'".into(),
-                    line: self.peek().line,
-                }),
+                TokenKind::Identifier(n) => {
+                    self.advance();
+                    n
+                }
+                _ => {
+                    return Err(SapphireError::ParseError {
+                        message: "expected superclass name after '<'".into(),
+                        line: self.peek().line,
+                    });
+                }
             };
             let mut expr: Expr = Expr::Variable(first);
             while self.check(&TokenKind::Dot) {
                 self.advance(); // consume '.'
                 let field = match self.peek().kind.clone() {
-                    TokenKind::Identifier(n) => { self.advance(); n }
-                    _ => return Err(SapphireError::ParseError {
-                        message: "expected identifier after '.' in superclass".into(),
-                        line: self.peek().line,
-                    }),
+                    TokenKind::Identifier(n) => {
+                        self.advance();
+                        n
+                    }
+                    _ => {
+                        return Err(SapphireError::ParseError {
+                            message: "expected identifier after '.' in superclass".into(),
+                            line: self.peek().line,
+                        });
+                    }
                 };
-                expr = Expr::Get { object: Box::new(expr), name: field };
+                expr = Expr::Get {
+                    object: Box::new(expr),
+                    name: field,
+                };
             }
             Some(Box::new(expr))
         } else {
@@ -256,15 +305,20 @@ impl Parser {
         let mut constants = Vec::new();
         loop {
             self.skip_terminators();
-            if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
+            if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+                break;
+            }
             if self.check(&TokenKind::Class) {
                 nested.push(self.class_def()?);
             } else if let TokenKind::Identifier(n) = self.peek().kind.clone() {
                 // ALL_CAPS identifier followed by `=` is a class constant: `PI = 3.14`
-                let next_is_eq = self.tokens.get(self.current + 1)
+                let next_is_eq = self
+                    .tokens
+                    .get(self.current + 1)
                     .map(|t| t.kind == TokenKind::Eq)
                     .unwrap_or(false);
-                if n.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+                if n.chars()
+                    .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
                     && next_is_eq
                 {
                     self.advance(); // consume name
@@ -273,18 +327,24 @@ impl Parser {
                     constants.push((n, Box::new(val)));
                 } else {
                     return Err(SapphireError::ParseError {
-                        message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body".into(),
+                        message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body"
+                            .into(),
                         line: self.peek().line,
                     });
                 }
             } else if self.check(&TokenKind::Attr) {
                 self.advance(); // consume 'attr'
                 let field_name = match self.peek().kind.clone() {
-                    TokenKind::Identifier(n) => { self.advance(); n }
-                    _ => return Err(SapphireError::ParseError {
-                        message: "expected field name after 'attr'".into(),
-                        line: self.peek().line,
-                    }),
+                    TokenKind::Identifier(n) => {
+                        self.advance();
+                        n
+                    }
+                    _ => {
+                        return Err(SapphireError::ParseError {
+                            message: "expected field name after 'attr'".into(),
+                            line: self.peek().line,
+                        });
+                    }
                 };
                 let type_ann = self.parse_type_ann()?;
                 let default = if self.check(&TokenKind::Eq) {
@@ -293,7 +353,11 @@ impl Parser {
                 } else {
                     None
                 };
-                fields.push(FieldDef { name: field_name, type_ann, default });
+                fields.push(FieldDef {
+                    name: field_name,
+                    type_ann,
+                    default,
+                });
             } else if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
                 let private = self.check(&TokenKind::Defp);
                 methods.push(self.method_def(private)?);
@@ -308,7 +372,9 @@ impl Parser {
                 self.advance(); // consume '{'
                 loop {
                     self.skip_terminators();
-                    if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
+                    if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+                        break;
+                    }
                     if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
                         let private = self.check(&TokenKind::Defp);
                         let mut m = self.method_def(private)?;
@@ -330,7 +396,8 @@ impl Parser {
                 self.advance(); // consume '}'
             } else {
                 return Err(SapphireError::ParseError {
-                    message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body".into(),
+                    message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body"
+                        .into(),
                     line: self.peek().line,
                 });
             }
@@ -403,11 +470,16 @@ impl Parser {
             return self.lambda_def();
         }
         let name = match self.peek().kind.clone() {
-            TokenKind::Identifier(n) => { self.advance(); n }
-            _ => return Err(SapphireError::ParseError {
-                message: "expected function name or '(' after 'def'".into(),
-                line: self.peek().line,
-            }),
+            TokenKind::Identifier(n) => {
+                self.advance();
+                n
+            }
+            _ => {
+                return Err(SapphireError::ParseError {
+                    message: "expected function name or '(' after 'def'".into(),
+                    line: self.peek().line,
+                });
+            }
         };
         let mut params = Vec::new();
         if self.check(&TokenKind::LeftParen) {
@@ -420,12 +492,16 @@ impl Parser {
                             let type_ann = self.parse_type_ann()?;
                             params.push(ParamDef { name: p, type_ann });
                         }
-                        _ => return Err(SapphireError::ParseError {
-                            message: "expected parameter name".into(),
-                            line: self.peek().line,
-                        }),
+                        _ => {
+                            return Err(SapphireError::ParseError {
+                                message: "expected parameter name".into(),
+                                line: self.peek().line,
+                            });
+                        }
                     }
-                    if !self.check(&TokenKind::Comma) { break; }
+                    if !self.check(&TokenKind::Comma) {
+                        break;
+                    }
                     self.advance();
                 }
             }
@@ -454,13 +530,20 @@ impl Parser {
         if !self.check(&TokenKind::RightParen) {
             loop {
                 match self.peek().kind.clone() {
-                    TokenKind::Identifier(p) => { self.advance(); params.push(p); }
-                    _ => return Err(SapphireError::ParseError {
-                        message: "expected parameter name in lambda".into(),
-                        line: self.peek().line,
-                    }),
+                    TokenKind::Identifier(p) => {
+                        self.advance();
+                        params.push(p);
+                    }
+                    _ => {
+                        return Err(SapphireError::ParseError {
+                            message: "expected parameter name in lambda".into(),
+                            line: self.peek().line,
+                        });
+                    }
                 }
-                if !self.check(&TokenKind::Comma) { break; }
+                if !self.check(&TokenKind::Comma) {
+                    break;
+                }
                 self.advance();
             }
         }
@@ -478,11 +561,16 @@ impl Parser {
     fn method_def(&mut self, private: bool) -> Result<MethodDef, SapphireError> {
         self.advance(); // consume 'def' or 'defp'
         let name = match self.peek().kind.clone() {
-            TokenKind::Identifier(n) => { self.advance(); n }
-            _ => return Err(SapphireError::ParseError {
-                message: "expected method name".into(),
-                line: self.peek().line,
-            }),
+            TokenKind::Identifier(n) => {
+                self.advance();
+                n
+            }
+            _ => {
+                return Err(SapphireError::ParseError {
+                    message: "expected method name".into(),
+                    line: self.peek().line,
+                });
+            }
         };
         let mut params = Vec::new();
         if self.check(&TokenKind::LeftParen) {
@@ -495,12 +583,16 @@ impl Parser {
                             let type_ann = self.parse_type_ann()?;
                             params.push(ParamDef { name: p, type_ann });
                         }
-                        _ => return Err(SapphireError::ParseError {
-                            message: "expected parameter name".into(),
-                            line: self.peek().line,
-                        }),
+                        _ => {
+                            return Err(SapphireError::ParseError {
+                                message: "expected parameter name".into(),
+                                line: self.peek().line,
+                            });
+                        }
                     }
-                    if !self.check(&TokenKind::Comma) { break; }
+                    if !self.check(&TokenKind::Comma) {
+                        break;
+                    }
                     self.advance();
                 }
             }
@@ -514,7 +606,14 @@ impl Parser {
         }
         let return_type = self.parse_return_type()?;
         let body = self.block_with_rescue()?;
-        Ok(MethodDef { name, params, return_type, body, private, class_method: false })
+        Ok(MethodDef {
+            name,
+            params,
+            return_type,
+            body,
+            private,
+            class_method: false,
+        })
     }
 
     fn while_statement(&mut self) -> Result<Expr, SapphireError> {
@@ -533,11 +632,16 @@ impl Parser {
         let mut names = Vec::new();
         loop {
             match self.peek().kind.clone() {
-                TokenKind::Identifier(n) => { self.advance(); names.push(n); }
-                _ => return Err(SapphireError::ParseError {
-                    message: "expected identifier in multiple assignment".into(),
-                    line: self.peek().line,
-                }),
+                TokenKind::Identifier(n) => {
+                    self.advance();
+                    names.push(n);
+                }
+                _ => {
+                    return Err(SapphireError::ParseError {
+                        message: "expected identifier in multiple assignment".into(),
+                        line: self.peek().line,
+                    });
+                }
             }
             if self.check(&TokenKind::Comma) {
                 self.advance();
@@ -569,7 +673,9 @@ impl Parser {
         let mut body = Vec::new();
         loop {
             self.skip_terminators();
-            if self.check(&TokenKind::Rescue) || self.check(&TokenKind::End) || self.is_at_end() { break; }
+            if self.check(&TokenKind::Rescue) || self.check(&TokenKind::End) || self.is_at_end() {
+                break;
+            }
             body.push(self.statement()?);
         }
         let (rescue_var, rescue_body) = if self.check(&TokenKind::Rescue) {
@@ -583,7 +689,9 @@ impl Parser {
             let mut rescue_body = Vec::new();
             loop {
                 self.skip_terminators();
-                if self.check(&TokenKind::Else) || self.check(&TokenKind::End) || self.is_at_end() { break; }
+                if self.check(&TokenKind::Else) || self.check(&TokenKind::End) || self.is_at_end() {
+                    break;
+                }
                 rescue_body.push(self.statement()?);
             }
             (var, rescue_body)
@@ -595,7 +703,9 @@ impl Parser {
             let mut else_body = Vec::new();
             loop {
                 self.skip_terminators();
-                if self.check(&TokenKind::End) || self.is_at_end() { break; }
+                if self.check(&TokenKind::End) || self.is_at_end() {
+                    break;
+                }
                 else_body.push(self.statement()?);
             }
             else_body
@@ -630,7 +740,12 @@ impl Parser {
         let mut body = Vec::new();
         loop {
             self.skip_terminators();
-            if self.check(&TokenKind::Rescue) || self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
+            if self.check(&TokenKind::Rescue)
+                || self.check(&TokenKind::RightBrace)
+                || self.is_at_end()
+            {
+                break;
+            }
             body.push(self.statement()?);
         }
         if self.check(&TokenKind::Rescue) {
@@ -644,7 +759,9 @@ impl Parser {
             let mut rescue_body = Vec::new();
             loop {
                 self.skip_terminators();
-                if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
+                if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+                    break;
+                }
                 rescue_body.push(self.statement()?);
             }
             if !self.check(&TokenKind::RightBrace) {
@@ -683,7 +800,9 @@ impl Parser {
         let mut stmts = Vec::new();
         loop {
             self.skip_terminators();
-            if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
+            if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+                break;
+            }
             stmts.push(self.statement()?);
         }
         if !self.check(&TokenKind::RightBrace) {
@@ -711,7 +830,11 @@ impl Parser {
         while self.check(&TokenKind::AmpAmp) || self.check(&TokenKind::PipePipe) {
             let op = self.advance().clone();
             let right = self.range()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -722,7 +845,10 @@ impl Parser {
         if self.check(&TokenKind::DotDot) {
             self.advance();
             let right = self.bitwise_or()?;
-            return Ok(Expr::Range { from: Box::new(left), to: Box::new(right) });
+            return Ok(Expr::Range {
+                from: Box::new(left),
+                to: Box::new(right),
+            });
         }
         Ok(left)
     }
@@ -733,7 +859,11 @@ impl Parser {
         while self.check(&TokenKind::Pipe) {
             let op = self.advance().clone();
             let right = self.bitwise_xor()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -744,7 +874,11 @@ impl Parser {
         while self.check(&TokenKind::Caret) {
             let op = self.advance().clone();
             let right = self.bitwise_and()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -755,7 +889,11 @@ impl Parser {
         while self.check(&TokenKind::Amp) {
             let op = self.advance().clone();
             let right = self.equality()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -766,7 +904,11 @@ impl Parser {
         while self.check(&TokenKind::EqEq) || self.check(&TokenKind::BangEq) {
             let op = self.advance().clone();
             let right = self.comparison()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -774,12 +916,18 @@ impl Parser {
     // comparison: shift (('<' | '<=' | '>' | '>=') shift)*
     fn comparison(&mut self) -> Result<Expr, SapphireError> {
         let mut left = self.shift()?;
-        while self.check(&TokenKind::Less) || self.check(&TokenKind::LessEq)
-            || self.check(&TokenKind::Greater) || self.check(&TokenKind::GreaterEq)
+        while self.check(&TokenKind::Less)
+            || self.check(&TokenKind::LessEq)
+            || self.check(&TokenKind::Greater)
+            || self.check(&TokenKind::GreaterEq)
         {
             let op = self.advance().clone();
             let right = self.shift()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -790,7 +938,11 @@ impl Parser {
         while self.check(&TokenKind::LessLess) || self.check(&TokenKind::GreaterGreater) {
             let op = self.advance().clone();
             let right = self.term()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -801,7 +953,11 @@ impl Parser {
         while self.check(&TokenKind::Plus) || self.check(&TokenKind::Minus) {
             let op = self.advance().clone();
             let right = self.factor()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -809,20 +965,33 @@ impl Parser {
     // factor: unary (('*' | '/') unary)*
     fn factor(&mut self) -> Result<Expr, SapphireError> {
         let mut left = self.unary()?;
-        while self.check(&TokenKind::Star) || self.check(&TokenKind::Slash) || self.check(&TokenKind::Percent) {
+        while self.check(&TokenKind::Star)
+            || self.check(&TokenKind::Slash)
+            || self.check(&TokenKind::Percent)
+        {
             let op = self.advance().clone();
             let right = self.unary()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
 
     // unary: ('!' | '-' | '~') unary | call
     fn unary(&mut self) -> Result<Expr, SapphireError> {
-        if self.check(&TokenKind::Bang) || self.check(&TokenKind::Minus) || self.check(&TokenKind::Tilde) {
+        if self.check(&TokenKind::Bang)
+            || self.check(&TokenKind::Minus)
+            || self.check(&TokenKind::Tilde)
+        {
             let op = self.advance().clone();
             let right = self.unary()?;
-            return Ok(Expr::Unary { op, right: Box::new(right) });
+            return Ok(Expr::Unary {
+                op,
+                right: Box::new(right),
+            });
         }
         self.call()
     }
@@ -840,47 +1009,84 @@ impl Parser {
             } else if self.check(&TokenKind::Dot) {
                 self.advance(); // consume '.'
                 let name = match self.peek().kind.clone() {
-                    TokenKind::Identifier(n) => { self.advance(); n }
+                    TokenKind::Identifier(n) => {
+                        self.advance();
+                        n
+                    }
                     // Allow keywords as method/field names after '.' (e.g. self.class)
-                    TokenKind::Class => { self.advance(); "class".to_string() }
-                    _ => return Err(SapphireError::ParseError {
-                        message: "expected field or method name after '.'".into(),
-                        line: self.peek().line,
-                    }),
+                    TokenKind::Class => {
+                        self.advance();
+                        "class".to_string()
+                    }
+                    _ => {
+                        return Err(SapphireError::ParseError {
+                            message: "expected field or method name after '.'".into(),
+                            line: self.peek().line,
+                        });
+                    }
                 };
                 if self.check(&TokenKind::Eq) {
                     self.advance(); // consume '='
                     let value = self.logical()?;
-                    expr = Expr::Set { object: Box::new(expr), name, value: Box::new(value) };
+                    expr = Expr::Set {
+                        object: Box::new(expr),
+                        name,
+                        value: Box::new(value),
+                    };
                     break;
                 }
                 if self.allow_trailing_block && self.is_block_start() {
                     let block = self.parse_block()?;
-                    let get = Expr::Get { object: Box::new(expr), name };
-                    expr = Expr::Call { callee: Box::new(get), args: Vec::new(), block };
+                    let get = Expr::Get {
+                        object: Box::new(expr),
+                        name,
+                    };
+                    expr = Expr::Call {
+                        callee: Box::new(get),
+                        args: Vec::new(),
+                        block,
+                    };
                     continue;
                 }
-                let get = Expr::Get { object: Box::new(expr), name };
+                let get = Expr::Get {
+                    object: Box::new(expr),
+                    name,
+                };
                 if self.check(&TokenKind::LeftParen) {
                     expr = self.finish_call(get)?;
                 } else {
-                    expr = Expr::Call { callee: Box::new(get), args: Vec::new(), block: None };
+                    expr = Expr::Call {
+                        callee: Box::new(get),
+                        args: Vec::new(),
+                        block: None,
+                    };
                 }
             } else if self.check(&TokenKind::AmpDot) {
                 self.advance(); // consume '&.'
                 let name = match self.peek().kind.clone() {
-                    TokenKind::Identifier(n) => { self.advance(); n }
-                    _ => return Err(SapphireError::ParseError {
-                        message: "expected method or field name after '&.'".into(),
-                        line: self.peek().line,
-                    }),
+                    TokenKind::Identifier(n) => {
+                        self.advance();
+                        n
+                    }
+                    _ => {
+                        return Err(SapphireError::ParseError {
+                            message: "expected method or field name after '&.'".into(),
+                            line: self.peek().line,
+                        });
+                    }
                 };
                 if self.check(&TokenKind::LeftParen) {
-                    let safe_get = Expr::SafeGet { object: Box::new(expr), name };
+                    let safe_get = Expr::SafeGet {
+                        object: Box::new(expr),
+                        name,
+                    };
                     let call = self.finish_call(safe_get)?;
                     expr = call;
                 } else {
-                    expr = Expr::SafeGet { object: Box::new(expr), name };
+                    expr = Expr::SafeGet {
+                        object: Box::new(expr),
+                        name,
+                    };
                 }
             } else if self.check(&TokenKind::LeftBracket) {
                 self.advance(); // consume '['
@@ -895,10 +1101,17 @@ impl Parser {
                 if self.check(&TokenKind::Eq) {
                     self.advance(); // consume '='
                     let value = self.logical()?;
-                    expr = Expr::IndexSet { object: Box::new(expr), index: Box::new(index), value: Box::new(value) };
+                    expr = Expr::IndexSet {
+                        object: Box::new(expr),
+                        index: Box::new(index),
+                        value: Box::new(value),
+                    };
                     break;
                 }
-                expr = Expr::Index { object: Box::new(expr), index: Box::new(index) };
+                expr = Expr::Index {
+                    object: Box::new(expr),
+                    index: Box::new(index),
+                };
             } else {
                 break;
             }
@@ -909,7 +1122,11 @@ impl Parser {
             && self.is_block_start()
         {
             let block = self.parse_block()?;
-            expr = Expr::Call { callee: Box::new(expr), args: Vec::new(), block };
+            expr = Expr::Call {
+                callee: Box::new(expr),
+                args: Vec::new(),
+                block,
+            };
         }
         Ok(expr)
     }
@@ -932,7 +1149,11 @@ impl Parser {
         }
         self.advance(); // consume ')'
         let block = self.parse_block()?;
-        Ok(Expr::Call { callee: Box::new(callee), args, block })
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            args,
+            block,
+        })
     }
 
     fn parse_block(&mut self) -> Result<Option<Block>, SapphireError> {
@@ -946,13 +1167,20 @@ impl Parser {
             if !self.check(&TokenKind::Pipe) {
                 loop {
                     match self.peek().kind.clone() {
-                        TokenKind::Identifier(n) => { self.advance(); params.push(n); }
-                        _ => return Err(SapphireError::ParseError {
-                            message: "expected parameter name in block".into(),
-                            line: self.peek().line,
-                        }),
+                        TokenKind::Identifier(n) => {
+                            self.advance();
+                            params.push(n);
+                        }
+                        _ => {
+                            return Err(SapphireError::ParseError {
+                                message: "expected parameter name in block".into(),
+                                line: self.peek().line,
+                            });
+                        }
                     }
-                    if !self.check(&TokenKind::Comma) { break; }
+                    if !self.check(&TokenKind::Comma) {
+                        break;
+                    }
                     self.advance(); // consume ','
                 }
             }
@@ -970,7 +1198,9 @@ impl Parser {
         let mut body = Vec::new();
         loop {
             self.skip_terminators();
-            if self.check(&TokenKind::RightBrace) || self.is_at_end() { break; }
+            if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+                break;
+            }
             body.push(self.statement()?);
         }
         if !self.check(&TokenKind::RightBrace) {
@@ -991,10 +1221,16 @@ impl Parser {
         {
             self.advance(); // consume identifier
             self.advance(); // consume ':'
-            return Ok(CallArg { name: Some(name), value: self.logical()? });
+            return Ok(CallArg {
+                name: Some(name),
+                value: self.logical()?,
+            });
         }
 
-        Ok(CallArg { name: None, value: self.logical()? })
+        Ok(CallArg {
+            name: None,
+            value: self.logical()?,
+        })
     }
 
     // primary: NUMBER | STRING | BOOL | IDENTIFIER ('=' equality)? | '(' equality ')'
@@ -1120,7 +1356,11 @@ impl Parser {
             } else {
                 (Vec::new(), None)
             };
-            return Ok(Expr::Super { method, args, block });
+            return Ok(Expr::Super {
+                method,
+                args,
+                block,
+            });
         }
 
         if let TokenKind::Identifier(name) = self.peek().kind.clone() {
@@ -1128,7 +1368,10 @@ impl Parser {
             if self.check(&TokenKind::Eq) {
                 self.advance(); // consume '='
                 let value = self.logical()?;
-                return Ok(Expr::Assign { name, value: Box::new(value) });
+                return Ok(Expr::Assign {
+                    name,
+                    value: Box::new(value),
+                });
             }
             return Ok(Expr::Variable(name));
         }
@@ -1166,11 +1409,16 @@ impl Parser {
             if !self.check(&TokenKind::RightBrace) {
                 loop {
                     let key = match self.peek().kind.clone() {
-                        TokenKind::Identifier(k) => { self.advance(); k }
-                        _ => return Err(SapphireError::ParseError {
-                            message: "expected key name in map literal".into(),
-                            line: self.peek().line,
-                        }),
+                        TokenKind::Identifier(k) => {
+                            self.advance();
+                            k
+                        }
+                        _ => {
+                            return Err(SapphireError::ParseError {
+                                message: "expected key name in map literal".into(),
+                                line: self.peek().line,
+                            });
+                        }
                     };
                     if !self.check(&TokenKind::Colon) {
                         return Err(SapphireError::ParseError {
@@ -1181,7 +1429,9 @@ impl Parser {
                     self.advance(); // consume ':'
                     let value = self.logical()?;
                     pairs.push((key, value));
-                    if !self.check(&TokenKind::Comma) { break; }
+                    if !self.check(&TokenKind::Comma) {
+                        break;
+                    }
                     self.advance(); // consume ','
                 }
             }

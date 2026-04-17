@@ -1,9 +1,9 @@
-use super::{eval, VmValue};
+use super::{VmValue, eval};
 
 #[test]
 fn is_a_instance_hierarchy() {
     let base = "class Animal { attr name }\nclass Dog < Animal { attr breed }\nd = Dog.new(name: \"Rex\", breed: \"Lab\")\n";
-    
+
     assert_eq!(
         eval(&(base.to_string() + "d.is_a?(Dog)")),
         VmValue::Bool(true)

@@ -7,20 +7,20 @@ pub struct UpvalueDef {
     /// function's stack frame.  If false, it is itself an upvalue of the
     /// enclosing function (i.e. captured transitively).
     pub is_local: bool,
-    pub index:    usize,
+    pub index: usize,
 }
 
 /// A compiled function: its own bytecode chunk, name, arity, and the upvalue
 /// descriptors needed to build a closure at runtime.
 #[derive(Debug)]
 pub struct Function {
-    pub name:         String,
-    pub arity:        usize,
-    pub chunk:        Chunk,
+    pub name: String,
+    pub arity: usize,
+    pub chunk: Chunk,
     pub upvalue_defs: Vec<UpvalueDef>,
     /// Return type annotation, if one was present in the source (`-> TypeName`).
     /// When `Some`, the VM checks the actual return value at runtime.
-    pub return_type:  Option<String>,
+    pub return_type: Option<String>,
 }
 
 /// Two `Function` values are equal only if they are the exact same allocation.
@@ -160,7 +160,10 @@ pub enum OpCode {
     /// Register a rescue handler for the current frame.
     /// `handler_offset`: instruction offset from HERE to the rescue body.
     /// `rescue_var_slot`: local slot index for the caught value (usize::MAX = none).
-    BeginRescue { handler_offset: usize, rescue_var_slot: usize },
+    BeginRescue {
+        handler_offset: usize,
+        rescue_var_slot: usize,
+    },
     /// Remove the most recently registered rescue handler (normal exit from body).
     PopRescue,
 
@@ -213,15 +216,15 @@ pub enum Constant {
     /// field names (in declaration order), and method names (in the same
     /// order as the closures that will be popped off the stack by `DefClass`).
     ClassDesc {
-        name:               String,
+        name: String,
         /// Static superclass name — used when the superclass is a plain `Variable`.
-        superclass:         Option<String>,
+        superclass: Option<String>,
         /// When true, the superclass value is on the stack (TOS) and must be popped by DefClass.
         superclass_dynamic: bool,
-        field_names:        Vec<String>,
-        field_defaults:     Vec<Option<Constant>>,
-        method_names:       Vec<String>,
-        private_methods:    Vec<String>,
+        field_names: Vec<String>,
+        field_defaults: Vec<Option<Constant>>,
+        method_names: Vec<String>,
+        private_methods: Vec<String>,
         class_method_names: Vec<String>,
         /// Names of nested classes; matched 1-to-1 with class values pushed after instance methods.
         nested_class_names: Vec<String>,
@@ -231,12 +234,20 @@ pub enum Constant {
 impl std::fmt::Display for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Constant::Int(n)              => write!(f, "{}", n),
-            Constant::Float(n)            => write!(f, "{}", n),
-            Constant::Str(s)              => write!(f, "{:?}", s),
-            Constant::Function(func)      => write!(f, "<fn {}>", func.name),
-            Constant::ClassDesc { name, superclass: Some(s), .. } => write!(f, "<class {} extends {}>", name, s),
-            Constant::ClassDesc { name, superclass_dynamic: true, .. } => write!(f, "<class {} extends (dynamic)>", name),
+            Constant::Int(n) => write!(f, "{}", n),
+            Constant::Float(n) => write!(f, "{}", n),
+            Constant::Str(s) => write!(f, "{:?}", s),
+            Constant::Function(func) => write!(f, "<fn {}>", func.name),
+            Constant::ClassDesc {
+                name,
+                superclass: Some(s),
+                ..
+            } => write!(f, "<class {} extends {}>", name, s),
+            Constant::ClassDesc {
+                name,
+                superclass_dynamic: true,
+                ..
+            } => write!(f, "<class {} extends (dynamic)>", name),
             Constant::ClassDesc { name, .. } => write!(f, "<class {}>", name),
         }
     }
@@ -245,10 +256,10 @@ impl std::fmt::Display for Constant {
 /// A sequence of instructions plus the constants they reference.
 #[derive(Debug, Default)]
 pub struct Chunk {
-    pub code:      Vec<OpCode>,
+    pub code: Vec<OpCode>,
     pub constants: Vec<Constant>,
     /// Source line number parallel to `code`, for error messages.
-    pub lines:     Vec<u32>,
+    pub lines: Vec<u32>,
 }
 
 impl Chunk {
@@ -266,10 +277,10 @@ impl Chunk {
     pub fn patch_jump(&mut self, jump_idx: usize) {
         let offset = self.code.len() - jump_idx - 1;
         match &self.code[jump_idx] {
-            OpCode::Jump(_)             => self.code[jump_idx] = OpCode::Jump(offset),
-            OpCode::JumpIfFalse(_)      => self.code[jump_idx] = OpCode::JumpIfFalse(offset),
-            OpCode::JumpIfFalseKeep(_)  => self.code[jump_idx] = OpCode::JumpIfFalseKeep(offset),
-            OpCode::JumpIfTrueKeep(_)   => self.code[jump_idx] = OpCode::JumpIfTrueKeep(offset),
+            OpCode::Jump(_) => self.code[jump_idx] = OpCode::Jump(offset),
+            OpCode::JumpIfFalse(_) => self.code[jump_idx] = OpCode::JumpIfFalse(offset),
+            OpCode::JumpIfFalseKeep(_) => self.code[jump_idx] = OpCode::JumpIfFalseKeep(offset),
+            OpCode::JumpIfTrueKeep(_) => self.code[jump_idx] = OpCode::JumpIfTrueKeep(offset),
             _ => panic!("patch_jump called on non-jump instruction"),
         }
     }
@@ -279,9 +290,14 @@ impl Chunk {
     pub fn patch_rescue(&mut self, begin_idx: usize) {
         let offset = self.code.len() - begin_idx - 1;
         match &self.code[begin_idx] {
-            OpCode::BeginRescue { rescue_var_slot, .. } => {
+            OpCode::BeginRescue {
+                rescue_var_slot, ..
+            } => {
                 let slot = *rescue_var_slot;
-                self.code[begin_idx] = OpCode::BeginRescue { handler_offset: offset, rescue_var_slot: slot };
+                self.code[begin_idx] = OpCode::BeginRescue {
+                    handler_offset: offset,
+                    rescue_var_slot: slot,
+                };
             }
             _ => panic!("patch_rescue called on non-BeginRescue instruction"),
         }
@@ -306,32 +322,52 @@ impl Chunk {
             };
             print!("{:04}  {}  ", offset, line_str);
             match op {
-                OpCode::Constant(idx)     => println!("CONSTANT       {:4}  ({})", idx, self.constants[*idx]),
-                OpCode::Closure(idx)      => println!("CLOSURE        {:4}  ({})", idx, self.constants[*idx]),
-                OpCode::GetLocal(slot)    => println!("GET_LOCAL      {:4}", slot),
-                OpCode::SetLocal(slot)    => println!("SET_LOCAL      {:4}", slot),
-                OpCode::GetUpvalue(idx)   => println!("GET_UPVALUE    {:4}", idx),
-                OpCode::SetUpvalue(idx)   => println!("SET_UPVALUE    {:4}", idx),
-                OpCode::Jump(off)         => println!("JUMP           {:4}", off),
-                OpCode::JumpIfFalse(off)  => println!("JUMP_IF_FALSE  {:4}", off),
-                OpCode::Loop(off)         => println!("LOOP           {:4}", off),
-                OpCode::Call(argc)              => println!("CALL                {:4}", argc),
-                OpCode::BuildString(n)          => println!("BUILD_STRING        {:4}", n),
-                OpCode::BuildList(n)            => println!("BUILD_LIST          {:4}", n),
-                OpCode::BuildMap(n)             => println!("BUILD_MAP           {:4}", n),
-                OpCode::DefClass(idx)           => println!("DEF_CLASS           {:4}  ({})", idx, self.constants[*idx]),
-                OpCode::NewInstance(n)          => println!("NEW_INSTANCE        {:4}", n),
-                OpCode::GetField(idx)           => println!("GET_FIELD           {:4}  ({})", idx, self.constants[*idx]),
-                OpCode::GetFieldSafe(idx)       => println!("GET_FIELD_SAFE      {:4}  ({})", idx, self.constants[*idx]),
-                OpCode::SetField(idx)           => println!("SET_FIELD           {:4}  ({})", idx, self.constants[*idx]),
-                OpCode::Invoke(n, argc)         => println!("INVOKE              {:4}  argc={}", n, argc),
-                OpCode::SuperInvoke(n, argc)    => println!("SUPER_INVOKE        {:4}  argc={}", n, argc),
-                OpCode::JumpIfFalseKeep(off)    => println!("JUMP_IF_FALSE_KEEP  {:4}", off),
-                OpCode::JumpIfTrueKeep(off)     => println!("JUMP_IF_TRUE_KEEP   {:4}", off),
-                OpCode::GetGlobal(idx)          => println!("GET_GLOBAL          {:4}  ({})", idx, self.constants[*idx]),
-                OpCode::SetGlobal(idx)          => println!("SET_GLOBAL          {:4}  ({})", idx, self.constants[*idx]),
-                OpCode::Import(idx)             => println!("IMPORT              {:4}  ({})", idx, self.constants[*idx]),
-                other                           => println!("{:?}", other),
+                OpCode::Constant(idx) => {
+                    println!("CONSTANT       {:4}  ({})", idx, self.constants[*idx])
+                }
+                OpCode::Closure(idx) => {
+                    println!("CLOSURE        {:4}  ({})", idx, self.constants[*idx])
+                }
+                OpCode::GetLocal(slot) => println!("GET_LOCAL      {:4}", slot),
+                OpCode::SetLocal(slot) => println!("SET_LOCAL      {:4}", slot),
+                OpCode::GetUpvalue(idx) => println!("GET_UPVALUE    {:4}", idx),
+                OpCode::SetUpvalue(idx) => println!("SET_UPVALUE    {:4}", idx),
+                OpCode::Jump(off) => println!("JUMP           {:4}", off),
+                OpCode::JumpIfFalse(off) => println!("JUMP_IF_FALSE  {:4}", off),
+                OpCode::Loop(off) => println!("LOOP           {:4}", off),
+                OpCode::Call(argc) => println!("CALL                {:4}", argc),
+                OpCode::BuildString(n) => println!("BUILD_STRING        {:4}", n),
+                OpCode::BuildList(n) => println!("BUILD_LIST          {:4}", n),
+                OpCode::BuildMap(n) => println!("BUILD_MAP           {:4}", n),
+                OpCode::DefClass(idx) => {
+                    println!("DEF_CLASS           {:4}  ({})", idx, self.constants[*idx])
+                }
+                OpCode::NewInstance(n) => println!("NEW_INSTANCE        {:4}", n),
+                OpCode::GetField(idx) => {
+                    println!("GET_FIELD           {:4}  ({})", idx, self.constants[*idx])
+                }
+                OpCode::GetFieldSafe(idx) => {
+                    println!("GET_FIELD_SAFE      {:4}  ({})", idx, self.constants[*idx])
+                }
+                OpCode::SetField(idx) => {
+                    println!("SET_FIELD           {:4}  ({})", idx, self.constants[*idx])
+                }
+                OpCode::Invoke(n, argc) => println!("INVOKE              {:4}  argc={}", n, argc),
+                OpCode::SuperInvoke(n, argc) => {
+                    println!("SUPER_INVOKE        {:4}  argc={}", n, argc)
+                }
+                OpCode::JumpIfFalseKeep(off) => println!("JUMP_IF_FALSE_KEEP  {:4}", off),
+                OpCode::JumpIfTrueKeep(off) => println!("JUMP_IF_TRUE_KEEP   {:4}", off),
+                OpCode::GetGlobal(idx) => {
+                    println!("GET_GLOBAL          {:4}  ({})", idx, self.constants[*idx])
+                }
+                OpCode::SetGlobal(idx) => {
+                    println!("SET_GLOBAL          {:4}  ({})", idx, self.constants[*idx])
+                }
+                OpCode::Import(idx) => {
+                    println!("IMPORT              {:4}  ({})", idx, self.constants[*idx])
+                }
+                other => println!("{:?}", other),
             }
         }
     }

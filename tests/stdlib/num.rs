@@ -1,4 +1,4 @@
-use super::{eval, VmValue};
+use super::{VmValue, eval};
 
 #[test]
 fn zero() {
@@ -29,7 +29,7 @@ fn clamp() {
 fn type_annotation_accepts_int_and_float() {
     let src = "def double(x: Num) { x + x }\ndouble(3)";
     assert_eq!(eval(src), VmValue::Int(6));
-    
+
     let src2 = "def double(x: Num) { x + x }\ndouble(1.5)";
     assert_eq!(eval(src2), VmValue::Float(3.0));
 }

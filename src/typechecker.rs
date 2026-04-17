@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use crate::ast::{CallArg, Expr, FieldDef, ParamDef, TypeExpr};
 use crate::token::TokenKind;
 use crate::value::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct TypeCheckError {
@@ -47,35 +47,68 @@ impl TypeChecker {
 
     pub fn check(exprs: &[Expr]) -> Vec<TypeCheckError> {
         let mut tc = Self::new();
-        for e in exprs { tc.collect_def(e); }
-        for e in exprs { tc.check_expr(e); }
+        for e in exprs {
+            tc.collect_def(e);
+        }
+        for e in exprs {
+            tc.check_expr(e);
+        }
         tc.errors
     }
 
     // First pass: record function and class signatures without checking bodies.
     fn collect_def(&mut self, expr: &Expr) {
         match expr {
-            Expr::Function { name, params, return_type, .. } => {
-                self.functions.insert(name.clone(), FnSig {
-                    params: params.clone(),
-                    return_type: return_type.clone(),
-                });
+            Expr::Function {
+                name,
+                params,
+                return_type,
+                ..
+            } => {
+                self.functions.insert(
+                    name.clone(),
+                    FnSig {
+                        params: params.clone(),
+                        return_type: return_type.clone(),
+                    },
+                );
             }
-            Expr::Class { name, fields, methods, .. } => {
-                let method_sigs = methods.iter().map(|m| {
-                    (m.name.clone(), FnSig { params: m.params.clone(), return_type: m.return_type.clone() })
-                }).collect();
-                self.classes.insert(name.clone(), ClassInfo {
-                    fields: fields.clone(),
-                    methods: method_sigs,
-                });
+            Expr::Class {
+                name,
+                fields,
+                methods,
+                ..
+            } => {
+                let method_sigs = methods
+                    .iter()
+                    .map(|m| {
+                        (
+                            m.name.clone(),
+                            FnSig {
+                                params: m.params.clone(),
+                                return_type: m.return_type.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+                self.classes.insert(
+                    name.clone(),
+                    ClassInfo {
+                        fields: fields.clone(),
+                        methods: method_sigs,
+                    },
+                );
             }
             _ => {}
         }
     }
 
-    fn push_scope(&mut self) { self.var_scopes.push(HashMap::new()); }
-    fn pop_scope(&mut self)  { self.var_scopes.pop(); }
+    fn push_scope(&mut self) {
+        self.var_scopes.push(HashMap::new());
+    }
+    fn pop_scope(&mut self) {
+        self.var_scopes.pop();
+    }
 
     fn set_var(&mut self, name: &str, ty: TypeExpr) {
         if let Some(scope) = self.var_scopes.last_mut() {
@@ -85,7 +118,9 @@ impl TypeChecker {
 
     fn get_var(&self, name: &str) -> Option<TypeExpr> {
         for scope in self.var_scopes.iter().rev() {
-            if let Some(ty) = scope.get(name) { return Some(ty.clone()); }
+            if let Some(ty) = scope.get(name) {
+                return Some(ty.clone());
+            }
         }
         None
     }
@@ -98,7 +133,11 @@ impl TypeChecker {
                     && !types_compatible(&actual, &rt)
                 {
                     self.errors.push(TypeCheckError {
-                        message: format!("return value expected {}, got {}", te_name(&rt), te_name(&actual)),
+                        message: format!(
+                            "return value expected {}, got {}",
+                            te_name(&rt),
+                            te_name(&actual)
+                        ),
                     });
                 }
                 self.check_expr(inner);
@@ -106,19 +145,25 @@ impl TypeChecker {
             Expr::While { condition, body } => {
                 self.check_expr(condition);
                 self.push_scope();
-                for s in body { self.check_expr(s); }
+                for s in body {
+                    self.check_expr(s);
+                }
                 self.pop_scope();
             }
             Expr::Lambda { body, .. } => {
                 self.push_scope();
-                for s in body { self.check_expr(s); }
+                for s in body {
+                    self.check_expr(s);
+                }
                 self.pop_scope();
             }
             Expr::Raise(inner) => self.check_expr(inner),
             Expr::Break(inner) | Expr::Next(inner) => self.check_expr(inner),
             Expr::MultiAssign { names, values } => {
                 for (name, ve) in names.iter().zip(values.iter()) {
-                    if let Some(ty) = self.infer_type(ve) { self.set_var(name, ty); }
+                    if let Some(ty) = self.infer_type(ve) {
+                        self.set_var(name, ty);
+                    }
                     self.check_expr(ve);
                 }
             }
@@ -135,13 +180,22 @@ impl TypeChecker {
                     }
                     None
                 });
-                if let Some(ty) = ty { self.set_var(name, ty); }
+                if let Some(ty) = ty {
+                    self.set_var(name, ty);
+                }
                 self.check_expr(value);
             }
-            Expr::Binary { left, right, .. } => { self.check_expr(left); self.check_expr(right); }
+            Expr::Binary { left, right, .. } => {
+                self.check_expr(left);
+                self.check_expr(right);
+            }
             Expr::Unary { right, .. } => self.check_expr(right),
             Expr::Get { object, .. } | Expr::SafeGet { object, .. } => self.check_expr(object),
-            Expr::Set { object, value, name } => {
+            Expr::Set {
+                object,
+                value,
+                name,
+            } => {
                 // If we can determine the receiver's class, check the field type.
                 if let Some(TypeExpr::Named(class_name)) = self.infer_type(object)
                     && let Some(cls) = self.classes.get(&class_name).cloned()
@@ -151,28 +205,61 @@ impl TypeChecker {
                     && !types_compatible(&actual, te)
                 {
                     self.errors.push(TypeCheckError {
-                        message: format!("field '{}' expected {}, got {}", name, te_name(te), te_name(&actual)),
+                        message: format!(
+                            "field '{}' expected {}, got {}",
+                            name,
+                            te_name(te),
+                            te_name(&actual)
+                        ),
                     });
                 }
                 self.check_expr(object);
                 self.check_expr(value);
             }
-            Expr::Index { object, index } => { self.check_expr(object); self.check_expr(index); }
-            Expr::IndexSet { object, index, value } => {
-                self.check_expr(object); self.check_expr(index); self.check_expr(value);
+            Expr::Index { object, index } => {
+                self.check_expr(object);
+                self.check_expr(index);
             }
-            Expr::Range { from, to } => { self.check_expr(from); self.check_expr(to); }
-            Expr::ListLit(elems) => { for e in elems { self.check_expr(e); } }
-            Expr::MapLit(pairs) => { for (_, v) in pairs { self.check_expr(v); } }
+            Expr::IndexSet {
+                object,
+                index,
+                value,
+            } => {
+                self.check_expr(object);
+                self.check_expr(index);
+                self.check_expr(value);
+            }
+            Expr::Range { from, to } => {
+                self.check_expr(from);
+                self.check_expr(to);
+            }
+            Expr::ListLit(elems) => {
+                for e in elems {
+                    self.check_expr(e);
+                }
+            }
+            Expr::MapLit(pairs) => {
+                for (_, v) in pairs {
+                    self.check_expr(v);
+                }
+            }
             Expr::Grouping(inner) => self.check_expr(inner),
-            Expr::If { condition, then_branch, else_branch } => {
+            Expr::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 self.check_expr(condition);
                 self.push_scope();
-                for s in then_branch { self.check_expr(s); }
+                for s in then_branch {
+                    self.check_expr(s);
+                }
                 self.pop_scope();
                 if let Some(branch) = else_branch {
                     self.push_scope();
-                    for s in branch { self.check_expr(s); }
+                    for s in branch {
+                        self.check_expr(s);
+                    }
                     self.pop_scope();
                 }
             }
@@ -182,9 +269,15 @@ impl TypeChecker {
                 else_body,
                 ..
             } => {
-                for s in body { self.check_expr(s); }
-                for s in rescue_body { self.check_expr(s); }
-                for s in else_body { self.check_expr(s); }
+                for s in body {
+                    self.check_expr(s);
+                }
+                for s in rescue_body {
+                    self.check_expr(s);
+                }
+                for s in else_body {
+                    self.check_expr(s);
+                }
             }
             Expr::Print(inner) => self.check_expr(inner),
             Expr::Class { methods, .. } => {
@@ -194,18 +287,26 @@ impl TypeChecker {
                     self.push_scope();
 
                     for p in &method.params {
-                        if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
+                        if let Some(te) = &p.type_ann {
+                            self.set_var(&p.name, te.clone());
+                        }
                     }
 
-                    for s in &method.body { self.check_expr(s); }
+                    for s in &method.body {
+                        self.check_expr(s);
+                    }
 
                     if let Some(rt) = &method.return_type.clone()
                         && let Some(last_expr) = method.body.last()
                         && let Some(actual) = self.infer_type(last_expr)
-                        && !types_compatible(&actual, rt) 
+                        && !types_compatible(&actual, rt)
                     {
                         self.errors.push(TypeCheckError {
-                            message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
+                            message: format!(
+                                "return value expected {}, got {}",
+                                te_name(rt),
+                                te_name(&actual)
+                            ),
                         });
                     }
 
@@ -213,25 +314,41 @@ impl TypeChecker {
                     self.current_return_type = saved;
                 }
             }
-            Expr::Function { name, params, return_type, body } => {
-                self.functions.insert(name.clone(), FnSig {
-                    params: params.clone(),
-                    return_type: return_type.clone(),
-                });
+            Expr::Function {
+                name,
+                params,
+                return_type,
+                body,
+            } => {
+                self.functions.insert(
+                    name.clone(),
+                    FnSig {
+                        params: params.clone(),
+                        return_type: return_type.clone(),
+                    },
+                );
                 let saved = self.current_return_type.take();
                 self.current_return_type = return_type.clone();
                 self.push_scope();
                 for p in params {
-                    if let Some(te) = &p.type_ann { self.set_var(&p.name, te.clone()); }
+                    if let Some(te) = &p.type_ann {
+                        self.set_var(&p.name, te.clone());
+                    }
                 }
-                for s in body { self.check_expr(s); }
+                for s in body {
+                    self.check_expr(s);
+                }
                 if let Some(rt) = return_type
                     && let Some(last_expr) = body.last()
                     && let Some(actual) = self.infer_type(last_expr)
                     && !types_compatible(&actual, rt)
                 {
                     self.errors.push(TypeCheckError {
-                        message: format!("return value expected {}, got {}", te_name(rt), te_name(&actual)),
+                        message: format!(
+                            "return value expected {}, got {}",
+                            te_name(rt),
+                            te_name(&actual)
+                        ),
                     });
                 }
 
@@ -243,7 +360,9 @@ impl TypeChecker {
     }
 
     fn check_call(&mut self, callee: &Expr, args: &[CallArg]) {
-        for arg in args { self.check_expr(&arg.value); }
+        for arg in args {
+            self.check_expr(&arg.value);
+        }
 
         match callee {
             Expr::Variable(name) => {
@@ -251,7 +370,10 @@ impl TypeChecker {
                     self.check_args(&sig.params, args, name);
                 }
             }
-            Expr::Get { object, name: method_name } => {
+            Expr::Get {
+                object,
+                name: method_name,
+            } => {
                 self.check_expr(object);
                 if method_name == "new" {
                     if let Expr::Variable(class_name) = object.as_ref()
@@ -265,7 +387,12 @@ impl TypeChecker {
                                 && !types_compatible(&actual, te)
                             {
                                 self.errors.push(TypeCheckError {
-                                    message: format!("field '{}' expected {}, got {}", fname, te_name(te), te_name(&actual)),
+                                    message: format!(
+                                        "field '{}' expected {}, got {}",
+                                        fname,
+                                        te_name(te),
+                                        te_name(&actual)
+                                    ),
                                 });
                             }
                         }
@@ -288,7 +415,13 @@ impl TypeChecker {
                 && !types_compatible(&actual, te)
             {
                 self.errors.push(TypeCheckError {
-                    message: format!("argument '{}' to '{}' expected {}, got {}", param.name, fn_name, te_name(te), te_name(&actual)),
+                    message: format!(
+                        "argument '{}' to '{}' expected {}, got {}",
+                        param.name,
+                        fn_name,
+                        te_name(te),
+                        te_name(&actual)
+                    ),
                 });
             }
         }
@@ -297,40 +430,49 @@ impl TypeChecker {
     fn infer_type(&self, expr: &Expr) -> Option<TypeExpr> {
         match expr {
             Expr::Literal(v) => match v {
-                Value::Int(_)   => Some(TypeExpr::Named("Int".into())),
+                Value::Int(_) => Some(TypeExpr::Named("Int".into())),
                 Value::Float(_) => Some(TypeExpr::Named("Float".into())),
-                Value::Str(_)   => Some(TypeExpr::Named("String".into())),
-                Value::Bool(_)  => Some(TypeExpr::Named("Bool".into())),
-                Value::Nil      => Some(TypeExpr::Named("Nil".into())),
+                Value::Str(_) => Some(TypeExpr::Named("String".into())),
+                Value::Bool(_) => Some(TypeExpr::Named("Bool".into())),
+                Value::Nil => Some(TypeExpr::Named("Nil".into())),
             },
             Expr::Variable(name) => self.get_var(name),
             Expr::Grouping(inner) => self.infer_type(inner),
             Expr::StringInterp(_) => Some(TypeExpr::Named("String".into())),
             Expr::ListLit(_) => Some(TypeExpr::Named("List".into())),
-            Expr::MapLit(_)  => Some(TypeExpr::Named("Map".into())),
+            Expr::MapLit(_) => Some(TypeExpr::Named("Map".into())),
             Expr::Range { .. } => Some(TypeExpr::Named("Range".into())),
-            Expr::Binary { left, op, right } => {
-                match &op.kind {
-                    TokenKind::Plus | TokenKind::Minus | TokenKind::Star |
-                    TokenKind::Slash | TokenKind::Percent => {
-                        let l = self.infer_type(left);
-                        let r = self.infer_type(right);
-                        match (&l, &r) {
-                            (Some(TypeExpr::Named(a)), Some(TypeExpr::Named(b))) => {
-                                if a == "Float" || b == "Float" { Some(TypeExpr::Named("Float".into())) }
-                                else if a == "Int" && b == "Int" { Some(TypeExpr::Named("Int".into())) }
-                                else { None }
+            Expr::Binary { left, op, right } => match &op.kind {
+                TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Star
+                | TokenKind::Slash
+                | TokenKind::Percent => {
+                    let l = self.infer_type(left);
+                    let r = self.infer_type(right);
+                    match (&l, &r) {
+                        (Some(TypeExpr::Named(a)), Some(TypeExpr::Named(b))) => {
+                            if a == "Float" || b == "Float" {
+                                Some(TypeExpr::Named("Float".into()))
+                            } else if a == "Int" && b == "Int" {
+                                Some(TypeExpr::Named("Int".into()))
+                            } else {
+                                None
                             }
-                            _ => None,
                         }
+                        _ => None,
                     }
-                    TokenKind::EqEq | TokenKind::BangEq | TokenKind::Less | TokenKind::LessEq |
-                    TokenKind::Greater | TokenKind::GreaterEq | TokenKind::AmpAmp | TokenKind::PipePipe => {
-                        Some(TypeExpr::Named("Bool".into()))
-                    }
-                    _ => None,
                 }
-            }
+                TokenKind::EqEq
+                | TokenKind::BangEq
+                | TokenKind::Less
+                | TokenKind::LessEq
+                | TokenKind::Greater
+                | TokenKind::GreaterEq
+                | TokenKind::AmpAmp
+                | TokenKind::PipePipe => Some(TypeExpr::Named("Bool".into())),
+                _ => None,
+            },
             Expr::Print(inner) => self.infer_type(inner),
             Expr::If { .. }
             | Expr::Begin { .. }
@@ -347,7 +489,10 @@ impl TypeChecker {
                 Expr::Variable(name) => {
                     self.functions.get(name).and_then(|s| s.return_type.clone())
                 }
-                Expr::Get { object, name: method_name } => {
+                Expr::Get {
+                    object,
+                    name: method_name,
+                } => {
                     if method_name == "new"
                         && let Expr::Variable(cn) = object.as_ref()
                         && self.classes.contains_key(cn)
@@ -358,7 +503,10 @@ impl TypeChecker {
                     if let Some(TypeExpr::Named(cn)) = self.infer_type(object)
                         && let Some(cls) = self.classes.get(&cn)
                     {
-                        return cls.methods.get(method_name).and_then(|s| s.return_type.clone());
+                        return cls
+                            .methods
+                            .get(method_name)
+                            .and_then(|s| s.return_type.clone());
                     }
 
                     None
@@ -380,5 +528,8 @@ fn types_compatible(actual: &TypeExpr, expected: &TypeExpr) -> bool {
 }
 
 fn te_name(te: &TypeExpr) -> &str {
-    match te { TypeExpr::Named(n) => n.as_str(), TypeExpr::Any => "Any" }
+    match te {
+        TypeExpr::Named(n) => n.as_str(),
+        TypeExpr::Any => "Any",
+    }
 }
