@@ -444,18 +444,18 @@ impl Vm {
     /// Compile and execute the stdlib Sapphire files to populate the class registry.
     pub fn load_stdlib(&mut self) -> Result<(), VmError> {
         const SOURCES: &[(&str, &str)] = &[
-            ("stdlib/object.spr", include_str!("../stdlib/object.spr")),
-            ("stdlib/nil.spr",    include_str!("../stdlib/nil.spr")),
-            ("stdlib/num.spr",    include_str!("../stdlib/num.spr")),
-            ("stdlib/int.spr",    include_str!("../stdlib/int.spr")),
-            ("stdlib/float.spr",  include_str!("../stdlib/float.spr")),
-            ("stdlib/string.spr", include_str!("../stdlib/string.spr")),
-            ("stdlib/bool.spr",   include_str!("../stdlib/bool.spr")),
-            ("stdlib/list.spr",   include_str!("../stdlib/list.spr")),
-            ("stdlib/map.spr",    include_str!("../stdlib/map.spr")),
-            ("stdlib/test.spr",   include_str!("../stdlib/test.spr")),
-            ("stdlib/file.spr",   include_str!("../stdlib/file.spr")),
-            ("stdlib/math.spr",   include_str!("../stdlib/math.spr")),
+            ("stdlib/object.spr", include_str!("../stdlib/src/object.spr")),
+            ("stdlib/nil.spr", include_str!("../stdlib/src/nil.spr")),
+            ("stdlib/num.spr", include_str!("../stdlib/src/num.spr")),
+            ("stdlib/int.spr", include_str!("../stdlib/src/int.spr")),
+            ("stdlib/float.spr", include_str!("../stdlib/src/float.spr")),
+            ("stdlib/string.spr", include_str!("../stdlib/src/string.spr")),
+            ("stdlib/bool.spr", include_str!("../stdlib/src/bool.spr")),
+            ("stdlib/list.spr", include_str!("../stdlib/src/list.spr")),
+            ("stdlib/map.spr", include_str!("../stdlib/src/map.spr")),
+            ("stdlib/test.spr", include_str!("../stdlib/src/test.spr")),
+            ("stdlib/file.spr", include_str!("../stdlib/src/file.spr")),
+            ("stdlib/math.spr", include_str!("../stdlib/src/math.spr")),
         ];
         for (name, src) in SOURCES {
             let tokens = crate::lexer::Lexer::new(src).scan_tokens();
