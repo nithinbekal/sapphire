@@ -1271,18 +1271,15 @@ impl Vm {
                             });
                         } else if name == "Math" {
                             // Constants take priority; methods fall through to native dispatch.
-                            if arg_count == 0 {
-                                if let Some(val) = namespace.get(&method_name) {
-                                    self.stack.truncate(recv_slot);
-                                    self.stack.push(val.clone());
-                                    continue;
-                                }
+                            if arg_count == 0
+                                && let Some(val) = namespace.get(&method_name)
+                            {
+                                self.stack.truncate(recv_slot);
+                                self.stack.push(val.clone());
+                                continue;
                             }
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                            let result = match dispatch_math_class_method(&method_name, &args, line) {
-                                Ok(val) => val,
-                                Err(e) => return Err(e),
-                            };
+                            let result = dispatch_math_class_method(&method_name, &args, line)?;
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
                         } else if name == "File" {
