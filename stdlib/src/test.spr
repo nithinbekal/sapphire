@@ -5,8 +5,8 @@ class Test {
 
   # Fails unless `cond` is truthy.
   #
-  #   self.assert(1 == 1)   # passes
-  #   self.assert(1 == 2)   # raises "assertion failed"
+  #   assert(1 == 1)   # passes
+  #   assert(1 == 2)   # raises "assertion failed"
   #
   def assert(cond) {
     if !cond {
@@ -16,8 +16,8 @@ class Test {
 
   # Fails unless `expected` equals `actual`.
   #
-  #   self.assert_equal(5, (-5).abs())   # passes
-  #   self.assert_equal(5, 3)            # raises "expected 5, got 3"
+  #   assert_equal(5, (-5).abs())   # passes
+  #   assert_equal(5, 3)            # raises "expected 5, got 3"
   #
   def assert_equal(expected, actual) {
     if expected != actual {
@@ -27,8 +27,8 @@ class Test {
 
   # Fails unless `obj` is nil.
   #
-  #   self.assert_nil(nil)   # passes
-  #   self.assert_nil(0)     # raises "expected nil, got 0"
+  #   assert_nil(nil)   # passes
+  #   assert_nil(0)     # raises "expected nil, got 0"
   #
   def assert_nil(obj) {
     if obj != nil {
@@ -39,8 +39,8 @@ class Test {
   # Fails unless `actual` is within `delta` of `expected`.
   # Useful for floating-point comparisons where exact equality is unreliable.
   #
-  #   self.assert_in_delta(3.14, 3.1415, 0.01)   # passes
-  #   self.assert_in_delta(3.14, 3.15, 0.001)    # raises
+  #   assert_in_delta(3.14, 3.1415, 0.01)   # passes
+  #   assert_in_delta(3.14, 3.15, 0.001)    # raises
   #
   def assert_in_delta(expected, actual, delta) {
     diff = (expected - actual).abs()
@@ -51,8 +51,8 @@ class Test {
 
   # Fails unless the block raises an exception.
   #
-  #   self.assert_raises { raise("boom") }   # passes
-  #   self.assert_raises { 1 + 1 }           # raises "expected an exception but none was raised"
+  #   assert_raises { raise("boom") }   # passes
+  #   assert_raises { 1 + 1 }           # raises "expected an exception but none was raised"
   #
   def assert_raises {
     raised = false
