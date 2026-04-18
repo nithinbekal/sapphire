@@ -1269,15 +1269,11 @@ impl Vm {
                                 rescues: vec![],
                                 class_name: Some(method.defined_in),
                             });
+                        } else if arg_count == 0 && let Some(val) = namespace.get(&method_name) {
+                            // Namespace lookup: constants and nested classes (e.g. Math.PI, Outer.Inner).
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(val.clone());
                         } else if name == "Math" {
-                            // Constants take priority; methods fall through to native dispatch.
-                            if arg_count == 0
-                                && let Some(val) = namespace.get(&method_name)
-                            {
-                                self.stack.truncate(recv_slot);
-                                self.stack.push(val.clone());
-                                continue;
-                            }
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
                             let result = dispatch_math_class_method(&method_name, &args, line)?;
                             self.stack.truncate(recv_slot);
@@ -1307,20 +1303,6 @@ impl Vm {
                             let result = VmValue::List(self.heap.alloc(HeapObject::List(names)));
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
-                        } else if arg_count == 0 {
-                            // Fall back to namespace lookup (nested class access like `Outer.Inner`)
-                            match namespace.get(&method_name) {
-                                Some(val) => {
-                                    self.stack.truncate(recv_slot);
-                                    self.stack.push(val.clone());
-                                }
-                                None => {
-                                    return Err(VmError::TypeError {
-                                        message: format!("unknown class method '{}'", method_name),
-                                        line,
-                                    });
-                                }
-                            }
                         } else {
                             return Err(VmError::TypeError {
                                 message: format!("unknown class method '{}'", method_name),
