@@ -47,6 +47,11 @@ class MapTest < Test {
     assert({}.all? { |k, v| v > 0 })
   }
 
+  def test_all_false_when_one_pair_has_nil {
+    m = { a: 1, b: nil }
+    self.assert(!m.all? { |k, v| v })
+  }
+
   def test_none_true_when_no_pair_matches {
     m = { a: 1, b: 2 }
     assert(m.none? { |k, v| v > 9 })
