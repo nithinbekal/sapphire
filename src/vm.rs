@@ -530,7 +530,7 @@ impl Vm {
             ("stdlib/bool.spr", include_str!("../stdlib/src/bool.spr")),
             ("stdlib/list.spr", include_str!("../stdlib/src/list.spr")),
             ("stdlib/map.spr", include_str!("../stdlib/src/map.spr")),
-            ("stdlib/test.spr", include_str!("../stdlib/src/test.spr")),
+            ("stdlib/Test.spr", include_str!("../stdlib/src/Test.spr")),
             ("stdlib/file.spr", include_str!("../stdlib/src/file.spr")),
             ("stdlib/math.spr", include_str!("../stdlib/src/math.spr")),
         ];
