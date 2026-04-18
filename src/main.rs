@@ -128,6 +128,7 @@ fn run_tests(path: &str) {
         std::process::exit(1);
     }
 
+    let start_time = std::time::Instant::now();
     let mut total = 0usize;
     let mut failures: Vec<String> = Vec::new();
     let mut dots = String::new();
@@ -195,8 +196,15 @@ fn run_tests(path: &str) {
         }
         println!();
     }
+    let elapsed = start_time.elapsed();
+    let elapsed_secs = elapsed.as_secs_f64();
+    let tests_per_sec = if elapsed_secs > 0.0 {
+        total as f64 / elapsed_secs
+    } else {
+        0.0
+    };
     println!(
-        "{} {}, {} {}",
+        "{} {}, {} {} ({:.2}s, {:.0} tests/sec)",
         total,
         if total == 1 { "test" } else { "tests" },
         failures.len(),
@@ -205,6 +213,8 @@ fn run_tests(path: &str) {
         } else {
             "failures"
         },
+        elapsed_secs,
+        tests_per_sec
     );
     if !failures.is_empty() {
         std::process::exit(1);
