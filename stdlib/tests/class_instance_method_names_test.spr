@@ -1,0 +1,47 @@
+class ClassInstanceMethodNamesTest < Test {
+  def test_returns_list {
+    class Dog {
+      def bark { }
+      def sit { }
+    }
+    names = Dog.instance_method_names
+    assert(names.include?("bark"))
+    assert(names.include?("sit"))
+  }
+
+  def test_excludes_private {
+    class Cat {
+      def meow { }
+      defp secret { }
+    }
+    names = Cat.instance_method_names
+    assert(names.include?("meow"))
+    assert(!names.include?("secret"))
+  }
+
+  def test_includes_inherited_methods {
+    class Animal {
+      def breathe { }
+    }
+    class Fish < Animal {
+      def swim { }
+    }
+    assert(Fish.instance_method_names.include?("swim"))
+    assert(Fish.instance_method_names.include?("breathe"))
+  }
+
+  def test_sorted {
+    class Foo {
+      def zzz { }
+      def aaa { }
+    }
+    assert_equal("aaa", Foo.instance_method_names[0])
+  }
+
+  def test_returns_list_type {
+    class Bar {
+      def baz { }
+    }
+    assert(Bar.instance_method_names.is_a?(List))
+  }
+}

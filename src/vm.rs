@@ -1239,6 +1239,7 @@ impl Vm {
                         ref class_methods,
                         ref namespace,
                         ref name,
+                        ref methods,
                         ..
                     } = self.stack[recv_slot].clone()
                     {
@@ -1277,6 +1278,16 @@ impl Vm {
                                 }
                                 Err(e) => return Err(e),
                             };
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
+                        } else if method_name == "instance_method_names" && arg_count == 0 {
+                            let mut names: Vec<VmValue> = methods
+                                .iter()
+                                .filter(|(_, m)| !m.private)
+                                .map(|(k, _)| VmValue::Str(k.clone()))
+                                .collect();
+                            names.sort_by(vm_value_partial_cmp);
+                            let result = VmValue::List(self.heap.alloc(HeapObject::List(names)));
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
                         } else if arg_count == 0 {
