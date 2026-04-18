@@ -1,4 +1,26 @@
 class Math {
   PI = 3.141592653589793
   E = 2.718281828459045
+
+  self {
+    def tan(x) { Math.sin(x) / Math.cos(x) }
+
+    def acos(x) { Math.PI / 2 - Math.asin(x) }
+
+    def atan2(y, x) {
+      if x > 0 {
+        Math.atan(y / x)
+      } elsif x < 0 && y >= 0 {
+        Math.atan(y / x) + Math.PI
+      } elsif x < 0 {
+        Math.atan(y / x) - Math.PI
+      } elsif y > 0 {
+        Math.PI / 2
+      } elsif y < 0 {
+        0 - Math.PI / 2
+      } else {
+        0
+      }
+    }
+  }
 }

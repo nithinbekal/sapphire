@@ -3341,32 +3341,8 @@ fn dispatch_math_class_method(name: &str, args: &[VmValue], line: u32) -> Result
     match name {
         "sin"  => math_arg(args, name, line).map(|f| VmValue::Float(f.sin())),
         "cos"  => math_arg(args, name, line).map(|f| VmValue::Float(f.cos())),
-        "tan"  => math_arg(args, name, line).map(|f| VmValue::Float(f.tan())),
         "asin" => math_arg(args, name, line).map(|f| VmValue::Float(f.asin())),
-        "acos" => math_arg(args, name, line).map(|f| VmValue::Float(f.acos())),
         "atan" => math_arg(args, name, line).map(|f| VmValue::Float(f.atan())),
-        "atan2" => match args {
-            [y, x] => {
-                let yf = match y {
-                    VmValue::Float(f) => *f,
-                    VmValue::Int(i)   => *i as f64,
-                    _ => return Err(VmError::TypeError {
-                        message: "Math.atan2: arguments must be numeric".to_string(), line,
-                    }),
-                };
-                let xf = match x {
-                    VmValue::Float(f) => *f,
-                    VmValue::Int(i)   => *i as f64,
-                    _ => return Err(VmError::TypeError {
-                        message: "Math.atan2: arguments must be numeric".to_string(), line,
-                    }),
-                };
-                Ok(VmValue::Float(yf.atan2(xf)))
-            }
-            _ => Err(VmError::TypeError {
-                message: format!("Math.atan2 expects 2 arguments, got {}", args.len()), line,
-            }),
-        },
         _ => Err(VmError::TypeError {
             message: format!("Math has no class method '{}'", name),
             line,
