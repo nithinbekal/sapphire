@@ -1,4 +1,4 @@
-class ClassInstanceMethodNamesTest < Test {
+class ClassTest < Test {
   def test_returns_list {
     class Dog {
       def bark { }
