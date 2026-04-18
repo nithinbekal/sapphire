@@ -263,6 +263,10 @@ pub enum VmError {
     /// `next val` inside a block — skips to the next `yield`.
     #[allow(dead_code)]
     Next(VmValue),
+    /// `return val` inside a block called by a native method — propagates to
+    /// the dispatch site so it can perform a non-local return from the
+    /// enclosing Sapphire frame.
+    Return(Option<VmValue>),
 }
 
 impl fmt::Display for VmError {
@@ -275,6 +279,7 @@ impl fmt::Display for VmError {
             VmError::Raised(v) => write!(f, "uncaught raise: {}", v),
             VmError::Break(v) => write!(f, "break outside block: {}", v),
             VmError::Next(v) => write!(f, "next outside block: {}", v),
+            VmError::Return(v) => write!(f, "return outside method: {:?}", v),
         }
     }
 }
@@ -1638,8 +1643,21 @@ impl Vm {
                             if message.contains("has no block method") || message.contains("requires a block")
                         );
                         if !is_native_miss {
-                            self.stack.truncate(recv_slot);
-                            self.stack.push(native_result?);
+                            match native_result {
+                                Err(VmError::Return(val)) => {
+                                    let frame = self.frames.pop().unwrap();
+                                    self.close_upvalues_above(frame.base);
+                                    self.stack.truncate(frame.base);
+                                    if self.frames.len() <= min_depth {
+                                        return Ok(val);
+                                    }
+                                    self.stack.push(val.unwrap_or(VmValue::Nil));
+                                }
+                                other => {
+                                    self.stack.truncate(recv_slot);
+                                    self.stack.push(other?);
+                                }
+                            }
                             continue;
                         }
                         // Native didn't handle it — try the class registry.
@@ -2006,6 +2024,41 @@ impl Vm {
                     }
 
                     // Discard the function value and all frame locals.
+                    self.stack.truncate(frame.base);
+                    self.stack.push(return_val.unwrap_or(VmValue::Nil));
+                }
+
+                OpCode::NonLocalReturn => {
+                    let return_val = self.stack.pop();
+                    let frame = self.frames.pop().unwrap();
+
+                    self.close_upvalues_above(frame.base);
+
+                    if let Some(expected_type) = &frame.function.return_type {
+                        let val = return_val.as_ref().unwrap_or(&VmValue::Nil);
+                        let actual_type = value_type_name(val);
+                        let types_match = actual_type == expected_type.as_str()
+                            || (expected_type == "Num"
+                                && (actual_type == "Int" || actual_type == "Float"));
+                        if !types_match {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "return type error in '{}': expected {}, got {}",
+                                    frame.function.name, expected_type, actual_type
+                                ),
+                                line,
+                            });
+                        }
+                    }
+
+                    if frame.is_native_block {
+                        return Err(VmError::Return(return_val));
+                    }
+
+                    if self.frames.len() <= min_depth {
+                        return Ok(return_val);
+                    }
+
                     self.stack.truncate(frame.base);
                     self.stack.push(return_val.unwrap_or(VmValue::Nil));
                 }

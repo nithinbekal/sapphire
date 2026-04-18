@@ -18,8 +18,8 @@ class Map {
   #   { a: 1, b: 2 }.any? { |k, v| v > 9 }   # false
   #
   def any?() {
-    result = each { |k, v| break true if yield(k, v) }
-    result == true
+    each { |k, v| return true if yield(k, v) }
+    false
   }
 
   # Returns true if the block returns true for every pair (empty maps are true).
@@ -28,8 +28,8 @@ class Map {
   #   { a: 1, b: 2 }.all? { |k, v| v > 1 }   # false
   #
   def all?() {
-    result = each { |k, v| break false if yield(k, v) == false }
-    result != false
+    each { |k, v| return false if yield(k, v) == false }
+    true
   }
 
   # Returns true if the block never returns a truthy value (empty maps are true).
@@ -38,7 +38,7 @@ class Map {
   #   { a: 1, b: 2 }.none? { |k, v| v > 1 }   # false
   #
   def none?() {
-    result = each { |k, v| break true if yield(k, v) }
-    result != true
+    each { |k, v| return false if yield(k, v) }
+    true
   }
 }
