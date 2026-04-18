@@ -4,25 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Sapphire?
 
-Sapphire is an object-oriented scripting language implemented in Rust. It's Ruby-inspired with gradual typing. The CLI has four subcommands: `run`, `typecheck`, `console` (REPL), and `version`.
+Sapphire is an object-oriented scripting language implemented in Rust. It's Ruby-inspired with gradual typing. The CLI supports five main subcommands: `run`, `typecheck`, `test`, `console` (REPL), and `version`.
 
 ## Build & Test Commands
 
 ```bash
 cargo build                              # debug build
-cargo test                               # run all tests
-cargo test <test_name>                   # run a specific test
+cargo test                               # run Rust tests (src/tests)
+cargo test <test_name>                   # run a specific Rust test
 cargo test <test_name> -- --nocapture    # run with stdout visible
+sapphire test [path]                     # run Sapphire tests (_test.spr files)
+sapphire test ./stdlib/tests             # run tests in a specific directory
 ```
+
+## Testing Framework
+
+Sapphire includes two testing approaches:
+
+**Rust integration tests** in `tests/` run the VM through the Rust API. Common patterns:
+- `eval(src)` — compile and run source, return `VmValue`
+- `eval_with_stdlib(src)` — same but with stdlib loaded
+- `eval_err(src)` — assert that code raises a `VmError`
+
+**Sapphire tests** are Sapphire files ending in `_test.spr` that extend the `Test` class (from `stdlib/src/test.spr`). Tests are discovered and run recursively with `sapphire test [path]`, which outputs:
+- `.` for passing tests, `F` for failures
+- Summary line showing test count and timing (tests/sec)
+
+Test classes inherit from `Test` and provide assertion methods:
+- `assert(cond)` — fails if condition is falsy
+- `assert_equal(expected, actual)` — fails with formatted message on mismatch
+- `assert_nil(obj)` — fails unless value is nil
+- `assert_in_delta(expected, actual, delta)` — fuzzy float comparison
+- `assert_raises { block }` — fails unless block raises an exception
 
 ## Architecture
 
 There is one execution pipeline: **Lexer → Parser → Compiler → VM**
 
-All three entry points (`run`, `console`, and the REPL loop) go through this same path. There is no tree-walk interpreter.
+All execution paths (`run`, `test`, `console`, and the REPL loop) go through this same pipeline. There is no tree-walk interpreter.
 
 Key files:
-- `src/main.rs` — CLI entry point; routes to `run_file`, `typecheck_file`, or `run_repl`
+- `src/main.rs` — CLI entry point; routes to `run_file`, `typecheck_file`, `run_tests`, or `run_repl`
 - `src/lexer.rs` — Tokenizes source into `Token`s
 - `src/token.rs` — Token type definitions
 - `src/parser.rs` — Recursive descent parser producing an AST; `call()` handles method/field access and auto-call behavior
