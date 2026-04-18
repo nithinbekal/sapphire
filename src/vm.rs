@@ -1269,6 +1269,22 @@ impl Vm {
                                 rescues: vec![],
                                 class_name: Some(method.defined_in),
                             });
+                        } else if name == "Math" {
+                            // Constants take priority; methods fall through to native dispatch.
+                            if arg_count == 0 {
+                                if let Some(val) = namespace.get(&method_name) {
+                                    self.stack.truncate(recv_slot);
+                                    self.stack.push(val.clone());
+                                    continue;
+                                }
+                            }
+                            let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                            let result = match dispatch_math_class_method(&method_name, &args, line) {
+                                Ok(val) => val,
+                                Err(e) => return Err(e),
+                            };
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
                         } else if name == "File" {
                             // Native File class method dispatch.
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
@@ -3323,6 +3339,57 @@ fn dispatch_file_class_method(name: &str, args: &[VmValue], line: u32) -> Result
         }
         _ => Err(VmError::TypeError {
             message: format!("File has no class method '{}'", name),
+            line,
+        }),
+    }
+}
+
+fn math_arg(args: &[VmValue], method: &str, line: u32) -> Result<f64, VmError> {
+    match args {
+        [VmValue::Float(f)] => Ok(*f),
+        [VmValue::Int(i)]   => Ok(*i as f64),
+        [_] => Err(VmError::TypeError {
+            message: format!("Math.{}: argument must be numeric", method), line,
+        }),
+        _ => Err(VmError::TypeError {
+            message: format!("Math.{} expects 1 argument, got {}", method, args.len()), line,
+        }),
+    }
+}
+
+/// Native dispatch for `Math` class methods.
+fn dispatch_math_class_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
+    match name {
+        "sin"  => math_arg(args, name, line).map(|f| VmValue::Float(f.sin())),
+        "cos"  => math_arg(args, name, line).map(|f| VmValue::Float(f.cos())),
+        "tan"  => math_arg(args, name, line).map(|f| VmValue::Float(f.tan())),
+        "asin" => math_arg(args, name, line).map(|f| VmValue::Float(f.asin())),
+        "acos" => math_arg(args, name, line).map(|f| VmValue::Float(f.acos())),
+        "atan" => math_arg(args, name, line).map(|f| VmValue::Float(f.atan())),
+        "atan2" => match args {
+            [y, x] => {
+                let yf = match y {
+                    VmValue::Float(f) => *f,
+                    VmValue::Int(i)   => *i as f64,
+                    _ => return Err(VmError::TypeError {
+                        message: "Math.atan2: arguments must be numeric".to_string(), line,
+                    }),
+                };
+                let xf = match x {
+                    VmValue::Float(f) => *f,
+                    VmValue::Int(i)   => *i as f64,
+                    _ => return Err(VmError::TypeError {
+                        message: "Math.atan2: arguments must be numeric".to_string(), line,
+                    }),
+                };
+                Ok(VmValue::Float(yf.atan2(xf)))
+            }
+            _ => Err(VmError::TypeError {
+                message: format!("Math.atan2 expects 2 arguments, got {}", args.len()), line,
+            }),
+        },
+        _ => Err(VmError::TypeError {
+            message: format!("Math has no class method '{}'", name),
             line,
         }),
     }
