@@ -22,7 +22,7 @@ class Map {
     false
   }
 
-  # Returns true if the block returns true for every pair (empty maps are true).
+  # Returns true if the block returns a truthy for every pair. Empty maps are true.
   #
   #   { a: 1, b: 2 }.all? { |k, v| v > 0 }   # true
   #   { a: 1, b: 2 }.all? { |k, v| v > 1 }   # false
