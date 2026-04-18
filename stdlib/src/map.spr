@@ -8,7 +8,7 @@ class Map {
   #
   def select() {
     result = {}
-    self.each { |k, v| result[k] = v if yield(k, v) }
+    each { |k, v| result[k] = v if yield(k, v) }
     result
   }
 
@@ -18,7 +18,7 @@ class Map {
   #   { a: 1, b: 2 }.any? { |k, v| v > 9 }   # false
   #
   def any?() {
-    result = self.each { |k, v| break true if yield(k, v) }
+    result = each { |k, v| break true if yield(k, v) }
     result == true
   }
 
@@ -28,7 +28,7 @@ class Map {
   #   { a: 1, b: 2 }.all? { |k, v| v > 1 }   # false
   #
   def all?() {
-    result = self.each { |k, v| break false if yield(k, v) == false }
+    result = each { |k, v| break false if yield(k, v) == false }
     result != false
   }
 
@@ -38,7 +38,7 @@ class Map {
   #   { a: 1, b: 2 }.none? { |k, v| v > 1 }   # false
   #
   def none?() {
-    result = self.each { |k, v| break true if yield(k, v) }
+    result = each { |k, v| break true if yield(k, v) }
     result != true
   }
 }
