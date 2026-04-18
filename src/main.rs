@@ -1,3 +1,4 @@
+#[cfg(feature = "cli")]
 use rustyline::{DefaultEditor, error::ReadlineError};
 use sapphire::{compiler, lexer, parser, token::TokenKind, typechecker, vm};
 
@@ -8,6 +9,7 @@ fn main() {
         [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
         [_, cmd, path] if cmd == "test" => run_tests(path),
         [_, cmd] if cmd == "test" => run_tests("."),
+        #[cfg(feature = "cli")]
         [_, cmd] if cmd == "console" => run_repl(),
         [_, cmd] if cmd == "version" => println!("sapphire {}", env!("CARGO_PKG_VERSION")),
         _ => {
@@ -221,6 +223,7 @@ fn run_tests(path: &str) {
     }
 }
 
+#[cfg(feature = "cli")]
 fn is_input_complete(source: &str) -> bool {
     let tokens = lexer::Lexer::new(source).scan_tokens();
     let mut depth: i32 = 0;
@@ -237,6 +240,7 @@ fn is_input_complete(source: &str) -> bool {
     depth <= 0 && begin_depth <= 0
 }
 
+#[cfg(feature = "cli")]
 fn run_repl() {
     println!("Sapphire {} — Ctrl+D to quit", env!("CARGO_PKG_VERSION"));
 

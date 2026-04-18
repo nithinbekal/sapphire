@@ -360,6 +360,8 @@ pub struct Vm {
     current_dir: PathBuf,
     /// Canonicalized paths of files already imported; prevents double-loading.
     imported: HashSet<PathBuf>,
+    /// When `Some`, print output is buffered here instead of written to stdout.
+    pub output: Option<Vec<String>>,
 }
 
 impl Vm {
@@ -384,6 +386,7 @@ impl Vm {
             globals: HashMap::new(),
             current_dir,
             imported: HashSet::new(),
+            output: None,
         }
     }
 
@@ -399,6 +402,7 @@ impl Vm {
             globals: HashMap::new(),
             current_dir: PathBuf::new(),
             imported: HashSet::new(),
+            output: None,
         }
     }
 
@@ -1862,7 +1866,11 @@ impl Vm {
 
                 OpCode::Print => {
                     let val = self.pop()?;
-                    println!("{}", self.format_value(&val));
+                    let s = self.format_value(&val);
+                    match self.output.as_mut() {
+                        Some(buf) => buf.push(s),
+                        None => println!("{}", s),
+                    }
                     self.stack.push(val);
                 }
 

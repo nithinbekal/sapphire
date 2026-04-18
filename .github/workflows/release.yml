@@ -73,3 +73,39 @@ jobs:
             sapphire-*
             checksums.txt
           body_path: release_notes.txt
+
+  build-wasm:
+    name: Build WASM
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM
+        run: |
+          wasm-pack build \
+            --target web \
+            --out-dir wasm-dist \
+            --release \
+            --features wasm \
+            --no-default-features
+
+      - name: Upload WASM to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            wasm-dist/sapphire_bg.wasm
+            wasm-dist/sapphire.js
