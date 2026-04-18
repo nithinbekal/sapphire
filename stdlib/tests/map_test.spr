@@ -49,7 +49,7 @@ class MapTest < Test {
 
   def test_all_false_when_one_pair_has_nil {
     m = { a: 1, b: nil }
-    self.assert(!m.all? { |k, v| v })
+    assert(!m.all? { |k, v| v })
   }
 
   def test_none_true_when_no_pair_matches {
