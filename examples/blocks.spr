@@ -1,0 +1,61 @@
+# blocks.spr — return, break, and next inside blocks
+
+# ── return inside a block performs a non-local return from the enclosing method
+
+def first_even(numbers) {
+  numbers.each { |n| return n if n % 2 == 0 }
+  nil
+}
+
+raise "expected 2" if first_even([1, 2, 3, 4]) != 2
+raise "expected 4" if first_even([1, 3, 4, 5]) != 4
+raise "expected nil" if first_even([1, 3, 5]) != nil
+
+# return works the same with Map#each
+
+def first_passing(scores) {
+  scores.each { |name, score| return name if score >= 90 }
+  nil
+}
+
+grades = { alice: 85, bob: 95, carol: 92 }
+result = first_passing(grades)
+raise "expected a passing student" if result == nil
+
+empty_grades = { alice: 70, bob: 65 }
+raise "expected nil for no passing students" if first_passing(empty_grades) != nil
+
+# ── break exits the block and returns a value to the caller
+
+found = [1, 3, 5, 6, 7].each { |n| break n if n % 2 == 0 }
+raise "expected 6" if found != 6
+
+# ── next skips to the next iteration
+
+odds = []
+[1, 2, 3, 4, 5].each { |n|
+  next if n % 2 == 0
+  odds.push(n)
+}
+raise "expected 3 odds" if odds.length != 3
+
+# ── stdlib predicates use return internally (List)
+
+has_big   = [1, 2, 3].any?  { |n| n > 2 }
+all_pos   = [1, 2, 3].all?  { |n| n > 0 }
+none_huge = [1, 2, 3].none? { |n| n > 9 }
+raise "any? wrong"  if !has_big
+raise "all? wrong"  if !all_pos
+raise "none? wrong" if !none_huge
+
+# ── stdlib predicates use return internally (Map)
+
+scores = { a: 1, b: 5, c: 3 }
+map_any  = scores.any?  { |k, v| v > 4 }
+map_all  = scores.all?  { |k, v| v > 0 }
+map_none = scores.none? { |k, v| v > 9 }
+raise "map any? wrong"  if !map_any
+raise "map all? wrong"  if !map_all
+raise "map none? wrong" if !map_none
+
+print "blocks: all checks passed"
