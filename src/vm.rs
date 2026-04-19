@@ -1310,13 +1310,13 @@ impl Vm {
                             self.stack.push(val.clone());
                         } else if name == "Math" {
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                            let result = dispatch_math_class_method(&method_name, &args, line)?;
+                            let result = crate::native_math::dispatch_math_class_method(&method_name, &args, line)?;
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
                         } else if name == "File" {
                             // Native File class method dispatch.
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                            let result = match dispatch_file_class_method(&method_name, &args, line)
+                            let result = match crate::native_file::dispatch_file_class_method(&method_name, &args, line)
                             {
                                 Ok(val) => val,
                                 Err(VmError::Raised(val)) => {
@@ -3365,100 +3365,6 @@ fn try_native_method(
     }
 }
 
-/// Native dispatch for `File` class methods: `read`, `write`, `exist?`.
-fn dispatch_file_class_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    match name {
-        "read" => {
-            let path = match args {
-                [VmValue::Str(s)] => s.clone(),
-                [_] => {
-                    return Err(VmError::TypeError {
-                        message: "File.read: path must be a string".to_string(),
-                        line,
-                    });
-                }
-                _ => {
-                    return Err(VmError::TypeError {
-                        message: format!("File.read expects 1 argument, got {}", args.len()),
-                        line,
-                    });
-                }
-            };
-            std::fs::read_to_string(&path)
-                .map(VmValue::Str)
-                .map_err(|e| VmError::Raised(VmValue::Str(format!("{}: {}", path, e))))
-        }
-        "write" => {
-            let (path, content) = match args {
-                [VmValue::Str(p), VmValue::Str(c)] => (p.clone(), c.clone()),
-                [_, _] => {
-                    return Err(VmError::TypeError {
-                        message: "File.write: path and content must be strings".to_string(),
-                        line,
-                    });
-                }
-                _ => {
-                    return Err(VmError::TypeError {
-                        message: format!("File.write expects 2 arguments, got {}", args.len()),
-                        line,
-                    });
-                }
-            };
-            std::fs::write(&path, content)
-                .map(|_| VmValue::Nil)
-                .map_err(|e| VmError::Raised(VmValue::Str(format!("{}: {}", path, e))))
-        }
-        "exist?" => {
-            let path = match args {
-                [VmValue::Str(s)] => s.clone(),
-                [_] => {
-                    return Err(VmError::TypeError {
-                        message: "File.exist?: path must be a string".to_string(),
-                        line,
-                    });
-                }
-                _ => {
-                    return Err(VmError::TypeError {
-                        message: format!("File.exist? expects 1 argument, got {}", args.len()),
-                        line,
-                    });
-                }
-            };
-            Ok(VmValue::Bool(std::path::Path::new(&path).exists()))
-        }
-        _ => Err(VmError::TypeError {
-            message: format!("File has no class method '{}'", name),
-            line,
-        }),
-    }
-}
-
-fn math_arg(args: &[VmValue], method: &str, line: u32) -> Result<f64, VmError> {
-    match args {
-        [VmValue::Float(f)] => Ok(*f),
-        [VmValue::Int(i)]   => Ok(*i as f64),
-        [_] => Err(VmError::TypeError {
-            message: format!("Math.{}: argument must be numeric", method), line,
-        }),
-        _ => Err(VmError::TypeError {
-            message: format!("Math.{} expects 1 argument, got {}", method, args.len()), line,
-        }),
-    }
-}
-
-/// Native dispatch for `Math` class methods.
-fn dispatch_math_class_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    match name {
-        "sin"  => math_arg(args, name, line).map(|f| VmValue::Float(f.sin())),
-        "cos"  => math_arg(args, name, line).map(|f| VmValue::Float(f.cos())),
-        "asin" => math_arg(args, name, line).map(|f| VmValue::Float(f.asin())),
-        "atan" => math_arg(args, name, line).map(|f| VmValue::Float(f.atan())),
-        _ => Err(VmError::TypeError {
-            message: format!("Math has no class method '{}'", name),
-            line,
-        }),
-    }
-}
 
 /// Return the stdlib class name for a primitive value, used to look up
 /// compiled stdlib methods in the class registry.
