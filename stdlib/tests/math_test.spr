@@ -1,0 +1,37 @@
+class MathTest < Test {
+  def test_tan_zero {
+    assert_in_delta(0.0, Math.tan(0), 0.0000000001)
+  }
+
+  def test_tan_pi_over_4 {
+    assert_in_delta(1.0, Math.tan(Math.PI / 4), 0.0000000001)
+  }
+
+  def test_acos_one {
+    assert_in_delta(0.0, Math.acos(1), 0.0000000001)
+  }
+
+  def test_acos_zero {
+    assert_in_delta(Math.PI / 2, Math.acos(0), 0.0000000001)
+  }
+
+  def test_atan2_positive_quadrant {
+    assert_in_delta(Math.PI / 4, Math.atan2(1, 1), 0.0000000001)
+  }
+
+  def test_atan2_negative_x {
+    assert_in_delta(Math.PI * 3 / 4, Math.atan2(1, -1), 0.0000000001)
+  }
+
+  def test_atan2_negative_x_negative_y {
+    assert_in_delta(0 - Math.PI * 3 / 4, Math.atan2(-1, -1), 0.0000000001)
+  }
+
+  def test_atan2_zero_x_positive_y {
+    assert_in_delta(Math.PI / 2, Math.atan2(1, 0), 0.0000000001)
+  }
+
+  def test_atan2_zero_x_negative_y {
+    assert_in_delta(0 - Math.PI / 2, Math.atan2(-1, 0), 0.0000000001)
+  }
+}
