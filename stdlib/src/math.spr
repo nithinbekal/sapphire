@@ -5,7 +5,6 @@
 #   Math.sin(Math.PI / 2)  # 1.0
 #   Math.atan2(1, 1)       # 0.7853981633974483
 #
-
 class Math {
   # Ratio of a circle's circumference to its diameter.
   PI = 3.141592653589793
@@ -19,6 +18,7 @@ class Math {
     #
     #   Math.tan(0)            # 0.0
     #   Math.tan(Math.PI / 4)  # ~1.0
+    #
     def tan(x) { self.sin(x) / self.cos(x) }
 
     # Returns the arccosine of x in radians. Domain: [-1, 1].
@@ -26,6 +26,7 @@ class Math {
     #
     #   Math.acos(1)  # 0.0
     #   Math.acos(0)  # 1.5707963... (PI/2)
+    #
     def acos(x) { self.PI / 2 - self.asin(x) }
 
     # Returns the angle in radians between the positive x-axis and the
@@ -35,6 +36,7 @@ class Math {
     #   Math.atan2(1, 1)   # 0.7853981... (PI/4)
     #   Math.atan2(1, -1)  # 2.3561944... (3*PI/4)
     #   Math.atan2(0, 1)   # 0.0
+    #
     def atan2(y, x) {
       if x > 0 {
         self.atan(y / x)
