@@ -1380,10 +1380,10 @@ impl Vm {
                                 } => {
                                     let methods = self
                                         .classes
-                                        .get("ProcessResult")
+                                        .get("Result")
                                         .map(|e| e.methods.clone())
                                         .ok_or_else(|| VmError::TypeError {
-                                            message: "ProcessResult class not loaded".to_string(),
+                                            message: "Process.Result class not loaded".to_string(),
                                             line,
                                         })?;
                                     let mut fields = HashMap::new();
@@ -1392,7 +1392,7 @@ impl Vm {
                                     fields.insert("exit_code".to_string(), VmValue::Int(exit_code));
                                     let gc_fields = self.alloc_fields(fields);
                                     VmValue::Instance {
-                                        class_name: "ProcessResult".to_string(),
+                                        class_name: "Result".to_string(),
                                         fields: gc_fields,
                                         methods,
                                     }
