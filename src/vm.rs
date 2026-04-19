@@ -570,6 +570,7 @@ impl Vm {
             ("stdlib/test.spr", include_str!("../stdlib/src/test.spr")),
             ("stdlib/file.spr", include_str!("../stdlib/src/file.spr")),
             ("stdlib/env.spr", include_str!("../stdlib/src/env.spr")),
+            ("stdlib/process.spr", include_str!("../stdlib/src/process.spr")),
             ("stdlib/math.spr", include_str!("../stdlib/src/math.spr")),
             ("stdlib/duration.spr", include_str!("../stdlib/src/duration.spr")),
             ("stdlib/instant.spr", include_str!("../stdlib/src/instant.spr")),
@@ -1348,6 +1349,53 @@ impl Vm {
                                         continue;
                                     }
                                     Err(e) => return Err(e),
+                                }
+                            };
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
+                        } else if name == "Process" {
+                            let proc_args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                            let proc_result = match crate::native_process::dispatch_process_class_method(
+                                &method_name,
+                                &proc_args,
+                                line,
+                            ) {
+                                Ok(r) => r,
+                                Err(VmError::Raised(val)) => {
+                                    self.stack.truncate(recv_slot);
+                                    self.raise_value(val)?;
+                                    continue;
+                                }
+                                Err(e) => return Err(e),
+                            };
+                            let result = match proc_result {
+                                crate::native_process::ProcessResult::Primitive(v) => v,
+                                crate::native_process::ProcessResult::List(items) => {
+                                    self.alloc_list(items)
+                                }
+                                crate::native_process::ProcessResult::RunOutput {
+                                    stdout,
+                                    stderr,
+                                    exit_code,
+                                } => {
+                                    let methods = self
+                                        .classes
+                                        .get("Result")
+                                        .map(|e| e.methods.clone())
+                                        .ok_or_else(|| VmError::TypeError {
+                                            message: "Process.Result class not loaded".to_string(),
+                                            line,
+                                        })?;
+                                    let mut fields = HashMap::new();
+                                    fields.insert("stdout".to_string(), VmValue::Str(stdout));
+                                    fields.insert("stderr".to_string(), VmValue::Str(stderr));
+                                    fields.insert("exit_code".to_string(), VmValue::Int(exit_code));
+                                    let gc_fields = self.alloc_fields(fields);
+                                    VmValue::Instance {
+                                        class_name: "Result".to_string(),
+                                        fields: gc_fields,
+                                        methods,
+                                    }
                                 }
                             };
                             self.stack.truncate(recv_slot);

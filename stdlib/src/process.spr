@@ -1,0 +1,22 @@
+# Process provides access to the current OS process.
+#
+#   Process.pid              # current process ID
+#   Process.exit             # exit with code 0
+#   Process.exit(1)          # exit with code 1
+#   Process.args             # List of arguments passed to the script
+#   Process.run("ls -la")    # run a shell command; returns a Process.Result
+#
+#   result = Process.run("echo hi")
+#   result.stdout            # "hi\n"
+#   result.stderr            # ""
+#   result.exit_code         # 0
+#
+class Process {
+  # Holds the captured output and exit status of a completed subprocess.
+  #
+  class Result {
+    attr stdout: Str
+    attr stderr: Str
+    attr exit_code: Int
+  }
+}
