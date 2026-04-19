@@ -569,6 +569,7 @@ impl Vm {
             ("stdlib/map.spr", include_str!("../stdlib/src/map.spr")),
             ("stdlib/test.spr", include_str!("../stdlib/src/test.spr")),
             ("stdlib/file.spr", include_str!("../stdlib/src/file.spr")),
+            ("stdlib/env.spr", include_str!("../stdlib/src/env.spr")),
             ("stdlib/process.spr", include_str!("../stdlib/src/process.spr")),
             ("stdlib/math.spr", include_str!("../stdlib/src/math.spr")),
             ("stdlib/duration.spr", include_str!("../stdlib/src/duration.spr")),
@@ -1330,6 +1331,25 @@ impl Vm {
                                     continue;
                                 }
                                 Err(e) => return Err(e),
+                            };
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
+                        } else if name == "Env" {
+                            let result = if method_name == "all" && arg_count == 0 {
+                                let vars: std::collections::HashMap<String, VmValue> =
+                                    std::env::vars().map(|(k, v)| (k, VmValue::Str(v))).collect();
+                                self.alloc_map(vars)
+                            } else {
+                                let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                                match crate::native_env::dispatch_env_class_method(&method_name, &args, line) {
+                                    Ok(val) => val,
+                                    Err(VmError::Raised(val)) => {
+                                        self.stack.truncate(recv_slot);
+                                        self.raise_value(val)?;
+                                        continue;
+                                    }
+                                    Err(e) => return Err(e),
+                                }
                             };
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
