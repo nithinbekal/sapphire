@@ -4,7 +4,7 @@
 use sapphire::compiler::compile;
 use sapphire::lexer::Lexer;
 use sapphire::parser::Parser;
-use sapphire::vm::{Vm, VmValue};
+use sapphire::vm::{Vm, VmError, VmValue};
 
 fn eval(src: &str) -> VmValue {
     let tokens = Lexer::new(src).scan_tokens();
@@ -13,6 +13,15 @@ fn eval(src: &str) -> VmValue {
     let mut vm = Vm::new(func, std::path::PathBuf::new());
     vm.load_stdlib().expect("stdlib");
     vm.run().expect("vm error").expect("empty stack")
+}
+
+fn eval_err(src: &str) -> VmError {
+    let tokens = Lexer::new(src).scan_tokens();
+    let stmts = Parser::new(tokens).parse().expect("parse error");
+    let func = compile(&stmts).expect("compile error");
+    let mut vm = Vm::new(func, std::path::PathBuf::new());
+    vm.load_stdlib().expect("stdlib");
+    vm.run().expect_err("expected vm error")
 }
 
 #[path = "stdlib/int.rs"]
@@ -44,3 +53,6 @@ mod math;
 
 #[path = "stdlib/datetime.rs"]
 mod datetime;
+
+#[path = "stdlib/env.rs"]
+mod env;

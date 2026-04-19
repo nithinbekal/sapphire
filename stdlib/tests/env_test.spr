@@ -1,0 +1,25 @@
+class EnvTest < Test {
+  def test_set_and_get {
+    Env.set("SPR_STEST", "hello")
+    assert_equal("hello", Env.get("SPR_STEST"))
+  }
+
+  def test_get_missing_returns_nil {
+    assert_nil(Env.get("SPR_DEFINITELY_NOT_SET_XYZ_123"))
+  }
+
+  def test_fetch_raises {
+    assert_raises { Env.fetch("SPR_DEFINITELY_NOT_SET_XYZ_123") }
+  }
+
+  def test_delete {
+    Env.set("SPR_SDEL", "bye")
+    Env.delete("SPR_SDEL")
+    assert_nil(Env.get("SPR_SDEL"))
+  }
+
+  def test_all_contains_set_var {
+    Env.set("SPR_SALL", "yes")
+    assert(Env.all().has_key?("SPR_SALL"))
+  }
+}
