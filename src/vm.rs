@@ -1373,8 +1373,29 @@ impl Vm {
                                 crate::native_process::ProcessResult::List(items) => {
                                     self.alloc_list(items)
                                 }
-                                crate::native_process::ProcessResult::Map(m) => {
-                                    self.alloc_map(m)
+                                crate::native_process::ProcessResult::RunOutput {
+                                    stdout,
+                                    stderr,
+                                    exit_code,
+                                } => {
+                                    let methods = self
+                                        .classes
+                                        .get("ProcessResult")
+                                        .map(|e| e.methods.clone())
+                                        .ok_or_else(|| VmError::TypeError {
+                                            message: "ProcessResult class not loaded".to_string(),
+                                            line,
+                                        })?;
+                                    let mut fields = HashMap::new();
+                                    fields.insert("stdout".to_string(), VmValue::Str(stdout));
+                                    fields.insert("stderr".to_string(), VmValue::Str(stderr));
+                                    fields.insert("exit_code".to_string(), VmValue::Int(exit_code));
+                                    let gc_fields = self.alloc_fields(fields);
+                                    VmValue::Instance {
+                                        class_name: "ProcessResult".to_string(),
+                                        fields: gc_fields,
+                                        methods,
+                                    }
                                 }
                             };
                             self.stack.truncate(recv_slot);

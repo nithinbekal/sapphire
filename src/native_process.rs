@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use crate::vm::{VmError, VmValue};
 
-/// Intermediate result type so vm.rs can do GC heap allocation for List/Map.
+/// Intermediate result type so vm.rs can do GC heap allocation for List/Instance.
 pub enum ProcessResult {
     Primitive(VmValue),
     List(Vec<VmValue>),
-    Map(HashMap<String, VmValue>),
+    RunOutput { stdout: String, stderr: String, exit_code: i64 },
 }
 
 pub fn dispatch_process_class_method(
@@ -81,20 +80,11 @@ pub fn dispatch_process_class_method(
                 .map_err(|e| {
                     VmError::Raised(VmValue::Str(format!("Process.run failed: {}", e)))
                 })?;
-            let mut map = HashMap::new();
-            map.insert(
-                "stdout".to_string(),
-                VmValue::Str(String::from_utf8_lossy(&output.stdout).into_owned()),
-            );
-            map.insert(
-                "stderr".to_string(),
-                VmValue::Str(String::from_utf8_lossy(&output.stderr).into_owned()),
-            );
-            map.insert(
-                "exit_code".to_string(),
-                VmValue::Int(output.status.code().unwrap_or(-1) as i64),
-            );
-            Ok(ProcessResult::Map(map))
+            Ok(ProcessResult::RunOutput {
+                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                exit_code: output.status.code().unwrap_or(-1) as i64,
+            })
         }
         _ => Err(VmError::TypeError {
             message: format!("Process has no class method '{}'", name),
