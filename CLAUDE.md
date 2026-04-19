@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## After completing a task
+
+Always run `./scripts/ci` when done with a task. It runs all CI checks (cargo test, clippy, sapphire tests, examples) and reports pass/fail for each.
+
 ## What is Sapphire?
 
 Sapphire is an object-oriented scripting language implemented in Rust. It's Ruby-inspired with gradual typing. The CLI supports five main subcommands: `run`, `typecheck`, `test`, `console` (REPL), and `version`.
@@ -15,6 +19,7 @@ cargo test <test_name>                   # run a specific Rust test
 cargo test <test_name> -- --nocapture    # run with stdout visible
 sapphire test [path]                     # run Sapphire tests (_test.spr files)
 sapphire test ./stdlib/tests             # run tests in a specific directory
+./scripts/ci                             # run all CI checks (cargo test, clippy, sapphire test, examples)
 ```
 
 ## Testing Framework

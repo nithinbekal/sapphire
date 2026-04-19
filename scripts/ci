@@ -1,0 +1,27 @@
+#!/bin/bash
+set -e
+
+run_check() {
+  local name=$1
+  local cmd=$2
+
+  if eval "$cmd" > /dev/null 2>&1; then
+    echo "$name - pass"
+  else
+    echo "$name - fail"
+    return 1
+  fi
+}
+
+echo "Running CI checks..."
+echo
+
+cargo build > /dev/null 2>&1
+
+run_check "cargo test" "cargo test"
+run_check "cargo clippy" "cargo clippy -- -D warnings"
+run_check "sapphire test" "target/debug/sapphire test stdlib/tests"
+run_check "examples" "examples/run_all.sh --interpreter && examples/run_all.sh --typecheck"
+
+echo
+echo "All checks passed!"
