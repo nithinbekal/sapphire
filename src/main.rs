@@ -5,7 +5,7 @@ use sapphire::{compiler, lexer, parser, token::TokenKind, typechecker, vm};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.as_slice() {
-        [_, cmd, path] if cmd == "run" => run_file(path),
+        [_, cmd, path, ..] if cmd == "run" => run_file(path),
         [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
         [_, cmd, path] if cmd == "test" => run_tests(path),
         [_, cmd] if cmd == "test" => run_tests("."),
