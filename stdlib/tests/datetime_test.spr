@@ -1,0 +1,196 @@
+class DateTimeTest < Test {
+
+  # ── Duration ────────────────────────────────────────────────────────────────
+
+  def test_duration_of_hours {
+    assert_equal(3, Duration.of_hours(3).hours())
+  }
+
+  def test_duration_of_days {
+    assert_equal(7, Duration.of_days(7).days())
+  }
+
+  def test_duration_negate {
+    assert_equal(-5, Duration.of_hours(5).negate().hours())
+  }
+
+  def test_duration_add {
+    assert_equal(5, Duration.of_hours(3).add(Duration.of_hours(2)).hours())
+  }
+
+  def test_duration_of_full {
+    d = Duration.of(1, 2, 3, 4, 5, 6, 0)
+    assert_equal(1, d.years())
+    assert_equal(2, d.months())
+    assert_equal(3, d.days())
+    assert_equal(4, d.hours())
+  }
+
+  # ── Instant ─────────────────────────────────────────────────────────────────
+
+  def test_instant_epoch_seconds {
+    assert_equal(3600, Instant.of_epoch_seconds(3600).epoch_seconds())
+  }
+
+  def test_instant_now_is_positive {
+    assert(Instant.now().epoch_seconds() > 0)
+  }
+
+  def test_instant_add_sub {
+    t = Instant.of_epoch_seconds(0)
+    d = Duration.of_hours(1)
+    assert_equal(3600, t.add(d).epoch_seconds())
+    assert_equal(0, t.add(d).sub(d).epoch_seconds())
+  }
+
+  def test_instant_sub_instant_gives_duration {
+    a = Instant.of_epoch_seconds(7200)
+    b = Instant.of_epoch_seconds(3600)
+    assert_equal(1, a.sub(b).hours())
+  }
+
+  def test_instant_before_after {
+    a = Instant.of_epoch_seconds(0)
+    b = Instant.of_epoch_seconds(1)
+    assert(a.before?(b))
+    assert(b.after?(a))
+    assert(!a.after?(b))
+  }
+
+  def test_instant_in_timezone {
+    z = Instant.of_epoch_seconds(0).in_timezone("UTC")
+    assert_equal("UTC", z.timezone())
+  }
+
+  # ── Date ────────────────────────────────────────────────────────────────────
+
+  def test_date_of {
+    d = Date.of(2024, 3, 15)
+    assert_equal(2024, d.year())
+    assert_equal(3,    d.month())
+    assert_equal(15,   d.day())
+  }
+
+  def test_date_day_of_week {
+    assert_equal(1, Date.of(2024, 1, 1).day_of_week())
+  }
+
+  def test_date_add_days {
+    assert_equal(11, Date.of(2024, 1, 1).add(Duration.of_days(10)).day())
+  }
+
+  def test_date_sub_days {
+    assert_equal(1, Date.of(2024, 1, 11).sub(Duration.of_days(10)).day())
+  }
+
+  def test_date_sub_date {
+    a = Date.of(2024, 1, 11)
+    b = Date.of(2024, 1, 1)
+    assert_equal(10, a.sub(b).days())
+  }
+
+  def test_date_before_after {
+    assert(Date.of(2023, 1, 1).before?(Date.of(2024, 1, 1)))
+    assert(Date.of(2024, 1, 1).after?(Date.of(2023, 1, 1)))
+  }
+
+  def test_date_next_prev_day {
+    assert_equal(2,  Date.of(2024, 1, 31).next_day().month())
+    assert_equal(31, Date.of(2024, 2, 1).prev_day().day())
+  }
+
+  # ── Time ────────────────────────────────────────────────────────────────────
+
+  def test_time_of {
+    t = Time.of(14, 30, 0)
+    assert_equal(14, t.hour())
+    assert_equal(30, t.minute())
+    assert_equal(0,  t.second())
+  }
+
+  def test_time_before_after {
+    assert(Time.of(8, 0, 0).before?(Time.of(12, 0, 0)))
+    assert(Time.of(12, 0, 0).after?(Time.of(8, 0, 0)))
+  }
+
+  # ── DateTime ────────────────────────────────────────────────────────────────
+
+  def test_datetime_of {
+    dt = DateTime.of(2024, 6, 15, 10, 30, 0)
+    assert_equal(2024, dt.year())
+    assert_equal(6,    dt.month())
+    assert_equal(10,   dt.hour())
+    assert_equal(30,   dt.minute())
+  }
+
+  def test_datetime_date_time {
+    dt = DateTime.of(2024, 6, 15, 10, 30, 0)
+    assert_equal(15, dt.date().day())
+    assert_equal(30, dt.time().minute())
+  }
+
+  def test_datetime_add {
+    dt = DateTime.of(2024, 1, 1, 0, 0, 0)
+    assert_equal(2, dt.add(Duration.of_days(1)).day())
+  }
+
+  # ── ZonedDateTime ────────────────────────────────────────────────────────────
+
+  def test_zoned_now {
+    assert(ZonedDateTime.now("UTC").epoch_seconds() > 0)
+  }
+
+  def test_zoned_from_instant {
+    i = Instant.of_epoch_seconds(0)
+    z = ZonedDateTime.from_instant(i, "UTC")
+    assert_equal("UTC", z.timezone())
+    assert_equal(1970, z.year())
+  }
+
+  def test_zoned_to_instant_roundtrip {
+    i = Instant.of_epoch_seconds(86400)
+    i2 = ZonedDateTime.from_instant(i, "UTC").to_instant()
+    assert_equal(86400, i2.epoch_seconds())
+  }
+
+  def test_zoned_epoch_seconds {
+    z = ZonedDateTime.now("UTC")
+    assert(z.epoch_seconds() > 0)
+  }
+
+  def test_zoned_with_timezone {
+    z = ZonedDateTime.now("UTC").with_timezone("America/Chicago")
+    assert_equal("America/Chicago", z.timezone())
+  }
+
+  def test_zoned_dst_aware_add {
+    z = ZonedDateTime.of_compatible(2024, 3, 10, 1, 30, 0, "America/New_York")
+    z2 = z.add(Duration.of_hours(1))
+    assert_equal(3, z2.hour())
+  }
+
+  def test_zoned_fall_back_before {
+    z = ZonedDateTime.of_before(2024, 11, 3, 1, 30, 0, "America/New_York")
+    assert(z.to_s().include?("-04:00"))
+  }
+
+  def test_zoned_fall_back_after {
+    z = ZonedDateTime.of_after(2024, 11, 3, 1, 30, 0, "America/New_York")
+    assert(z.to_s().include?("-05:00"))
+  }
+
+  def test_zoned_gap_raises {
+    assert_raises { ZonedDateTime.of(2024, 3, 10, 2, 30, 0, "America/New_York") }
+  }
+
+  def test_zoned_sub_gives_duration {
+    a = ZonedDateTime.from_instant(Instant.of_epoch_seconds(7200), "UTC")
+    b = ZonedDateTime.from_instant(Instant.of_epoch_seconds(0), "UTC")
+    assert_equal(2, a.sub(b).hours())
+  }
+
+  def test_zoned_to_utc {
+    z = ZonedDateTime.now("America/New_York").to_utc()
+    assert_equal("UTC", z.timezone())
+  }
+}

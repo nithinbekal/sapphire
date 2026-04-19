@@ -487,6 +487,35 @@ impl Vm {
         self.heap.alloc(HeapObject::Fields(m))
     }
 
+    /// Materialise a `DtValue` returned by the datetime dispatch module into a
+    /// fully-formed `VmValue`.  For `NewInstance` we look up the class entry in
+    /// the registry to obtain the compiled method table.
+    fn finalize_dt(
+        &mut self,
+        dt: crate::datetime::DtValue,
+        line: u32,
+    ) -> Result<VmValue, VmError> {
+        match dt {
+            crate::datetime::DtValue::Value(v) => Ok(v),
+            crate::datetime::DtValue::NewInstance { class_name, fields } => {
+                let methods = self
+                    .classes
+                    .get(&class_name)
+                    .map(|e| e.methods.clone())
+                    .ok_or_else(|| VmError::TypeError {
+                        message: format!(
+                            "datetime class '{}' not loaded; \
+                             call vm.load_stdlib() first",
+                            class_name
+                        ),
+                        line,
+                    })?;
+                let gc_fields = self.alloc_fields(fields);
+                Ok(VmValue::Instance { class_name, fields: gc_fields, methods })
+            }
+        }
+    }
+
     pub fn format_value(&self, val: &VmValue) -> String {
         format_value_with_heap(&self.heap, val)
     }
@@ -537,6 +566,12 @@ impl Vm {
             ("stdlib/test.spr", include_str!("../stdlib/src/test.spr")),
             ("stdlib/file.spr", include_str!("../stdlib/src/file.spr")),
             ("stdlib/math.spr", include_str!("../stdlib/src/math.spr")),
+            ("stdlib/duration.spr", include_str!("../stdlib/src/duration.spr")),
+            ("stdlib/instant.spr", include_str!("../stdlib/src/instant.spr")),
+            ("stdlib/date.spr", include_str!("../stdlib/src/date.spr")),
+            ("stdlib/time.spr", include_str!("../stdlib/src/time.spr")),
+            ("stdlib/datetime.spr", include_str!("../stdlib/src/datetime.spr")),
+            ("stdlib/zoned.spr", include_str!("../stdlib/src/zoned.spr")),
         ];
         for (name, src) in SOURCES {
             let tokens = crate::lexer::Lexer::new(src).scan_tokens();
@@ -1293,6 +1328,34 @@ impl Vm {
                             };
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
+                        } else if matches!(
+                            name.as_str(),
+                            "Instant"
+                                | "Date"
+                                | "Time"
+                                | "DateTime"
+                                | "ZonedDateTime"
+                                | "Duration"
+                        ) {
+                            let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                            let dt = match crate::datetime::dispatch_class_method(
+                                &self.heap,
+                                name,
+                                &method_name,
+                                &args,
+                                line,
+                            ) {
+                                Ok(v) => v,
+                                Err(VmError::Raised(val)) => {
+                                    self.stack.truncate(recv_slot);
+                                    self.raise_value(val)?;
+                                    continue;
+                                }
+                                Err(e) => return Err(e),
+                            };
+                            let result = self.finalize_dt(dt, line)?;
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
                         } else if method_name == "instance_method_names" && arg_count == 0 {
                             let mut names: Vec<VmValue> = methods
                                 .iter()
@@ -1383,11 +1446,58 @@ impl Vm {
                         }
                     }
 
-                    let method_opt = match &self.stack[recv_slot] {
-                        VmValue::Instance { methods, .. } => methods.get(&method_name).cloned(),
+                    let (method_opt, dt_class, dt_fields) = match &self.stack[recv_slot] {
+                        VmValue::Instance { class_name, methods, fields } => (
+                            methods.get(&method_name).cloned(),
+                            class_name.clone(),
+                            *fields,
+                        ),
                         _ => unreachable!(),
                     };
-                    if let Some(method) = method_opt {
+
+                    // For datetime types, try native dispatch first so our
+                    // implementations shadow inherited Object methods (e.g. to_s).
+                    let mut dt_handled = false;
+                    if matches!(
+                        dt_class.as_str(),
+                        "Instant"
+                            | "Date"
+                            | "Time"
+                            | "DateTime"
+                            | "ZonedDateTime"
+                            | "Duration"
+                    ) {
+                        let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                        match crate::datetime::dispatch_instance_method(
+                            &self.heap,
+                            &dt_class,
+                            dt_fields,
+                            &method_name,
+                            &args,
+                            line,
+                        ) {
+                            Ok(dt) => {
+                                let result = self.finalize_dt(dt, line)?;
+                                self.stack.truncate(recv_slot);
+                                self.stack.push(result);
+                                dt_handled = true;
+                            }
+                            Err(VmError::Raised(val)) => {
+                                self.stack.truncate(recv_slot);
+                                self.raise_value(val)?;
+                                continue;
+                            }
+                            Err(VmError::TypeError { .. }) => {
+                                // Method not found natively; fall through to
+                                // compiled dispatch (e.g. user-defined methods).
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+
+                    if dt_handled {
+                        // already handled above
+                    } else if let Some(method) = method_opt {
                         if method.private {
                             let caller_class = self
                                 .frames

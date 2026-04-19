@@ -41,3 +41,6 @@ mod object;
 
 #[path = "stdlib/math.rs"]
 mod math;
+
+#[path = "stdlib/datetime.rs"]
+mod datetime;
