@@ -1,4 +1,54 @@
+# Math provides mathematical constants and trigonometric functions.
+# Native methods (sin, cos, asin, atan) are dispatched by the VM.
+#
+#   Math.PI                # 3.141592653589793
+#   Math.sin(Math.PI / 2)  # 1.0
+#   Math.atan2(1, 1)       # 0.7853981633974483
+#
+
 class Math {
+  # Ratio of a circle's circumference to its diameter.
   PI = 3.141592653589793
+
+  # Base of the natural logarithm.
   E = 2.718281828459045
+
+  self {
+    # Returns the tangent of x (radians).
+    # Derived from sin and cos: tan(x) = sin(x) / cos(x).
+    #
+    #   Math.tan(0)            # 0.0
+    #   Math.tan(Math.PI / 4)  # ~1.0
+    def tan(x) { self.sin(x) / self.cos(x) }
+
+    # Returns the arccosine of x in radians. Domain: [-1, 1].
+    # Derived from asin: acos(x) = PI/2 - asin(x).
+    #
+    #   Math.acos(1)  # 0.0
+    #   Math.acos(0)  # 1.5707963... (PI/2)
+    def acos(x) { self.PI / 2 - self.asin(x) }
+
+    # Returns the angle in radians between the positive x-axis and the
+    # point (x, y). Handles all four quadrants correctly.
+    # Derived from atan.
+    #
+    #   Math.atan2(1, 1)   # 0.7853981... (PI/4)
+    #   Math.atan2(1, -1)  # 2.3561944... (3*PI/4)
+    #   Math.atan2(0, 1)   # 0.0
+    def atan2(y, x) {
+      if x > 0 {
+        self.atan(y / x)
+      } elsif x < 0 && y >= 0 {
+        self.atan(y / x) + self.PI
+      } elsif x < 0 {
+        self.atan(y / x) - self.PI
+      } elsif y > 0 {
+        self.PI / 2
+      } elsif y < 0 {
+        0 - self.PI / 2
+      } else {
+        0
+      }
+    }
+  }
 }

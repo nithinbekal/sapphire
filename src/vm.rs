@@ -1269,6 +1269,15 @@ impl Vm {
                                 rescues: vec![],
                                 class_name: Some(method.defined_in),
                             });
+                        } else if arg_count == 0 && let Some(val) = namespace.get(&method_name) {
+                            // Namespace lookup: constants and nested classes (e.g. Math.PI, Outer.Inner).
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(val.clone());
+                        } else if name == "Math" {
+                            let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                            let result = dispatch_math_class_method(&method_name, &args, line)?;
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
                         } else if name == "File" {
                             // Native File class method dispatch.
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
@@ -1294,20 +1303,6 @@ impl Vm {
                             let result = VmValue::List(self.heap.alloc(HeapObject::List(names)));
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
-                        } else if arg_count == 0 {
-                            // Fall back to namespace lookup (nested class access like `Outer.Inner`)
-                            match namespace.get(&method_name) {
-                                Some(val) => {
-                                    self.stack.truncate(recv_slot);
-                                    self.stack.push(val.clone());
-                                }
-                                None => {
-                                    return Err(VmError::TypeError {
-                                        message: format!("unknown class method '{}'", method_name),
-                                        line,
-                                    });
-                                }
-                            }
                         } else {
                             return Err(VmError::TypeError {
                                 message: format!("unknown class method '{}'", method_name),
@@ -3323,6 +3318,33 @@ fn dispatch_file_class_method(name: &str, args: &[VmValue], line: u32) -> Result
         }
         _ => Err(VmError::TypeError {
             message: format!("File has no class method '{}'", name),
+            line,
+        }),
+    }
+}
+
+fn math_arg(args: &[VmValue], method: &str, line: u32) -> Result<f64, VmError> {
+    match args {
+        [VmValue::Float(f)] => Ok(*f),
+        [VmValue::Int(i)]   => Ok(*i as f64),
+        [_] => Err(VmError::TypeError {
+            message: format!("Math.{}: argument must be numeric", method), line,
+        }),
+        _ => Err(VmError::TypeError {
+            message: format!("Math.{} expects 1 argument, got {}", method, args.len()), line,
+        }),
+    }
+}
+
+/// Native dispatch for `Math` class methods.
+fn dispatch_math_class_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
+    match name {
+        "sin"  => math_arg(args, name, line).map(|f| VmValue::Float(f.sin())),
+        "cos"  => math_arg(args, name, line).map(|f| VmValue::Float(f.cos())),
+        "asin" => math_arg(args, name, line).map(|f| VmValue::Float(f.asin())),
+        "atan" => math_arg(args, name, line).map(|f| VmValue::Float(f.atan())),
+        _ => Err(VmError::TypeError {
+            message: format!("Math has no class method '{}'", name),
             line,
         }),
     }
