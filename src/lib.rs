@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod chunk;
 pub mod compiler;
+pub mod datetime;
 pub mod error;
 pub mod gc;
 pub mod lexer;
