@@ -1806,7 +1806,7 @@ fn break_in_map_stops_early() {
 [1, 2, 3, 4].map { |n|
   break if n == 3
   n * 10
-}.length"#,
+}.size"#,
     );
     assert_eq!(result, VmValue::Int(3)); // [10, 20, nil] — 2 mapped + the break value
 }

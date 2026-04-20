@@ -11,7 +11,7 @@ pub fn dispatch_set_method(
 ) -> Result<VmValue, VmError> {
     let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
     match name {
-        "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_set(r).len() as i64)),
+        "size" if args.is_empty() => Ok(VmValue::Int(heap.get_set(r).len() as i64)),
         "empty?" if args.is_empty() => Ok(VmValue::Bool(heap.get_set(r).is_empty())),
         "include?" | "member?" if args.len() == 1 => {
             Ok(VmValue::Bool(heap.get_set(r).contains(&args[0])))

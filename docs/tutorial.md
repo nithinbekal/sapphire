@@ -207,7 +207,7 @@ nums = [3, 1, 4, 1, 5, 9, 2, 6]
 
 print nums[0]    # 3
 print nums[-1]   # 6
-print nums.length   # 8
+print nums.size   # 8
 
 nums.push(7)     # append
 nums.pop()       # remove and return last
@@ -251,7 +251,7 @@ print person["name"]   # Alice
 person["city"] = "Dublin"
 
 print person.keys      # ["name", "age", "city"]
-print person.length    # 3
+print person.size    # 3
 
 person.each { |k, v| print "#{k}: #{v}" }
 ```

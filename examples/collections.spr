@@ -4,7 +4,7 @@
 
 numbers = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3]
 
-print "length: #{numbers.length}"
+print "size: #{numbers.size}"
 print "first:  #{numbers.first}"
 print "last:   #{numbers.last}"
 
@@ -12,7 +12,7 @@ doubled = numbers.map { |n| n * 2 }
 doubled.each { |n| print n }
 
 evens = numbers.select { |n| n % 2 == 0 }
-print "even count: #{evens.length}"
+print "even count: #{evens.size}"
 
 total = numbers.reduce(0) { |acc, n| acc + n }
 print "sum: #{total}"
@@ -22,7 +22,7 @@ print "min: #{sorted.first}"
 print "max: #{sorted.last}"
 
 unique = numbers.uniq()
-print "unique: #{unique.length} values"
+print "unique: #{unique.size} values"
 
 numbers.each_with_index { |n, i| print "  [#{i}] = #{n}" }
 
@@ -36,24 +36,24 @@ stack.push(10)
 stack.push(20)
 stack.push(30)
 print "popped: #{stack.pop()}"
-print "stack length: #{stack.length}"
+print "stack size: #{stack.size}"
 
 # ── Maps ───────────────────────────────────────────────────────────────────────
 
 scores = { alice: 95, bob: 82, carol: 91 }
 
-print "length: #{scores.length}"
+print "size: #{scores.size}"
 print "has alice? #{scores.has_key?("alice")}"
 print "has dave?  #{scores.has_key?("dave")}"
 
 scores.each { |name, score| print "  #{name}: #{score}" }
 
 passing = scores.select { |name, score| score >= 90 }
-print "passing count: #{passing.length}"
+print "passing count: #{passing.size}"
 
 extras = { dave: 78 }
 all_scores = scores.merge(extras)
-print "total students: #{all_scores.length}"
+print "total students: #{all_scores.size}"
 
 # ── Ranges ─────────────────────────────────────────────────────────────────────
 

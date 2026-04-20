@@ -2,7 +2,7 @@ class MapTest < Test {
   def test_select_keeps_matching_pairs {
     m = { a: 1, b: 2, c: 3 }
     result = m.select { |k, v| v > 1 }
-    assert_equal(2, result.length)
+    assert_equal(2, result.size)
     assert(result.has_key?("b"))
     assert(result.has_key?("c"))
   }
@@ -10,13 +10,13 @@ class MapTest < Test {
   def test_select_empty_when_none_match {
     m = { a: 1, b: 2 }
     result = m.select { |k, v| v > 9 }
-    assert_equal(0, result.length)
+    assert_equal(0, result.size)
   }
 
   def test_select_all_when_all_match {
     m = { a: 1, b: 2 }
     result = m.select { |k, v| v > 0 }
-    assert_equal(2, result.length)
+    assert_equal(2, result.size)
   }
 
   def test_any_true_when_one_pair_matches {

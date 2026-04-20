@@ -2693,7 +2693,7 @@ impl Vm {
                         VmValue::Range { from, to } => (to - from).max(0),
                         other => {
                             return Err(VmError::TypeError {
-                                message: format!("len() not supported for {}", other),
+                                message: format!("size not supported for {}", other),
                                 line,
                             });
                         }

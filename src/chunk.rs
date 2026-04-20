@@ -168,7 +168,7 @@ pub enum OpCode {
     PopRescue,
 
     // Native helpers used by pre-built stdlib functions
-    /// Pop a List/Map/Str/Range and push its length as Int.
+    /// Pop a List/Map/Str/Range and push its size as Int.
     Len,
     /// Pop a Map and push a List of its string keys (sorted).
     MapKeys,

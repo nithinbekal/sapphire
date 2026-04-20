@@ -1,5 +1,5 @@
 # List is an ordered, mutable sequence of values.
-# This class adds higher-order helpers on top of indexing, length, and each.
+# This class adds higher-order helpers on top of indexing, size, and each.
 #
 class List {
   # Returns a new list built by calling the block once per element.
@@ -65,13 +65,13 @@ class List {
   }
 
   # Returns a new list of pairs: the i-th element of self with the i-th of other.
-  # The number of pairs is self.length; other must have at least that many elements.
+  # The number of pairs is self.size; other must have at least that many elements.
   #
   #   [1, 2, 3].zip([4, 5, 6])   # [[1, 4], [2, 5], [3, 6]]
   #
   def zip(other) {
     result = []
-    len = self.length
+    len = self.size
     i = 0
     while i < len {
       result.push([self[i], other[i]])
