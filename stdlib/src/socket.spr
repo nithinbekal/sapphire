@@ -1,0 +1,14 @@
+# Socket provides TCP client connections.
+# Use Socket.connect(host, port) to open a connection, then call
+# write, read_line, read_bytes, or read_all to exchange data, and
+# close when done.
+#
+#   sock = Socket.connect("example.com", 80)
+#   sock.write("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n")
+#   sock.read_line   # "HTTP/1.0 200 OK"
+#   sock.read_all    # response body
+#   sock.close
+#
+class Socket {
+  attr fd
+}

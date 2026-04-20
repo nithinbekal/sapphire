@@ -56,3 +56,6 @@ mod datetime;
 
 #[path = "stdlib/env.rs"]
 mod env;
+
+#[path = "stdlib/socket.rs"]
+mod socket;
