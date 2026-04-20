@@ -32,9 +32,9 @@ print "none < 0? #{numbers.none? { |n| n < 0 }}"
 
 # List mutation
 stack = []
-stack.push(10)
-stack.push(20)
-stack.push(30)
+stack.append(10)
+stack.append(20)
+stack.append(30)
 print "popped: #{stack.pop()}"
 print "stack size: #{stack.size}"
 

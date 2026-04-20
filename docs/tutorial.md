@@ -209,7 +209,7 @@ print nums[0]    # 3
 print nums[-1]   # 6
 print nums.size   # 8
 
-nums.push(7)     # append
+nums.append(7)
 nums.pop()       # remove and return last
 ```
 

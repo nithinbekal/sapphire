@@ -696,7 +696,7 @@ fn string_methods() {
     assert_eq!(eval(r#""hello".upcase()"#), VmValue::Str("HELLO".into()));
     assert_eq!(eval(r#""HELLO".downcase()"#), VmValue::Str("hello".into()));
     assert_eq!(eval(r#""abc".reverse()"#), VmValue::Str("cba".into()));
-    assert_eq!(eval(r#""  hi  ".strip()"#), VmValue::Str("hi".into()));
+    assert_eq!(eval(r#""  hi  ".trim()"#), VmValue::Str("hi".into()));
     assert_eq!(eval(r#""42".to_i()"#), VmValue::Int(42));
     assert_eq!(eval(r#""3.14".to_f()"#), VmValue::Float(3.14));
     assert_eq!(eval(r#""".empty?()"#), VmValue::Bool(true));
@@ -725,7 +725,7 @@ fn list_methods() {
 
 #[test]
 fn list_push_and_pop() {
-    assert_eq!(eval("a = [1,2]\na.push(3)\na.size()"), VmValue::Int(3));
+    assert_eq!(eval("a = [1,2]\na.append(3)\na.size()"), VmValue::Int(3));
     assert_eq!(eval("a = [1,2,3]\na.pop()"), VmValue::Int(3));
 }
 
@@ -1109,7 +1109,7 @@ fn list_uniq() {
 #[test]
 fn list_each_with_index() {
     let src = r#"pairs = []
-["a", "b", "c"].each_with_index() { |item, i| pairs.push(i) }
+["a", "b", "c"].each_with_index() { |item, i| pairs.append(i) }
 pairs[2]"#;
     assert_eq!(eval_with_stdlib(src), VmValue::Int(2));
 }

@@ -413,7 +413,7 @@ rely on the `each` block method you wired in Step 6:
 class Set {
   def map() {
     result = []
-    each { |x| result.push(yield(x)) }
+    each { |x| result.append(yield(x)) }
     result
   }
   # select, reject, any?, all?, none?, each_with_index follow the same pattern

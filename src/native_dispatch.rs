@@ -193,7 +193,7 @@ fn dispatch_str_method(
         "upcase" if args.is_empty() => Ok(VmValue::Str(s.to_uppercase())),
         "downcase" if args.is_empty() => Ok(VmValue::Str(s.to_lowercase())),
         "reverse" if args.is_empty() => Ok(VmValue::Str(s.chars().rev().collect())),
-        "strip" | "trim" if args.is_empty() => Ok(VmValue::Str(s.trim().to_string())),
+        "trim" if args.is_empty() => Ok(VmValue::Str(s.trim().to_string())),
         "chomp" if args.is_empty() => Ok(VmValue::Str(s.trim_end_matches('\n').to_string())),
         "to_i" if args.is_empty() => Ok(VmValue::Int(s.trim().parse::<i64>().unwrap_or(0))),
         "to_f" if args.is_empty() => Ok(VmValue::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
@@ -315,11 +315,11 @@ fn dispatch_list_method(
             Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
         }
         "include?" if args.len() == 1 => Ok(VmValue::Bool(heap.get_list(r).contains(&args[0]))),
-        "push" | "append" if args.len() == 1 => {
+        "append" if args.len() == 1 => {
             heap.get_list_mut(r).push(args[0].clone());
             Ok(recv.clone())
         }
-        "unshift" | "prepend" if args.len() == 1 => {
+        "prepend" if args.len() == 1 => {
             heap.get_list_mut(r).insert(0, args[0].clone());
             Ok(recv.clone())
         }
