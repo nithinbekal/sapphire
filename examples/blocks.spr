@@ -37,7 +37,7 @@ odds = []
   next if n % 2 == 0
   odds.push(n)
 }
-raise "expected 3 odds" if odds.length != 3
+raise "expected 3 odds" if odds.size != 3
 
 # ── stdlib predicates use return internally (List)
 

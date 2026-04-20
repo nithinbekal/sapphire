@@ -66,7 +66,7 @@ class SetTest < Test {
   def test_to_a_returns_list {
     s = Set.new([3, 1, 2])
     a = s.to_a()
-    assert_equal(3, a.length)
+    assert_equal(3, a.size)
     assert(a.include?(1))
     assert(a.include?(2))
     assert(a.include?(3))
@@ -179,7 +179,7 @@ class SetTest < Test {
   def test_map_transforms_to_list {
     s = Set.new([1, 2, 3])
     result = s.map { |x| x * 2 }
-    assert_equal(3, result.length)
+    assert_equal(3, result.size)
     assert(result.include?(2))
     assert(result.include?(4))
     assert(result.include?(6))

@@ -189,7 +189,7 @@ fn dispatch_str_method(
 ) -> Result<VmValue, VmError> {
     let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
     match name {
-        "size" | "length" if args.is_empty() => Ok(VmValue::Int(s.chars().count() as i64)),
+        "size" if args.is_empty() => Ok(VmValue::Int(s.chars().count() as i64)),
         "upcase" if args.is_empty() => Ok(VmValue::Str(s.to_uppercase())),
         "downcase" if args.is_empty() => Ok(VmValue::Str(s.to_lowercase())),
         "reverse" if args.is_empty() => Ok(VmValue::Str(s.chars().rev().collect())),
@@ -300,7 +300,7 @@ fn dispatch_list_method(
 ) -> Result<VmValue, VmError> {
     let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
     match name {
-        "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_list(r).len() as i64)),
+        "size" if args.is_empty() => Ok(VmValue::Int(heap.get_list(r).len() as i64)),
         "empty?" if args.is_empty() => Ok(VmValue::Bool(heap.get_list(r).is_empty())),
         "first" if args.is_empty() => Ok(heap.get_list(r).first().cloned().unwrap_or(VmValue::Nil)),
         "last" if args.is_empty() => Ok(heap.get_list(r).last().cloned().unwrap_or(VmValue::Nil)),
@@ -417,7 +417,7 @@ fn dispatch_map_method(
 ) -> Result<VmValue, VmError> {
     let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
     match name {
-        "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_map(r).len() as i64)),
+        "size" if args.is_empty() => Ok(VmValue::Int(heap.get_map(r).len() as i64)),
         "empty?" if args.is_empty() => Ok(VmValue::Bool(heap.get_map(r).is_empty())),
         "keys" if args.is_empty() => {
             let mut keys: Vec<VmValue> = heap
@@ -484,7 +484,7 @@ fn dispatch_range_method(
 ) -> Result<VmValue, VmError> {
     let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
     match name {
-        "size" | "length" if args.is_empty() => Ok(VmValue::Int((to - from).max(0))),
+        "size" if args.is_empty() => Ok(VmValue::Int((to - from).max(0))),
         "to_a" if args.is_empty() => {
             let v: Vec<VmValue> = (from..to).map(VmValue::Int).collect();
             Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
