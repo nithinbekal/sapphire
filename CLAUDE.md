@@ -81,6 +81,7 @@ Key files:
 - Zero-arg method calls don't require parentheses: `obj.foo` and `obj.foo()` are equivalent (both parse to `Expr::Call` wrapping `Expr::Get`)
 - `def foo { }` and `def foo() { }` are equivalent (parentheses optional on zero-arg definitions)
 - `Expr::Get` (bare field access without call) is only emitted when used as an lvalue or in specific non-call contexts
+- **`Foo.new(args)` always compiles to `OpCode::NewInstance`**, not `Invoke("new", …)` — special-cased in `src/compiler.rs`. The class-method dispatch chain in `vm.rs` is never reached for `new`. To intercept construction of a new value type, add a guard at the top of the `OpCode::NewInstance` handler, not in the class-method chain.
 
 ## Language Design Constraints
 
