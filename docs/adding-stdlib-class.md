@@ -15,6 +15,20 @@ exposed as a global. All method logic lives in Rust — the stub can be empty:
 class Foo { }
 ```
 
+If Rust will create instances of this class (i.e. the class has instance
+methods, not just class methods), declare the fields with `attr` so the
+field names are visible to the VM and match what Rust inserts:
+
+```sapphire
+class Foo {
+  attr value
+  attr code
+}
+```
+
+The `attr` names must exactly match the `HashMap` keys your Rust code
+inserts when building the instance. See step 4b.
+
 Follow the doc-comment style used by `math.spr`: one-line description, a blank
 `#` line, then indented usage examples, then a final blank `#` line, with the
 `class` keyword immediately after (no blank line between):
@@ -176,9 +190,53 @@ Find the `} else if name == "File" {` branch and add a peer branch after it:
 - Field names in the `HashMap` must exactly match the `attr` names declared in
   the `.spr` class body.
 
+### 4c. Instance method dispatch (if the class returns instances)
+
+If your class creates `VmValue::Instance` values and those instances have
+methods, wire a second dispatch branch into the instance method section of
+`vm.rs`. Find the block that begins:
+
+```rust
+// For datetime types, try native dispatch first …
+let mut dt_handled = false;
+if matches!(dt_class.as_str(), "Instant" | …) {
+```
+
+Add a peer block immediately before the `if dt_handled {` line:
+
+```rust
+let mut foo_handled = false;
+if dt_class == "Foo" {
+    let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+    match crate::native_foo::dispatch_foo_instance_method(dt_fields, &method_name, &args, line) {
+        Ok(result) => {
+            self.stack.truncate(recv_slot);
+            self.stack.push(result);
+            foo_handled = true;
+        }
+        Err(VmError::Raised(val)) => {
+            self.stack.truncate(recv_slot);
+            self.raise_value(val)?;
+            continue;
+        }
+        Err(e) => return Err(e),
+    }
+}
+
+if foo_handled || dt_handled {
+    // already handled
+} else if let Some(method) = method_opt {
+```
+
+The dispatch function receives `dt_fields: GcRef` — read the instance's
+field map with `heap.get_fields(fields_ref)` (requires `&GcHeap` access).
+
 ---
 
-## 5. Write tests (`stdlib/tests/foo_test.spr`)
+## 5. Write tests
+
+**Sapphire tests** (`stdlib/tests/foo_test.spr`) are the default for classes
+whose behaviour can be exercised from Sapphire:
 
 ```sapphire
 class FooTest < Test {
@@ -190,6 +248,30 @@ class FooTest < Test {
 }
 ```
 
+**Rust integration tests** (`tests/stdlib/foo.rs`) are preferable when the
+class wraps I/O or OS resources (sockets, file descriptors, subprocesses)
+where a Sapphire-level test would need live external access. Spin up a
+controlled environment (loopback server, temp file, etc.) in a thread, then
+call `eval` with the port/path injected via `format!`:
+
+```rust
+#[test]
+fn foo_does_thing() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || { /* serve one request */ });
+    let src = format!(r#"Foo.connect("127.0.0.1", {port}).read_all()"#);
+    assert_eq!(eval(&src), VmValue::Str("response".into()));
+}
+```
+
+Wire the file into `tests/stdlib.rs`:
+
+```rust
+#[path = "stdlib/foo.rs"]
+mod foo;
+```
+
 ---
 
 ## 6. Verify
@@ -199,6 +281,89 @@ class FooTest < Test {
 ```
 
 All four checks (cargo test, clippy, sapphire test, examples) must pass.
+
+---
+
+## Classes that wrap OS resources (sockets, file handles, processes)
+
+Some classes can't store their state as `VmValue` fields because the
+underlying Rust type (e.g. `TcpStream`, `Child`) isn't serialisable as a
+`VmValue`. The `Socket` class is the reference implementation.
+
+### The side-table pattern
+
+Keep a `HashMap<i64, Resource>` on the `Vm` struct alongside a monotonic
+integer counter. Each instance stores only the integer key in an `fd` field;
+native dispatch looks up the real resource by that key.
+
+**`src/vm.rs` — add to `Vm` struct:**
+
+```rust
+sockets: HashMap<i64, std::io::BufReader<std::net::TcpStream>>,
+next_socket_id: i64,
+```
+
+Initialise both in `Vm::new` and `Vm::new_repl`.
+
+### Why dispatch must be `&mut self` methods on `Vm`
+
+A standalone function in `native_foo.rs` can't be used when the dispatch
+needs to both read VM state (`self.classes`, `self.heap`) and mutate it
+(`self.alloc_fields`, `self.sockets`). The Rust borrow checker disallows
+holding a shared reference to one field while calling a `&mut self` method.
+
+The solution is to make the dispatch logic a private `impl Vm` method:
+
+```rust
+fn dispatch_foo_class(&mut self, method: &str, args: &[VmValue], line: u32)
+    -> Result<VmValue, VmError>
+{
+    match method {
+        "connect" => {
+            let resource = native_foo::open(args, line)?;
+            let id = self.next_foo_id;
+            self.next_foo_id += 1;
+            self.foos.insert(id, resource);
+            let methods = self.classes.get("Foo")
+                .map(|e| e.methods.clone())
+                .ok_or_else(|| VmError::TypeError {
+                    message: "Foo class not loaded".into(), line,
+                })?;
+            let mut fields = HashMap::new();
+            fields.insert("fd".to_string(), VmValue::Int(id));
+            let fields_ref = self.alloc_fields(fields);
+            Ok(VmValue::Instance { class_name: "Foo".into(), fields: fields_ref, methods })
+        }
+        _ => Err(VmError::TypeError { message: format!("Foo has no class method '{}'", method), line }),
+    }
+}
+
+fn dispatch_foo_instance(&mut self, fields_ref: GcRef, method: &str, args: &[VmValue], line: u32)
+    -> Result<VmValue, VmError>
+{
+    // Clone fields first to drop the immutable borrow before touching self.foos.
+    let fields = self.heap.get_fields(fields_ref).clone();
+    let fd = match fields.get("fd") {
+        Some(VmValue::Int(n)) => *n,
+        _ => return Err(VmError::TypeError { message: "invalid fd".into(), line }),
+    };
+    let resource = self.foos.get_mut(&fd)
+        .ok_or_else(|| VmError::Raised(VmValue::Str(format!("fd {} is closed", fd))))?;
+    match method {
+        "close" => { self.foos.remove(&fd); Ok(VmValue::Nil) }
+        // … other arms call free functions in native_foo.rs …
+        _ => Err(VmError::TypeError { message: format!("Foo has no method '{}'", method), line }),
+    }
+}
+```
+
+**Key constraint:** call `self.heap.get_fields(r).clone()` to extract the fd
+*before* calling `self.foos.get_mut(…)`. The clone ends the immutable borrow
+on `self.heap`, allowing the subsequent mutable borrow of `self.foos`.
+
+Wire the `&mut self` class method into the class dispatch chain (step 4b) and
+the instance method into the instance dispatch section (step 4c), passing
+`self.dispatch_foo_class(…)` and `self.dispatch_foo_instance(…)` respectively.
 
 ---
 
