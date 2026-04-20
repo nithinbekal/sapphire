@@ -1115,36 +1115,24 @@ impl Vm {
                             });
                         }
                     };
-                    // Special construction for Set: Set.new() or Set.new([items])
+                    // Set.new() / Set.new([items]) — intercept before normal instance allocation.
                     if class_name == "Set" {
-                        let elements = if n_pairs == 0 {
-                            Vec::new()
-                        } else if n_pairs == 1 {
-                            let val = self.stack[base + 2].clone();
-                            match val {
-                                VmValue::List(lr) => {
-                                    let items = self.heap.get_list(lr).clone();
-                                    let mut elems: Vec<VmValue> = Vec::new();
-                                    for item in items {
-                                        if !elems.contains(&item) {
-                                            elems.push(item);
-                                        }
-                                    }
-                                    elems
-                                }
-                                VmValue::Set(sr) => self.heap.get_set(sr).clone(),
-                                _ => {
-                                    return Err(VmError::TypeError {
-                                        message: "Set.new expects a List or no argument".to_string(),
-                                        line,
-                                    });
-                                }
-                            }
+                        let list_val = if n_pairs == 0 {
+                            None
                         } else {
-                            return Err(VmError::TypeError {
-                                message: "Set.new takes at most one argument".to_string(),
-                                line,
-                            });
+                            Some(self.stack[base + 2].clone())
+                        };
+                        let elements = match list_val {
+                            None => Vec::new(),
+                            Some(VmValue::List(lr)) => {
+                                crate::native_set::dedup_list(self.heap.get_list(lr).clone())
+                            }
+                            _ => {
+                                return Err(VmError::TypeError {
+                                    message: "Set.new expects a List argument".to_string(),
+                                    line,
+                                });
+                            }
                         };
                         self.stack.drain(base..);
                         let result = self.alloc_set(elements);
