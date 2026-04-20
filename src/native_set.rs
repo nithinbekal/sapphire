@@ -13,7 +13,7 @@ pub fn dispatch_set_method(
     match name {
         "size" if args.is_empty() => Ok(VmValue::Int(heap.get_set(r).len() as i64)),
         "empty?" if args.is_empty() => Ok(VmValue::Bool(heap.get_set(r).is_empty())),
-        "include?" | "member?" if args.len() == 1 => {
+        "include?" if args.len() == 1 => {
             Ok(VmValue::Bool(heap.get_set(r).contains(&args[0])))
         }
         "add" if args.len() == 1 => {

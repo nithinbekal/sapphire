@@ -56,7 +56,7 @@ fn join() {
 
 #[test]
 fn push_pop() {
-    assert_eq!(eval("a = [1,2]\na.push(3)\na.size()"), VmValue::Int(3));
+    assert_eq!(eval("a = [1,2]\na.append(3)\na.size()"), VmValue::Int(3));
     assert_eq!(eval("a = [1,2,3]\na.pop()"), VmValue::Int(3));
     assert_eq!(eval("a = [1,2,3]\na.pop()\na.size()"), VmValue::Int(2));
 }

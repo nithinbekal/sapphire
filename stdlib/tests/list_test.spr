@@ -67,7 +67,7 @@ class ListTest < Test {
 
   def test_each_with_index_yields_indices {
     indices = []
-    ["a", "b", "c"].each_with_index { |item, i| indices.push(i) }
+    ["a", "b", "c"].each_with_index { |item, i| indices.append(i) }
     assert_equal(0, indices[0])
     assert_equal(1, indices[1])
     assert_equal(2, indices[2])
@@ -75,7 +75,7 @@ class ListTest < Test {
 
   def test_each_with_index_yields_elements {
     items = []
-    ["a", "b", "c"].each_with_index { |item, i| items.push(item) }
+    ["a", "b", "c"].each_with_index { |item, i| items.append(item) }
     assert_equal("a", items[0])
     assert_equal("b", items[1])
     assert_equal("c", items[2])

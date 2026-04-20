@@ -9,7 +9,7 @@ class Set {
   #
   def map() {
     result = []
-    each { |x| result.push(yield(x)) }
+    each { |x| result.append(yield(x)) }
     result
   }
 

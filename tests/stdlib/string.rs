@@ -19,9 +19,9 @@ fn reverse() {
 }
 
 #[test]
-fn strip() {
-    assert_eq!(eval(r#""  hi  ".strip()"#), VmValue::Str("hi".into()));
-    assert_eq!(eval(r#""hello".strip()"#), VmValue::Str("hello".into()));
+fn trim() {
+    assert_eq!(eval(r#""  hi  ".trim()"#), VmValue::Str("hi".into()));
+    assert_eq!(eval(r#""hello".trim()"#), VmValue::Str("hello".into()));
 }
 
 #[test]

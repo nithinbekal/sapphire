@@ -35,7 +35,7 @@ raise "expected 6" if found != 6
 odds = []
 [1, 2, 3, 4, 5].each { |n|
   next if n % 2 == 0
-  odds.push(n)
+  odds.append(n)
 }
 raise "expected 3 odds" if odds.size != 3
 

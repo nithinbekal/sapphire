@@ -21,7 +21,7 @@ class SetTest < Test {
   def test_include_true_for_member {
     s = Set.new([10, 20])
     assert(s.include?(10))
-    assert(s.member?(20))
+    assert(s.include?(20))
   }
 
   def test_include_false_for_non_member {
@@ -233,7 +233,7 @@ class SetTest < Test {
   def test_each_with_index_yields_indices {
     s = Set.new(["a", "b", "c"])
     indices = []
-    s.each_with_index { |item, i| indices.push(i) }
+    s.each_with_index { |item, i| indices.append(i) }
     assert_equal(0, indices[0])
     assert_equal(1, indices[1])
     assert_equal(2, indices[2])

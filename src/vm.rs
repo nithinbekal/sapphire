@@ -2877,7 +2877,7 @@ impl Vm {
                         }
                         Ok(self.alloc_list(out))
                     }
-                    "select" | "filter" => {
+                    "select" => {
                         let items: Vec<VmValue> = self.get_list(r).clone();
                         let mut out = Vec::new();
                         for item in items {
@@ -2939,7 +2939,7 @@ impl Vm {
                         }
                         Ok(VmValue::Bool(true))
                     }
-                    "reduce" | "inject" => {
+                    "reduce" => {
                         let items: Vec<VmValue> = self.get_list(r).clone();
                         let mut acc = if args.is_empty() {
                             items.first().cloned().unwrap_or(VmValue::Nil)
