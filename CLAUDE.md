@@ -94,3 +94,5 @@ Key files:
 ## Standard Library
 
 Stdlib files in `stdlib/` are embedded as string literals and loaded during `vm.load_stdlib()`. Each file adds methods to a primitive type's class (`int.spr`, `float.spr`, `string.spr`, `bool.spr`, `nil.spr`, `list.spr`, `map.spr`) plus `object.spr` for the base `Object` class.
+
+See `docs/adding-stdlib-class.md` for a step-by-step guide to adding a new stdlib class backed by native Rust dispatch.
