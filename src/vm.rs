@@ -16,6 +16,7 @@ use std::rc::Rc;
 pub enum HeapObject {
     List(Vec<VmValue>),
     Map(HashMap<String, VmValue>),
+    Set(Vec<VmValue>),
     /// Instance field storage.
     Fields(HashMap<String, VmValue>),
 }
@@ -25,6 +26,7 @@ impl Trace for HeapObject {
         match self {
             HeapObject::List(v) => v.iter().for_each(|val| collect_refs(val, out)),
             HeapObject::Map(m) => m.values().for_each(|val| collect_refs(val, out)),
+            HeapObject::Set(v) => v.iter().for_each(|val| collect_refs(val, out)),
             HeapObject::Fields(f) => f.values().for_each(|val| collect_refs(val, out)),
         }
     }
@@ -33,7 +35,7 @@ impl Trace for HeapObject {
 /// Push all GcRefs contained directly in `val` into `out`.
 fn collect_refs(val: &VmValue, out: &mut Vec<GcRef>) {
     match val {
-        VmValue::List(r) | VmValue::Map(r) => out.push(*r),
+        VmValue::List(r) | VmValue::Map(r) | VmValue::Set(r) => out.push(*r),
         VmValue::Instance { fields, .. } => out.push(*fields),
         _ => {}
     }
@@ -62,6 +64,18 @@ impl GcHeap<HeapObject> {
         match self.get_mut(r) {
             HeapObject::Map(m) => m,
             _ => panic!("GcRef is not a Map"),
+        }
+    }
+    pub fn get_set(&self, r: GcRef) -> &Vec<VmValue> {
+        match self.get(r) {
+            HeapObject::Set(v) => v,
+            _ => panic!("GcRef is not a Set"),
+        }
+    }
+    pub fn get_set_mut(&mut self, r: GcRef) -> &mut Vec<VmValue> {
+        match self.get_mut(r) {
+            HeapObject::Set(v) => v,
+            _ => panic!("GcRef is not a Set"),
         }
     }
     pub fn get_fields(&self, r: GcRef) -> &HashMap<String, VmValue> {
@@ -97,6 +111,14 @@ pub fn format_value_with_heap(heap: &GcHeap<HeapObject>, val: &VmValue) -> Strin
                 .collect();
             parts.sort();
             format!("{{{}}}", parts.join(", "))
+        }
+        VmValue::Set(r) => {
+            let parts: Vec<String> = heap
+                .get_set(*r)
+                .iter()
+                .map(|el| format_value_with_heap(heap, el))
+                .collect();
+            format!("Set{{{}}}", parts.join(", "))
         }
         VmValue::Instance {
             class_name, fields, ..
@@ -161,6 +183,7 @@ pub enum VmValue {
     },
     List(GcRef),
     Map(GcRef),
+    Set(GcRef),
     Range {
         from: i64,
         to: i64,
@@ -209,6 +232,7 @@ impl PartialEq for VmValue {
             }
             (VmValue::List(a), VmValue::List(b)) => a == b,
             (VmValue::Map(a), VmValue::Map(b)) => a == b,
+            (VmValue::Set(a), VmValue::Set(b)) => a == b,
             (VmValue::Range { from: f1, to: t1 }, VmValue::Range { from: f2, to: t2 }) => {
                 f1 == f2 && t1 == t2
             }
@@ -232,6 +256,7 @@ impl fmt::Display for VmValue {
             VmValue::Closure { function, .. } => write!(f, "<fn {}>", function.name),
             VmValue::List(_) => write!(f, "<list>"),
             VmValue::Map(_) => write!(f, "<map>"),
+            VmValue::Set(_) => write!(f, "<set>"),
             VmValue::Range { from, to } => write!(f, "{}..{}", from, to),
             VmValue::Class { name, .. } => write!(f, "<class {}>", name),
             VmValue::Instance { class_name, .. } => write!(f, "#<{}>", class_name),
@@ -471,6 +496,9 @@ impl Vm {
     fn get_map_mut(&mut self, r: GcRef) -> &mut HashMap<String, VmValue> {
         self.heap.get_map_mut(r)
     }
+    fn get_set(&self, r: GcRef) -> &Vec<VmValue> {
+        self.heap.get_set(r)
+    }
     fn get_fields(&self, r: GcRef) -> &HashMap<String, VmValue> {
         self.heap.get_fields(r)
     }
@@ -485,6 +513,10 @@ impl Vm {
     fn alloc_map(&mut self, m: HashMap<String, VmValue>) -> VmValue {
         self.maybe_gc();
         VmValue::Map(self.heap.alloc(HeapObject::Map(m)))
+    }
+    fn alloc_set(&mut self, v: Vec<VmValue>) -> VmValue {
+        self.maybe_gc();
+        VmValue::Set(self.heap.alloc(HeapObject::Set(v)))
     }
     fn alloc_fields(&mut self, m: HashMap<String, VmValue>) -> GcRef {
         self.maybe_gc();
@@ -567,6 +599,7 @@ impl Vm {
             ("stdlib/bool.spr", include_str!("../stdlib/src/bool.spr")),
             ("stdlib/list.spr", include_str!("../stdlib/src/list.spr")),
             ("stdlib/map.spr", include_str!("../stdlib/src/map.spr")),
+            ("stdlib/set.spr", include_str!("../stdlib/src/set.spr")),
             ("stdlib/test.spr", include_str!("../stdlib/src/test.spr")),
             ("stdlib/file.spr", include_str!("../stdlib/src/file.spr")),
             ("stdlib/env.spr", include_str!("../stdlib/src/env.spr")),
@@ -1082,6 +1115,42 @@ impl Vm {
                             });
                         }
                     };
+                    // Special construction for Set: Set.new() or Set.new([items])
+                    if class_name == "Set" {
+                        let elements = if n_pairs == 0 {
+                            Vec::new()
+                        } else if n_pairs == 1 {
+                            let val = self.stack[base + 2].clone();
+                            match val {
+                                VmValue::List(lr) => {
+                                    let items = self.heap.get_list(lr).clone();
+                                    let mut elems: Vec<VmValue> = Vec::new();
+                                    for item in items {
+                                        if !elems.contains(&item) {
+                                            elems.push(item);
+                                        }
+                                    }
+                                    elems
+                                }
+                                VmValue::Set(sr) => self.heap.get_set(sr).clone(),
+                                _ => {
+                                    return Err(VmError::TypeError {
+                                        message: "Set.new expects a List or no argument".to_string(),
+                                        line,
+                                    });
+                                }
+                            }
+                        } else {
+                            return Err(VmError::TypeError {
+                                message: "Set.new takes at most one argument".to_string(),
+                                line,
+                            });
+                        };
+                        self.stack.drain(base..);
+                        let result = self.alloc_set(elements);
+                        self.stack.push(result);
+                        continue;
+                    }
                     // Initialise fields to their declared defaults (or nil if none).
                     let mut instance_fields: HashMap<String, VmValue> = field_decls
                         .iter()
@@ -1396,6 +1465,40 @@ impl Vm {
                                         fields: gc_fields,
                                         methods,
                                     }
+                                }
+                            };
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
+                        } else if name == "Set" {
+                            let set_args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                            let result = match (method_name.as_str(), set_args.as_slice()) {
+                                ("new", []) => self.alloc_set(Vec::new()),
+                                ("new", [VmValue::List(list_ref)]) => {
+                                    let list_ref = *list_ref;
+                                    let items: Vec<VmValue> =
+                                        self.heap.get_list(list_ref).clone();
+                                    let mut elements: Vec<VmValue> = Vec::new();
+                                    for item in items {
+                                        if !elements.contains(&item) {
+                                            elements.push(item);
+                                        }
+                                    }
+                                    self.alloc_set(elements)
+                                }
+                                ("new", [VmValue::Set(set_ref)]) => {
+                                    let set_ref = *set_ref;
+                                    let items: Vec<VmValue> =
+                                        self.heap.get_set(set_ref).clone();
+                                    self.alloc_set(items)
+                                }
+                                _ => {
+                                    return Err(VmError::TypeError {
+                                        message: format!(
+                                            "Set.{} is not defined or wrong argument types",
+                                            method_name
+                                        ),
+                                        line,
+                                    });
                                 }
                             };
                             self.stack.truncate(recv_slot);
@@ -2830,6 +2933,28 @@ impl Vm {
                     }
                     _ => Err(VmError::TypeError {
                         message: format!("Map has no block method '{}'", name),
+                        line,
+                    }),
+                }
+            }
+
+            VmValue::Set(r) => {
+                let r = *r;
+                match name {
+                    "each" => {
+                        let items: Vec<VmValue> = self.get_set(r).clone();
+                        for item in items {
+                            match self.call_block(&blk, vec![item]) {
+                                Err(VmError::Next(_)) => continue,
+                                Err(VmError::Break(v)) => return Ok(v),
+                                Err(e) => return Err(e),
+                                Ok(_) => {}
+                            }
+                        }
+                        Ok(recv.clone())
+                    }
+                    _ => Err(VmError::TypeError {
+                        message: format!("Set has no block method '{}'", name),
                         line,
                     }),
                 }
