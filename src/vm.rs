@@ -391,6 +391,9 @@ pub struct Vm {
     imported: HashSet<PathBuf>,
     /// When `Some`, print output is buffered here instead of written to stdout.
     pub output: Option<Vec<String>>,
+    /// Open TCP sockets keyed by integer fd; lives outside the GC.
+    sockets: HashMap<i64, std::io::BufReader<std::net::TcpStream>>,
+    next_socket_id: i64,
 }
 
 impl Vm {
@@ -416,6 +419,8 @@ impl Vm {
             current_dir,
             imported: HashSet::new(),
             output: None,
+            sockets: HashMap::new(),
+            next_socket_id: 0,
         }
     }
 
@@ -432,6 +437,8 @@ impl Vm {
             current_dir: PathBuf::new(),
             imported: HashSet::new(),
             output: None,
+            sockets: HashMap::new(),
+            next_socket_id: 0,
         }
     }
 
@@ -552,6 +559,120 @@ impl Vm {
         }
     }
 
+    fn dispatch_socket_class(
+        &mut self,
+        method_name: &str,
+        args: &[VmValue],
+        line: u32,
+    ) -> Result<VmValue, VmError> {
+        match method_name {
+            "connect" => {
+                let (host, port) = match args {
+                    [VmValue::Str(h), VmValue::Int(p)] => (h.clone(), *p),
+                    _ => {
+                        return Err(VmError::TypeError {
+                            message: "Socket.connect expects (String, Int)".into(),
+                            line,
+                        })
+                    }
+                };
+                let reader = crate::native_socket::socket_connect(&host, port, line)?;
+                let id = self.next_socket_id;
+                self.next_socket_id += 1;
+                self.sockets.insert(id, reader);
+                let methods = self
+                    .classes
+                    .get("Socket")
+                    .map(|e| e.methods.clone())
+                    .ok_or_else(|| VmError::TypeError {
+                        message: "Socket class not loaded; call load_stdlib() first".into(),
+                        line,
+                    })?;
+                let mut fields_map = HashMap::new();
+                fields_map.insert("fd".to_string(), VmValue::Int(id));
+                let fields_ref = self.alloc_fields(fields_map);
+                Ok(VmValue::Instance {
+                    class_name: "Socket".to_string(),
+                    fields: fields_ref,
+                    methods,
+                })
+            }
+            _ => Err(VmError::TypeError {
+                message: format!("Socket has no class method '{}'", method_name),
+                line,
+            }),
+        }
+    }
+
+    fn dispatch_socket_instance(
+        &mut self,
+        fields_ref: crate::gc::GcRef,
+        method_name: &str,
+        args: &[VmValue],
+        line: u32,
+    ) -> Result<VmValue, VmError> {
+        let fields = self.heap.get_fields(fields_ref).clone();
+        let fd = crate::native_socket::extract_fd(&fields, line)?;
+        let closed_err = || VmError::Raised(VmValue::Str(format!("socket fd {} is closed", fd)));
+        match method_name {
+            "write" => {
+                let data = match args {
+                    [VmValue::Str(s)] => s.clone(),
+                    _ => {
+                        return Err(VmError::TypeError {
+                            message: "socket.write expects a String".into(),
+                            line,
+                        })
+                    }
+                };
+                let reader = self.sockets.get_mut(&fd).ok_or_else(closed_err)?;
+                crate::native_socket::socket_write(reader, &data, line)?;
+                Ok(VmValue::Nil)
+            }
+            "read_line" => {
+                if !args.is_empty() {
+                    return Err(VmError::TypeError {
+                        message: "socket.read_line takes no arguments".into(),
+                        line,
+                    });
+                }
+                let reader = self.sockets.get_mut(&fd).ok_or_else(closed_err)?;
+                crate::native_socket::socket_read_line(reader, line).map(VmValue::Str)
+            }
+            "read_bytes" => {
+                let n = match args {
+                    [VmValue::Int(n)] => *n,
+                    _ => {
+                        return Err(VmError::TypeError {
+                            message: "socket.read_bytes expects an Int".into(),
+                            line,
+                        })
+                    }
+                };
+                let reader = self.sockets.get_mut(&fd).ok_or_else(closed_err)?;
+                crate::native_socket::socket_read_bytes(reader, n, line).map(VmValue::Str)
+            }
+            "read_all" => {
+                if !args.is_empty() {
+                    return Err(VmError::TypeError {
+                        message: "socket.read_all takes no arguments".into(),
+                        line,
+                    });
+                }
+                let reader = self.sockets.get_mut(&fd).ok_or_else(closed_err)?;
+                crate::native_socket::socket_read_all(reader, line).map(VmValue::Str)
+            }
+            "close" => {
+                self.sockets.remove(&fd);
+                Ok(VmValue::Nil)
+            }
+            _ => Err(VmError::TypeError {
+                message: format!("Socket has no method '{}'", method_name),
+                line,
+            }),
+        }
+    }
+
     pub fn format_value(&self, val: &VmValue) -> String {
         format_value_with_heap(&self.heap, val)
     }
@@ -611,6 +732,7 @@ impl Vm {
             ("stdlib/time.spr", include_str!("../stdlib/src/time.spr")),
             ("stdlib/datetime.spr", include_str!("../stdlib/src/datetime.spr")),
             ("stdlib/zoned.spr", include_str!("../stdlib/src/zoned.spr")),
+            ("stdlib/socket.spr", include_str!("../stdlib/src/socket.spr")),
         ];
         for (name, src) in SOURCES {
             let tokens = crate::lexer::Lexer::new(src).scan_tokens();
@@ -1491,6 +1613,19 @@ impl Vm {
                             };
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
+                        } else if name == "Socket" {
+                            let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                            let result = match self.dispatch_socket_class(&method_name, &args, line) {
+                                Ok(val) => val,
+                                Err(VmError::Raised(val)) => {
+                                    self.stack.truncate(recv_slot);
+                                    self.raise_value(val)?;
+                                    continue;
+                                }
+                                Err(e) => return Err(e),
+                            };
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
                         } else if matches!(
                             name.as_str(),
                             "Instant"
@@ -1658,7 +1793,25 @@ impl Vm {
                         }
                     }
 
-                    if dt_handled {
+                    let mut socket_handled = false;
+                    if dt_class == "Socket" {
+                        let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                        match self.dispatch_socket_instance(dt_fields, &method_name, &args, line) {
+                            Ok(result) => {
+                                self.stack.truncate(recv_slot);
+                                self.stack.push(result);
+                                socket_handled = true;
+                            }
+                            Err(VmError::Raised(val)) => {
+                                self.stack.truncate(recv_slot);
+                                self.raise_value(val)?;
+                                continue;
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+
+                    if socket_handled || dt_handled {
                         // already handled above
                     } else if let Some(method) = method_opt {
                         if method.private {

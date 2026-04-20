@@ -11,6 +11,7 @@ pub mod native_file;
 pub mod native_math;
 pub mod native_process;
 pub mod native_set;
+pub mod native_socket;
 pub mod parser;
 pub mod token;
 pub mod typechecker;
