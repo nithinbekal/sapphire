@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.5.0
+
+**Language**
+
+- Heredoc strings — triple-quoted multi-line string literals with automatic indent stripping:
+
+```ruby
+message = """
+  Hello,
+  world!
+  """
+```
+
+- `return` now works correctly inside blocks passed to native methods such as `each`
+
+**Standard library**
+
+- `DateTime` module — `Instant`, `Date`, `Time`, `DateTime`, `ZonedDateTime`, and `Duration` types for date and time handling
+- `Math` — trigonometric methods: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`
+- `Set` — unordered collection with set-membership semantics
+- `Socket` — minimal TCP client support via `Socket.new` and `connect`, `send`, `receive`, `close`
+- `Env` — read and write environment variables with `Env.get`, `Env.set`, and `Env.all`
+- `Process` — run subprocesses with `Process.run`; result is a `Process.Result` with `stdout`, `stderr`, and `exit_code`
+- `Class#instance_method_names` — returns a list of method names defined on a class
+- All collection types now consistently use `size` instead of `length`
+
+**CLI**
+
+- `sapphire test` now reports the total test run time
+
+**Bug fixes**
+
+- `Map#all?` now handles entries with `nil` values correctly
+- `Map#none?` no longer recurses infinitely
+
+---
+
 ## v0.4.0
 
 **Language**
