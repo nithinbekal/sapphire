@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.1
+
+This is a version bump to verify the release pipeline.
+
+**CI**
+
+- WASM build now runs in parallel with native builds, reducing total release time
+
+---
+
 ## v0.5.0
 
 **Language**
