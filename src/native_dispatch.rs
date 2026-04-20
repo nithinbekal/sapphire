@@ -19,6 +19,7 @@ pub fn primitive_class_name(val: &VmValue) -> Option<&'static str> {
         VmValue::Nil => Some("Nil"),
         VmValue::List(_) => Some("List"),
         VmValue::Map(_) => Some("Map"),
+        VmValue::Set(_) => Some("Set"),
         _ => None,
     }
 }
@@ -33,6 +34,7 @@ pub fn value_type_name(val: &VmValue) -> &str {
         VmValue::Nil => "Nil",
         VmValue::List(_) => "List",
         VmValue::Map(_) => "Map",
+        VmValue::Set(_) => "Set",
         VmValue::Range { .. } => "Range",
         VmValue::Instance { class_name, .. } => class_name.as_str(),
         VmValue::Class { name, .. } => name.as_str(),
@@ -120,6 +122,7 @@ pub fn dispatch_native_method(
         VmValue::Nil => dispatch_nil_method(name, args, line),
         VmValue::List(r) => dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => dispatch_map_method(heap, *r, recv, name, args, line),
+        VmValue::Set(r) => crate::native_set::dispatch_set_method(heap, *r, recv, name, args, line),
         VmValue::Range { from, to } => {
             dispatch_range_method(heap, *from, *to, recv, name, args, line)
         }
