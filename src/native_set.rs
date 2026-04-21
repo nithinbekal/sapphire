@@ -1,6 +1,30 @@
 use crate::gc::{GcHeap, GcRef};
 use crate::vm::{format_value_with_heap, HeapObject, VmError, VmValue};
 
+const METHOD_ARITIES: &[(&str, usize)] = &[
+    ("add", 1),
+    ("delete", 1),
+    ("difference", 1),
+    ("disjoint?", 1),
+    ("empty?", 0),
+    ("include?", 1),
+    ("intersection", 1),
+    ("size", 0),
+    ("subset?", 1),
+    ("superset?", 1),
+    ("to_a", 0),
+    ("to_s", 0),
+    ("union", 1),
+];
+
+fn arg_error(name: &str, argc: usize, line: u32) -> VmError {
+    let msg = METHOD_ARITIES.iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, arity)| format!("Set.{name} expects {arity} argument(s), got {argc}"))
+        .unwrap_or_else(|| format!("Set has no method '{name}'"));
+    VmError::TypeError { message: msg, line }
+}
+
 pub fn dispatch_set_method(
     heap: &mut GcHeap<HeapObject>,
     r: GcRef,
@@ -9,91 +33,64 @@ pub fn dispatch_set_method(
     args: &[VmValue],
     line: u32,
 ) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
-    match name {
-        "size" if args.is_empty() => Ok(VmValue::Int(heap.get_set(r).len() as i64)),
-        "empty?" if args.is_empty() => Ok(VmValue::Bool(heap.get_set(r).is_empty())),
-        "include?" if args.len() == 1 => {
-            Ok(VmValue::Bool(heap.get_set(r).contains(&args[0])))
-        }
-        "add" if args.len() == 1 => {
-            let item = args[0].clone();
+    match (name, args) {
+        ("add", [item]) => {
+            let item = item.clone();
             if !heap.get_set(r).contains(&item) {
                 heap.get_set_mut(r).push(item);
             }
             Ok(recv.clone())
         }
-        "delete" if args.len() == 1 => {
+        ("delete", [item]) => {
             let v = heap.get_set_mut(r);
-            let pos = v.iter().position(|x| x == &args[0]);
-            if let Some(i) = pos {
+            if let Some(i) = v.iter().position(|x| x == item) {
                 v.remove(i);
             }
             Ok(recv.clone())
         }
-        "to_a" if args.is_empty() => {
+        ("difference", [VmValue::Set(other_r)]) => {
+            let self_items = heap.get_set(r).clone();
+            let other = heap.get_set(*other_r).clone();
+            let result = self_items.into_iter().filter(|x| !other.contains(x)).collect();
+            Ok(VmValue::Set(heap.alloc(HeapObject::Set(result))))
+        }
+        ("disjoint?", [VmValue::Set(other_r)]) => {
+            let other = heap.get_set(*other_r).clone();
+            Ok(VmValue::Bool(!heap.get_set(r).iter().any(|x| other.contains(x))))
+        }
+        ("empty?", [])    => Ok(VmValue::Bool(heap.get_set(r).is_empty())),
+        ("include?", [item]) => Ok(VmValue::Bool(heap.get_set(r).contains(item))),
+        ("intersection", [VmValue::Set(other_r)]) => {
+            let self_items = heap.get_set(r).clone();
+            let other = heap.get_set(*other_r).clone();
+            let result = self_items.into_iter().filter(|x| other.contains(x)).collect();
+            Ok(VmValue::Set(heap.alloc(HeapObject::Set(result))))
+        }
+        ("size", [])      => Ok(VmValue::Int(heap.get_set(r).len() as i64)),
+        ("subset?", [VmValue::Set(other_r)]) => {
+            let other = heap.get_set(*other_r).clone();
+            Ok(VmValue::Bool(heap.get_set(r).iter().all(|x| other.contains(x))))
+        }
+        ("superset?", [VmValue::Set(other_r)]) => {
+            let self_items = heap.get_set(r).clone();
+            Ok(VmValue::Bool(heap.get_set(*other_r).iter().all(|x| self_items.contains(x))))
+        }
+        ("to_a", []) => {
             let items = heap.get_set(r).clone();
             Ok(VmValue::List(heap.alloc(HeapObject::List(items))))
         }
-        "to_s" if args.is_empty() => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
-        "union" if args.len() == 1 => match &args[0] {
-            VmValue::Set(other_r) => {
-                let mut result = heap.get_set(r).clone();
-                let other = heap.get_set(*other_r).clone();
-                for item in other {
-                    if !result.contains(&item) {
-                        result.push(item);
-                    }
-                }
-                Ok(VmValue::Set(heap.alloc(HeapObject::Set(result))))
+        ("to_s", [])      => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
+        ("union", [VmValue::Set(other_r)]) => {
+            let mut result = heap.get_set(r).clone();
+            let other = heap.get_set(*other_r).clone();
+            for item in other {
+                if !result.contains(&item) { result.push(item); }
             }
-            _ => Err(type_err("union expects a Set")),
-        },
-        "intersection" if args.len() == 1 => match &args[0] {
-            VmValue::Set(other_r) => {
-                let self_items = heap.get_set(r).clone();
-                let other = heap.get_set(*other_r).clone();
-                let result: Vec<VmValue> =
-                    self_items.into_iter().filter(|x| other.contains(x)).collect();
-                Ok(VmValue::Set(heap.alloc(HeapObject::Set(result))))
-            }
-            _ => Err(type_err("intersection expects a Set")),
-        },
-        "difference" if args.len() == 1 => match &args[0] {
-            VmValue::Set(other_r) => {
-                let self_items = heap.get_set(r).clone();
-                let other = heap.get_set(*other_r).clone();
-                let result: Vec<VmValue> =
-                    self_items.into_iter().filter(|x| !other.contains(x)).collect();
-                Ok(VmValue::Set(heap.alloc(HeapObject::Set(result))))
-            }
-            _ => Err(type_err("difference expects a Set")),
-        },
-        "subset?" if args.len() == 1 => match &args[0] {
-            VmValue::Set(other_r) => {
-                let other = heap.get_set(*other_r).clone();
-                let is_subset = heap.get_set(r).iter().all(|x| other.contains(x));
-                Ok(VmValue::Bool(is_subset))
-            }
-            _ => Err(type_err("subset? expects a Set")),
-        },
-        "superset?" if args.len() == 1 => match &args[0] {
-            VmValue::Set(other_r) => {
-                let self_items = heap.get_set(r).clone();
-                let is_superset = heap.get_set(*other_r).iter().all(|x| self_items.contains(x));
-                Ok(VmValue::Bool(is_superset))
-            }
-            _ => Err(type_err("superset? expects a Set")),
-        },
-        "disjoint?" if args.len() == 1 => match &args[0] {
-            VmValue::Set(other_r) => {
-                let other = heap.get_set(*other_r).clone();
-                let is_disjoint = !heap.get_set(r).iter().any(|x| other.contains(x));
-                Ok(VmValue::Bool(is_disjoint))
-            }
-            _ => Err(type_err("disjoint? expects a Set")),
-        },
-        _ => Err(type_err(&format!("Set has no method '{}'", name))),
+            Ok(VmValue::Set(heap.alloc(HeapObject::Set(result))))
+        }
+        (m @ ("difference" | "disjoint?" | "intersection" | "subset?" | "superset?" | "union"), [_]) =>
+            Err(VmError::TypeError { message: format!("{m} expects a Set"), line }),
+        _ => Err(arg_error(name, args.len(), line)),
     }
 }
 
