@@ -123,9 +123,9 @@ pub fn dispatch_native_method(
         VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
         VmValue::Set(r) => crate::native_set::dispatch_set_method(heap, *r, recv, name, args, line),
-        VmValue::Range { from, to } => {
-            dispatch_range_method(heap, *from, *to, recv, name, args, line)
-        }
+        VmValue::Range { from, to } => crate::native_range::dispatch_range_method(
+            heap, *from, *to, recv, name, args, line,
+        ),
         other => Err(VmError::TypeError {
             message: format!("'{}' has no method '{}'", other, name),
             line,
@@ -199,34 +199,3 @@ fn dispatch_nil_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValu
     }
 }
 
-fn dispatch_range_method(
-    heap: &mut GcHeap<HeapObject>,
-    from: i64,
-    to: i64,
-    recv: &VmValue,
-    name: &str,
-    args: &[VmValue],
-    line: u32,
-) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
-    match name {
-        "size" if args.is_empty() => Ok(VmValue::Int((to - from).max(0))),
-        "to_a" if args.is_empty() => {
-            let v: Vec<VmValue> = (from..to).map(VmValue::Int).collect();
-            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-        }
-        "include?" if args.len() == 1 => match &args[0] {
-            VmValue::Int(n) => Ok(VmValue::Bool(n >= &from && n < &to)),
-            _ => Err(type_err("include? expects an Int")),
-        },
-        "first" if args.is_empty() => Ok(VmValue::Int(from)),
-        "last" if args.is_empty() => Ok(VmValue::Int(to - 1)),
-        "min" if args.is_empty() => Ok(VmValue::Int(from)),
-        "max" if args.is_empty() => Ok(VmValue::Int(to - 1)),
-        "to_s" if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
-        _ => Err(VmError::TypeError {
-            message: format!("Range has no method '{}'", name),
-            line,
-        }),
-    }
-}
