@@ -243,6 +243,36 @@ fn while_accumulates() {
     assert_eq!(eval(src), VmValue::Int(6));
 }
 
+/// Nested `while` with a local first assigned under `if` must not allocate that
+/// local mid-outer-loop (would shift stack slots). Regression for #86.
+#[test]
+fn nested_while_inner_local_under_if_reuses_slot() {
+    let src = r#"
+limit = 10
+flags = []
+i = 0
+while i <= limit {
+  flags.append(1)
+  i = i + 1
+}
+flags[0] = 0
+flags[1] = 0
+p = 2
+while p * p <= limit {
+  if flags[p] == 1 {
+    m = p * p
+    while m <= limit {
+      flags[m] = 0
+      m = m + p
+    }
+  }
+  p = p + 1
+}
+flags[9]
+"#;
+    assert_eq!(eval_with_stdlib(src), VmValue::Int(0));
+}
+
 #[test]
 fn last_expr_is_implicit_return() {
     let tokens = Lexer::new("1 + 1\n2 + 2").scan_tokens();

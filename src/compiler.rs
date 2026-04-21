@@ -953,42 +953,80 @@ impl Compiler {
         }
     }
 
-    /// Pre-declare variables that are first introduced at the top level of a while
-    /// body, emitting `Nil` for each so they occupy a fixed stack slot before the
-    /// loop's condition is checked.  This prevents subsequent iterations from
-    /// pushing a new stack slot instead of updating the existing one.
+    /// Pre-declare variables that are first introduced in a while body (including
+    /// under `if` / nested `while` / `begin`), emitting `Nil` for each so they occupy
+    /// a fixed stack slot before the loop's condition is checked.  This prevents
+    /// subsequent iterations from pushing a new stack slot instead of updating the
+    /// existing one, and keeps inner locals from being allocated mid-loop (which
+    /// would shift slots and break nested control flow).
     fn hoist_while_locals(&mut self, body: &[Expr]) {
         if self.global_mode {
             return; // globals use SetGlobal, not stack slots
         }
-        let depth = self.states.len() - 1;
         for stmt in body {
-            match stmt {
-                Expr::Assign { name, .. }
-                    if self.resolve_local(depth, name).is_none()
-                        && !self.would_be_upvalue(depth, name) =>
-                {
-                    self.emit(OpCode::Nil);
-                    self.state_mut().locals.push(LocalInfo {
-                        name: name.clone(),
-                        captured: false,
-                    });
+            self.hoist_while_locals_in_stmt(stmt);
+        }
+    }
+
+    fn hoist_while_locals_maybe_declare(&mut self, name: &str) {
+        let depth = self.states.len() - 1;
+        if self.resolve_local(depth, name).is_none() && !self.would_be_upvalue(depth, name) {
+            self.emit(OpCode::Nil);
+            self.state_mut().locals.push(LocalInfo {
+                name: name.to_string(),
+                captured: false,
+            });
+        }
+    }
+
+    fn hoist_while_locals_in_stmt(&mut self, stmt: &Expr) {
+        match stmt {
+            Expr::Assign { name, .. } => {
+                self.hoist_while_locals_maybe_declare(name);
+            }
+            Expr::MultiAssign { names, .. } => {
+                for name in names {
+                    self.hoist_while_locals_maybe_declare(name);
                 }
-                Expr::MultiAssign { names, .. } => {
-                    for name in names {
-                        if self.resolve_local(depth, name).is_none()
-                            && !self.would_be_upvalue(depth, name)
-                        {
-                            self.emit(OpCode::Nil);
-                            self.state_mut().locals.push(LocalInfo {
-                                name: name.clone(),
-                                captured: false,
-                            });
-                        }
+            }
+            Expr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                for e in then_branch {
+                    self.hoist_while_locals_in_stmt(e);
+                }
+                if let Some(else_stmts) = else_branch {
+                    for e in else_stmts {
+                        self.hoist_while_locals_in_stmt(e);
                     }
                 }
-                _ => {}
             }
+            Expr::While { body, .. } => {
+                for e in body {
+                    self.hoist_while_locals_in_stmt(e);
+                }
+            }
+            Expr::Begin {
+                body,
+                rescue_body,
+                else_body,
+                ..
+            } => {
+                for e in body {
+                    self.hoist_while_locals_in_stmt(e);
+                }
+                for e in rescue_body {
+                    self.hoist_while_locals_in_stmt(e);
+                }
+                for e in else_body {
+                    self.hoist_while_locals_in_stmt(e);
+                }
+            }
+            // New scopes: do not hoist through closures or class bodies.
+            Expr::Lambda { .. } | Expr::Function { .. } | Expr::Class { .. } => {}
+            _ => {}
         }
     }
 
