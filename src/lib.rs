@@ -8,6 +8,7 @@ pub mod lexer;
 pub mod native_dispatch;
 pub mod native_env;
 pub mod native_file;
+pub mod native_float;
 pub mod native_math;
 pub mod native_list;
 pub mod native_map;

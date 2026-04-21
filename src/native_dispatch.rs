@@ -116,7 +116,7 @@ pub fn dispatch_native_method(
 ) -> Result<VmValue, VmError> {
     match recv {
         VmValue::Int(n) => dispatch_int_method(*n, name, args, line),
-        VmValue::Float(n) => dispatch_float_method(*n, name, args, line),
+        VmValue::Float(n) => crate::native_float::dispatch_float_method(*n, name, args, line),
         VmValue::Str(s) => crate::native_string::dispatch_str_method(heap, s, name, args, line),
         VmValue::Bool(b) => dispatch_bool_method(*b, name, args, line),
         VmValue::Nil => dispatch_nil_method(name, args, line),
@@ -158,25 +158,6 @@ fn dispatch_int_method(n: i64, name: &str, args: &[VmValue], line: u32) -> Resul
         ("to_f", []) => Ok(VmValue::Float(n as f64)),
         ("pow", [VmValue::Int(e)]) if *e >= 0 => Ok(VmValue::Int(n.pow(*e as u32))),
         _ => Err(type_err(&format!("Int has no method '{}'", name))),
-    }
-}
-
-fn dispatch_float_method(n: f64, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
-    match (name, args) {
-        ("to_s", []) => Ok(VmValue::Str(if n.fract() == 0.0 {
-            format!("{}.0", n as i64)
-        } else {
-            format!("{}", n)
-        })),
-        ("to_i", []) => Ok(VmValue::Int(n as i64)),
-        ("round", []) => Ok(VmValue::Int(n.round() as i64)),
-        ("floor", []) => Ok(VmValue::Int(n.floor() as i64)),
-        ("ceil", []) => Ok(VmValue::Int(n.ceil() as i64)),
-        ("sqrt", []) => Ok(VmValue::Float(n.sqrt())),
-        ("nan?", []) => Ok(VmValue::Bool(n.is_nan())),
-        ("infinite?", []) => Ok(VmValue::Bool(n.is_infinite())),
-        _ => Err(type_err(&format!("Float has no method '{}'", name))),
     }
 }
 
