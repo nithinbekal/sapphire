@@ -856,6 +856,18 @@ Greeter.hello()"#;
 }
 
 #[test]
+fn class_method_lexical_constant_without_self_prefix() {
+    let src = r#"class Math {
+  PI = 3
+  self {
+    def tau { PI * 2 }
+  }
+}
+Math.tau()"#;
+    assert_eq!(eval(src), VmValue::Int(6));
+}
+
+#[test]
 fn class_method_with_args_self_block() {
     let src = r#"class Math {
   self {
@@ -1878,6 +1890,44 @@ class Container {
 }
 Container.Child.new().kind()"#;
     assert_eq!(eval(src), VmValue::Str("base".into()));
+}
+
+#[test]
+fn lexical_class_constant_in_instance_method() {
+    let src = r#"class Outer {
+  C = 1
+  class Inner {
+    def m() { C }
+  }
+}
+Outer.Inner.new().m()"#;
+    assert_eq!(eval(src), VmValue::Int(1));
+}
+
+#[test]
+fn lexical_inner_class_constant_shadows_outer() {
+    let src = r#"class Outer {
+  C = 1
+  class Inner {
+    C = 2
+    def m() { C }
+  }
+}
+Outer.Inner.new().m()"#;
+    assert_eq!(eval(src), VmValue::Int(2));
+}
+
+#[test]
+fn lexical_class_constant_in_lambda_inside_method() {
+    let src = r#"class Math {
+  PI = 3
+  def m() {
+    f = def() { PI }
+    f.call()
+  }
+}
+Math.new().m()"#;
+    assert_eq!(eval(src), VmValue::Int(3));
 }
 
 #[test]

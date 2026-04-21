@@ -137,6 +137,10 @@ pub enum OpCode {
     SuperInvoke(usize, usize),
     /// Push `self` (slot 0) — emitted for `SelfExpr` inside methods.
     GetSelf,
+    /// Resolve a class constant by name using the lexically enclosing classes
+    /// recorded at compile time, then fall back to `GetGlobal` semantics.
+    /// Operand is `Constant::LexicalClassScope`.
+    GetLexicalConstant(usize),
 
     // Blocks
     /// Like `Call(n)` but also passes the block closure sitting one slot
@@ -233,6 +237,12 @@ pub enum Constant {
         /// Names of nested classes; matched 1-to-1 with class values pushed after instance methods.
         nested_class_names: Vec<String>,
     },
+    /// Enclosing class names from outer to inner for `GetLexicalConstant`; `name_idx` points at
+    /// a `Constant::Str` holding the constant name to resolve.
+    LexicalClassScope {
+        enclosing_classes: Vec<String>,
+        name_idx: usize,
+    },
 }
 
 impl std::fmt::Display for Constant {
@@ -253,6 +263,7 @@ impl std::fmt::Display for Constant {
                 ..
             } => write!(f, "<class {} extends (dynamic)>", name),
             Constant::ClassDesc { name, .. } => write!(f, "<class {}>", name),
+            Constant::LexicalClassScope { .. } => write!(f, "<lexical class scope>"),
         }
     }
 }
