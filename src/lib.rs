@@ -9,6 +9,7 @@ pub mod native_dispatch;
 pub mod native_env;
 pub mod native_file;
 pub mod native_math;
+pub mod native_list;
 pub mod native_process;
 pub mod native_set;
 pub mod native_string;
