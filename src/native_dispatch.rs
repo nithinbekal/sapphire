@@ -118,7 +118,7 @@ pub fn dispatch_native_method(
         VmValue::Int(n) => crate::native_int::dispatch_int_method(*n, name, args, line),
         VmValue::Float(n) => crate::native_float::dispatch_float_method(*n, name, args, line),
         VmValue::Str(s) => crate::native_string::dispatch_str_method(heap, s, name, args, line),
-        VmValue::Bool(b) => dispatch_bool_method(*b, name, args, line),
+        VmValue::Bool(b) => crate::native_bool::dispatch_bool_method(*b, name, args, line),
         VmValue::Nil => dispatch_nil_method(name, args, line),
         VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
@@ -146,15 +146,6 @@ pub fn try_native_method(
     match dispatch_native_method(heap, recv, name, args, line) {
         Err(VmError::TypeError { ref message, .. }) if message.contains("has no method") => None,
         result => Some(result),
-    }
-}
-
-fn dispatch_bool_method(b: bool, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
-    match (name, args) {
-        ("to_s", []) => Ok(VmValue::Str(b.to_string())),
-        ("nil?", []) => Ok(VmValue::Bool(false)),
-        _ => Err(type_err(&format!("Bool has no method '{}'", name))),
     }
 }
 

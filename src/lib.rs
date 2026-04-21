@@ -9,6 +9,7 @@ pub mod native_dispatch;
 pub mod native_env;
 pub mod native_file;
 pub mod native_float;
+pub mod native_bool;
 pub mod native_int;
 pub mod native_math;
 pub mod native_list;
