@@ -14,6 +14,7 @@ pub mod native_int;
 pub mod native_math;
 pub mod native_list;
 pub mod native_map;
+pub mod native_nil;
 pub mod native_process;
 pub mod native_range;
 pub mod native_set;
