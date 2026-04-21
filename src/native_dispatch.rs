@@ -116,16 +116,16 @@ pub fn dispatch_native_method(
 ) -> Result<VmValue, VmError> {
     match recv {
         VmValue::Int(n) => dispatch_int_method(*n, name, args, line),
-        VmValue::Float(n) => dispatch_float_method(*n, name, args, line),
+        VmValue::Float(n) => crate::native_float::dispatch_float_method(*n, name, args, line),
         VmValue::Str(s) => crate::native_string::dispatch_str_method(heap, s, name, args, line),
         VmValue::Bool(b) => dispatch_bool_method(*b, name, args, line),
         VmValue::Nil => dispatch_nil_method(name, args, line),
         VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
         VmValue::Set(r) => crate::native_set::dispatch_set_method(heap, *r, recv, name, args, line),
-        VmValue::Range { from, to } => {
-            dispatch_range_method(heap, *from, *to, recv, name, args, line)
-        }
+        VmValue::Range { from, to } => crate::native_range::dispatch_range_method(
+            heap, *from, *to, recv, name, args, line,
+        ),
         other => Err(VmError::TypeError {
             message: format!("'{}' has no method '{}'", other, name),
             line,
@@ -161,25 +161,6 @@ fn dispatch_int_method(n: i64, name: &str, args: &[VmValue], line: u32) -> Resul
     }
 }
 
-fn dispatch_float_method(n: f64, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
-    match (name, args) {
-        ("to_s", []) => Ok(VmValue::Str(if n.fract() == 0.0 {
-            format!("{}.0", n as i64)
-        } else {
-            format!("{}", n)
-        })),
-        ("to_i", []) => Ok(VmValue::Int(n as i64)),
-        ("round", []) => Ok(VmValue::Int(n.round() as i64)),
-        ("floor", []) => Ok(VmValue::Int(n.floor() as i64)),
-        ("ceil", []) => Ok(VmValue::Int(n.ceil() as i64)),
-        ("sqrt", []) => Ok(VmValue::Float(n.sqrt())),
-        ("nan?", []) => Ok(VmValue::Bool(n.is_nan())),
-        ("infinite?", []) => Ok(VmValue::Bool(n.is_infinite())),
-        _ => Err(type_err(&format!("Float has no method '{}'", name))),
-    }
-}
-
 fn dispatch_bool_method(b: bool, name: &str, args: &[VmValue], line: u32) -> Result<VmValue, VmError> {
     let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
     match (name, args) {
@@ -199,34 +180,3 @@ fn dispatch_nil_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValu
     }
 }
 
-fn dispatch_range_method(
-    heap: &mut GcHeap<HeapObject>,
-    from: i64,
-    to: i64,
-    recv: &VmValue,
-    name: &str,
-    args: &[VmValue],
-    line: u32,
-) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
-    match name {
-        "size" if args.is_empty() => Ok(VmValue::Int((to - from).max(0))),
-        "to_a" if args.is_empty() => {
-            let v: Vec<VmValue> = (from..to).map(VmValue::Int).collect();
-            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-        }
-        "include?" if args.len() == 1 => match &args[0] {
-            VmValue::Int(n) => Ok(VmValue::Bool(n >= &from && n < &to)),
-            _ => Err(type_err("include? expects an Int")),
-        },
-        "first" if args.is_empty() => Ok(VmValue::Int(from)),
-        "last" if args.is_empty() => Ok(VmValue::Int(to - 1)),
-        "min" if args.is_empty() => Ok(VmValue::Int(from)),
-        "max" if args.is_empty() => Ok(VmValue::Int(to - 1)),
-        "to_s" if args.is_empty() => Ok(VmValue::Str(format!("{}", recv))),
-        _ => Err(VmError::TypeError {
-            message: format!("Range has no method '{}'", name),
-            line,
-        }),
-    }
-}
