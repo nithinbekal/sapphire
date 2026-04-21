@@ -1,23 +1,20 @@
 # Adding a new stdlib class
 
-This guide walks through every step needed to add a new class to the Sapphire
-standard library, backed by native Rust dispatch. The `Process` and `Env`
-classes are the primary reference implementations.
+Native-backed stdlib work: a Sapphire stub, a `native_*` module, `pub mod` in `lib.rs`, wiring in `vm.rs` (and `native_dispatch.rs` for value types). References: `Process` / `Env` (normal class), `Socket` (side-table + `&mut self` on `Vm`), `Set` (heap value type).
+
+**Checklist:** stub → `dispatch_*` → `lib.rs` mod → `vm.rs` (`load_stdlib`, class dispatch, instance dispatch if needed) → tests → `./scripts/ci`.
 
 ---
 
-## 1. Write the Sapphire stub (`stdlib/src/foo.spr`)
+## 1. Sapphire stub (`stdlib/src/foo.spr`)
 
-The file declares the class so it is registered in the VM class table and
-exposed as a global. All method logic lives in Rust — the stub can be empty:
+Declares the class for the VM class table and global exposure. Method bodies live in Rust; the stub can be empty:
 
 ```sapphire
 class Foo { }
 ```
 
-If Rust will create instances of this class (i.e. the class has instance
-methods, not just class methods), declare the fields with `attr` so the
-field names are visible to the VM and match what Rust inserts:
+If Rust builds instances, declare fields with `attr` so names match the keys you insert in Rust when constructing `VmValue::Instance` (see §4b):
 
 ```sapphire
 class Foo {
@@ -26,12 +23,7 @@ class Foo {
 }
 ```
 
-The `attr` names must exactly match the `HashMap` keys your Rust code
-inserts when building the instance. See step 4b.
-
-Follow the doc-comment style used by `math.spr`: one-line description, a blank
-`#` line, then indented usage examples, then a final blank `#` line, with the
-`class` keyword immediately after (no blank line between):
+Doc-comment style (see `math.spr`): one-line summary, blank `#`, indented examples, blank `#`, then `class` on the next line (no blank line before `class`):
 
 ```sapphire
 # Foo provides access to the frobnication subsystem.
@@ -43,8 +35,7 @@ class Foo { }
 
 ### Nested classes
 
-Sapphire supports nested class definitions natively. Use them when a method
-returns a structured object rather than a primitive:
+Use when a method returns a structured object. The VM registers the **simple** name (`"Result"` for `Foo.Result`); use that name in Rust when building instances.
 
 ```sapphire
 class Foo {
@@ -57,15 +48,11 @@ class Foo {
 }
 ```
 
-Access the nested class as `Foo.Result`. The simple name (`"Result"`) is what
-the VM registers in `self.classes` and what you use in Rust when instantiating.
-
 ---
 
-## 2. Write the native dispatch module (`src/native_foo.rs`)
+## 2. Native dispatch (`src/native_foo.rs`)
 
-Match the signature of `dispatch_file_class_method` when all return values are
-primitives (`VmValue::Str`, `VmValue::Int`, `VmValue::Bool`, `VmValue::Nil`):
+For returns that are plain `VmValue` scalars only, mirror `dispatch_file_class_method`:
 
 ```rust
 use crate::vm::{VmError, VmValue};
@@ -85,11 +72,9 @@ pub fn dispatch_foo_class_method(
 }
 ```
 
-### Returning a List, Map, or Instance
+### List, Map, or Instance from class methods
 
-`VmValue::List` and `VmValue::Map` require GC heap allocation, which needs
-`&mut self` on the VM. The dispatch function cannot hold that reference, so
-return an intermediate enum and let `vm.rs` do the allocation:
+`VmValue::List` / `Map` need heap allocation (`&mut self` on the VM). The standalone dispatcher cannot hold that, so return an intermediate enum and map it in `vm.rs`:
 
 ```rust
 use std::collections::HashMap;
@@ -98,7 +83,6 @@ use crate::vm::{VmError, VmValue};
 pub enum FooResult {
     Primitive(VmValue),
     List(Vec<VmValue>),
-    /// Fields for a Foo.Result instance.
     Output { value: String, code: i64 },
 }
 
@@ -126,23 +110,23 @@ pub fn dispatch_foo_class_method(
 pub mod native_foo;
 ```
 
+Add every new `native_*` file here once; later sections assume this.
+
 ---
 
-## 4. Wire into the VM (`src/vm.rs`)
+## 4. Wire the VM (`src/vm.rs`)
 
-Two edits are required.
-
-### 4a. Add the source file to `load_stdlib`
+### 4a. `load_stdlib`
 
 ```rust
 ("stdlib/foo.spr", include_str!("../stdlib/src/foo.spr")),
 ```
 
-Place it near the other utility classes (after `file.spr`, before `math.spr`).
+Place with similar utility classes (e.g. after `file.spr`, before `math.spr`). Any new `stdlib/*.spr` uses the same `include_str!` pattern.
 
-### 4b. Add a dispatch branch in the class method chain
+### 4b. Class method branch
 
-Find the `} else if name == "File" {` branch and add a peer branch after it:
+Add a peer of the `} else if name == "File" {` branch:
 
 ```rust
 } else if name == "Foo" {
@@ -164,7 +148,7 @@ Find the `} else if name == "File" {` branch and add a peer branch after it:
         crate::native_foo::FooResult::Output { value, code } => {
             let methods = self
                 .classes
-                .get("Result")          // simple name of the nested class
+                .get("Result")
                 .map(|e| e.methods.clone())
                 .ok_or_else(|| VmError::TypeError {
                     message: "Foo.Result class not loaded".to_string(),
@@ -181,62 +165,17 @@ Find the `} else if name == "File" {` branch and add a peer branch after it:
     self.stack.push(result);
 ```
 
-**Key points:**
-- `self.alloc_list(v)` and `self.alloc_map(m)` are helpers already on `Vm`.
-- `self.alloc_fields(m)` allocates a `HeapObject::Fields` for an instance.
-- The `class_name` in `VmValue::Instance` must match the name the class was
-  compiled under — for a nested class `Foo { class Result { } }` that is
-  `"Result"`, not `"Foo.Result"`.
-- Field names in the `HashMap` must exactly match the `attr` names declared in
-  the `.spr` class body.
+`alloc_list` / `alloc_map` / `alloc_fields` are existing `Vm` helpers. Nested class: `class_name` is the simple name (`"Result"`), not `"Foo.Result"`. Field `HashMap` keys match the stub `attr` names.
 
-### 4c. Instance method dispatch (if the class returns instances)
+### 4c. Instance methods (optional)
 
-If your class creates `VmValue::Instance` values and those instances have
-methods, wire a second dispatch branch into the instance method section of
-`vm.rs`. Find the block that begins:
-
-```rust
-// For datetime types, try native dispatch first …
-let mut dt_handled = false;
-if matches!(dt_class.as_str(), "Instant" | …) {
-```
-
-Add a peer block immediately before the `if dt_handled {` line:
-
-```rust
-let mut foo_handled = false;
-if dt_class == "Foo" {
-    let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-    match crate::native_foo::dispatch_foo_instance_method(dt_fields, &method_name, &args, line) {
-        Ok(result) => {
-            self.stack.truncate(recv_slot);
-            self.stack.push(result);
-            foo_handled = true;
-        }
-        Err(VmError::Raised(val)) => {
-            self.stack.truncate(recv_slot);
-            self.raise_value(val)?;
-            continue;
-        }
-        Err(e) => return Err(e),
-    }
-}
-
-if foo_handled || dt_handled {
-    // already handled
-} else if let Some(method) = method_opt {
-```
-
-The dispatch function receives `dt_fields: GcRef` — read the instance's
-field map with `heap.get_fields(fields_ref)` (requires `&GcHeap` access).
+If instances expose methods, add a block before `if dt_handled` in the native instance path (search for the `Instant` / datetime comment). Pattern: copy args from the stack, call `dispatch_foo_instance_method`, handle `VmError::Raised`, set a `*_handled` flag, join `foo_handled || dt_handled`. The dispatcher receives `GcRef` to fields — use `heap.get_fields(fields_ref)`.
 
 ---
 
-## 5. Write tests
+## 5. Tests
 
-**Sapphire tests** (`stdlib/tests/foo_test.spr`) are the default for classes
-whose behaviour can be exercised from Sapphire:
+**Sapphire** (`stdlib/tests/foo_test.spr`) when behaviour is easy to express in Sapphire:
 
 ```sapphire
 class FooTest < Test {
@@ -248,24 +187,7 @@ class FooTest < Test {
 }
 ```
 
-**Rust integration tests** (`tests/stdlib/foo.rs`) are preferable when the
-class wraps I/O or OS resources (sockets, file descriptors, subprocesses)
-where a Sapphire-level test would need live external access. Spin up a
-controlled environment (loopback server, temp file, etc.) in a thread, then
-call `eval` with the port/path injected via `format!`:
-
-```rust
-#[test]
-fn foo_does_thing() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || { /* serve one request */ });
-    let src = format!(r#"Foo.connect("127.0.0.1", {port}).read_all()"#);
-    assert_eq!(eval(&src), VmValue::Str("response".into()));
-}
-```
-
-Wire the file into `tests/stdlib.rs`:
+**Rust** (`tests/stdlib/foo.rs`) when wrapping I/O or OS resources; inject ports/paths with `format!` and `eval`. Register in `tests/stdlib.rs`:
 
 ```rust
 #[path = "stdlib/foo.rs"]
@@ -284,35 +206,13 @@ All four checks (cargo test, clippy, sapphire test, examples) must pass.
 
 ---
 
-## Classes that wrap OS resources (sockets, file handles, processes)
+## OS resource wrappers (sockets, processes, …)
 
-Some classes can't store their state as `VmValue` fields because the
-underlying Rust type (e.g. `TcpStream`, `Child`) isn't serialisable as a
-`VmValue`. The `Socket` class is the reference implementation.
+When state cannot live as `VmValue` fields (`TcpStream`, `Child`, …), use a **side table**: `HashMap<i64, Resource>` + monotonic id on `Vm`; instances store the id (e.g. `fd`). See `Socket`.
 
-### The side-table pattern
+Standalone `native_foo.rs` functions are insufficient when dispatch must read `self.classes` / `self.heap` and mutate allocation or the map — the borrow checker blocks that. Use private `impl Vm` methods (`dispatch_foo_class`, `dispatch_foo_instance`) and call them from the same class/instance sites as §4b / §4c.
 
-Keep a `HashMap<i64, Resource>` on the `Vm` struct alongside a monotonic
-integer counter. Each instance stores only the integer key in an `fd` field;
-native dispatch looks up the real resource by that key.
-
-**`src/vm.rs` — add to `Vm` struct:**
-
-```rust
-sockets: HashMap<i64, std::io::BufReader<std::net::TcpStream>>,
-next_socket_id: i64,
-```
-
-Initialise both in `Vm::new` and `Vm::new_repl`.
-
-### Why dispatch must be `&mut self` methods on `Vm`
-
-A standalone function in `native_foo.rs` can't be used when the dispatch
-needs to both read VM state (`self.classes`, `self.heap`) and mutate it
-(`self.alloc_fields`, `self.sockets`). The Rust borrow checker disallows
-holding a shared reference to one field while calling a `&mut self` method.
-
-The solution is to make the dispatch logic a private `impl Vm` method:
+**Borrowing:** clone field map first: `let fields = self.heap.get_fields(r).clone()` before `self.foos.get_mut(&fd)` so the heap borrow does not overlap the map borrow.
 
 ```rust
 fn dispatch_foo_class(&mut self, method: &str, args: &[VmValue], line: u32)
@@ -341,7 +241,6 @@ fn dispatch_foo_class(&mut self, method: &str, args: &[VmValue], line: u32)
 fn dispatch_foo_instance(&mut self, fields_ref: GcRef, method: &str, args: &[VmValue], line: u32)
     -> Result<VmValue, VmError>
 {
-    // Clone fields first to drop the immutable borrow before touching self.foos.
     let fields = self.heap.get_fields(fields_ref).clone();
     let fd = match fields.get("fd") {
         Some(VmValue::Int(n)) => *n,
@@ -351,79 +250,39 @@ fn dispatch_foo_instance(&mut self, fields_ref: GcRef, method: &str, args: &[VmV
         .ok_or_else(|| VmError::Raised(VmValue::Str(format!("fd {} is closed", fd))))?;
     match method {
         "close" => { self.foos.remove(&fd); Ok(VmValue::Nil) }
-        // … other arms call free functions in native_foo.rs …
         _ => Err(VmError::TypeError { message: format!("Foo has no method '{}'", method), line }),
     }
 }
 ```
 
-**Key constraint:** call `self.heap.get_fields(r).clone()` to extract the fd
-*before* calling `self.foos.get_mut(…)`. The clone ends the immutable borrow
-on `self.heap`, allowing the subsequent mutable borrow of `self.foos`.
-
-Wire the `&mut self` class method into the class dispatch chain (step 4b) and
-the instance method into the instance dispatch section (step 4c), passing
-`self.dispatch_foo_class(…)` and `self.dispatch_foo_instance(…)` respectively.
-
 ---
 
-## Adding a value type
+## Heap-backed value types (`List` / `Map` / `Set` style)
 
-Use this section when you want to add a first-class collection or value type —
-one backed by `GcRef` rather than an `Instance` — like `List`, `Map`, or `Set`.
-The `Set` type is the primary reference implementation.
+For a first-class type backed by `GcRef` (not `Instance`), `Set` is the reference. Mirror how `List` / `Map` are threaded through the VM; the snippets below use `Set` as the running example.
 
-### Step 1 — `HeapObject` variant (`src/vm.rs`)
-
-Add the variant after the existing collection variants:
+### `HeapObject`, `VmValue`, tracing, formatting
 
 ```rust
-pub enum HeapObject {
-    List(Vec<VmValue>),
-    Map(HashMap<String, VmValue>),
-    Set(Vec<VmValue>),    // ← example
-    Fields(HashMap<String, VmValue>),
-}
-```
+// HeapObject — add next to List/Map
+Set(Vec<VmValue>),
 
-Update the `Trace` impl inside `HeapObject::trace`:
-
-```rust
+// HeapObject::trace
 HeapObject::Set(v) => v.iter().for_each(|val| collect_refs(val, out)),
-```
 
-Update `collect_refs()` — add the new variant alongside the other `GcRef` carriers:
-
-```rust
+// collect_refs on VmValue
 VmValue::List(r) | VmValue::Map(r) | VmValue::Set(r) => out.push(*r),
-```
 
-### Step 2 — `VmValue` variant (`src/vm.rs`)
+// VmValue
+Set(GcRef),
 
-Add the variant after the existing collection variants:
-
-```rust
-pub enum VmValue {
-    // … existing variants …
-    Set(GcRef),
-}
-```
-
-Add an arm to `PartialEq`:
-
-```rust
+// PartialEq
 (VmValue::Set(a), VmValue::Set(b)) => a == b,
-```
 
-Add an arm to `fmt::Display` (short fallback used in error messages):
-
-```rust
+// fmt::Display
 VmValue::Set(_) => write!(f, "<set>"),
-```
 
-Add an arm to `format_value_with_heap()` (used by `to_s` and the REPL):
-
-```rust
+// format_value_with_heap — follow List formatting; join elements with ", "
 VmValue::Set(r) => {
     let parts: Vec<String> = heap
         .get_set(*r)
@@ -434,9 +293,7 @@ VmValue::Set(r) => {
 }
 ```
 
-### Step 3 — `GcHeap` accessors and `alloc_*` helper (`src/vm.rs`)
-
-Add immutable and mutable accessors on `GcHeap<HeapObject>`:
+### `GcHeap` accessors and `alloc_set`
 
 ```rust
 pub fn get_set(&self, r: GcRef) -> &Vec<VmValue> {
@@ -451,21 +308,14 @@ pub fn get_set_mut(&mut self, r: GcRef) -> &mut Vec<VmValue> {
         _ => panic!("GcRef is not a Set"),
     }
 }
-```
 
-Add a private `alloc_set` helper on `Vm` (alongside `alloc_list`, `alloc_map`):
-
-```rust
 fn alloc_set(&mut self, v: Vec<VmValue>) -> VmValue {
     self.maybe_gc();
     VmValue::Set(self.heap.alloc(HeapObject::Set(v)))
 }
 ```
 
-### Step 4 — Native dispatch module (`src/native_set.rs`)
-
-Create `src/native_set.rs`. It receives a shared `&mut GcHeap<HeapObject>` so it
-can allocate new values while reading existing ones:
+### Native module (`src/native_set.rs`)
 
 ```rust
 use crate::gc::{GcHeap, GcRef};
@@ -481,7 +331,6 @@ pub fn dispatch_set_method(
 ) -> Result<VmValue, VmError> {
     match name {
         "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_set(r).len() as i64)),
-        // … more arms …
         _ => Err(VmError::TypeError {
             message: format!("Set has no method '{}'", name),
             line,
@@ -490,63 +339,23 @@ pub fn dispatch_set_method(
 }
 ```
 
-Register the module in `src/lib.rs`:
+Register with `pub mod native_set;` in `lib.rs` (§3).
+
+### `native_dispatch.rs`
 
 ```rust
-pub mod native_set;
-```
-
-### Step 5 — Wire into `native_dispatch.rs` (`src/native_dispatch.rs`)
-
-Three additions:
-
-```rust
-// primitive_class_name()
-VmValue::Set(_) => Some("Set"),
-
-// value_type_name()
-VmValue::Set(_) => "Set",
-
-// dispatch_native_method() match arm
+VmValue::Set(_) => Some("Set"),           // primitive_class_name
+VmValue::Set(_) => "Set",                // value_type_name
 VmValue::Set(r) => crate::native_set::dispatch_set_method(heap, *r, recv, name, args, line),
 ```
 
-### Step 6 — Block method dispatch (`src/vm.rs`)
+### Block methods
 
-Add an arm inside `dispatch_native_block_method` before the `other =>` catch-all:
+Add an arm in `dispatch_native_block_method` before the catch-all (copy the shape of `Set` / `each` in `vm.rs`).
 
-```rust
-VmValue::Set(r) => {
-    let r = *r;
-    match name {
-        "each" => {
-            let items: Vec<VmValue> = self.heap.get_set(r).clone();
-            for item in items {
-                match self.call_block(&blk, vec![item]) {
-                    Err(VmError::Next(_)) => continue,
-                    Err(VmError::Break(v)) => return Ok(v),
-                    Err(e) => return Err(e),
-                    Ok(_) => {}
-                }
-            }
-            Ok(recv.clone())
-        }
-        _ => Err(VmError::TypeError {
-            message: format!("Set has no block method '{}'", name),
-            line,
-        }),
-    }
-}
-```
+### `OpCode::NewInstance`
 
-### Step 7 — Intercept `OpCode::NewInstance` (`src/vm.rs`)
-
-> **Important:** `Foo.new(args)` compiles to `OpCode::NewInstance`, not
-> `Invoke("new", …)`. The class-method dispatch chain is never reached for
-> `new`. See the `Foo.new(args)` bullet in CLAUDE.md for details.
-
-Add a guard at the **top** of the `OpCode::NewInstance` handler, before the
-normal instance-creation path:
+`Foo.new(args)` hits `NewInstance`, not class-method dispatch. Guard at the **top** of that handler before normal construction. See `Foo.new` in `CLAUDE.md`.
 
 ```rust
 if class_name == "Set" {
@@ -566,13 +375,11 @@ if class_name == "Set" {
 }
 ```
 
-The `dedup_list` helper (a free function in `native_set.rs`) deduplicates items
-using linear `contains()` — `VmValue` implements `PartialEq` but not `Hash`.
+`dedup_list` can live in `native_set.rs` (`VmValue: PartialEq` but not `Hash`).
 
-### Step 8 — Sapphire stub and stdlib registration
+### Stub and `load_stdlib`
 
-For higher-order methods (those that take blocks), write them in Sapphire and
-rely on the `each` block method you wired in Step 6:
+Higher-order methods can live in Sapphire on top of a wired `each` block method:
 
 ```sapphire
 class Set {
@@ -581,20 +388,11 @@ class Set {
     each { |x| result.append(yield(x)) }
     result
   }
-  # select, reject, any?, all?, none?, each_with_index follow the same pattern
 }
 ```
 
-Register the file in `vm.load_stdlib()`:
+Register the file in `load_stdlib` (§4a).
 
-```rust
-("stdlib/set.spr", include_str!("../stdlib/src/set.spr")),
-```
+### Tests
 
-### Step 9 — Tests
-
-Create `stdlib/tests/set_test.spr` extending `Test`. Cover: construction
-(empty, from list, deduplication), membership (`include?`), mutation (`add`,
-`delete`), set algebra (`union`, `intersection`, `difference`, `subset?`,
-`superset?`, `disjoint?`), conversion (`to_a`, `to_s`), `each`, and all
-higher-order methods from the Sapphire stub.
+`stdlib/tests/set_test.spr`: construction, membership, mutation, set algebra, `to_a` / `to_s`, `each`, and higher-order helpers from the stub.
