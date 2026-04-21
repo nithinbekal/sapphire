@@ -355,7 +355,7 @@ Add an arm in `dispatch_native_block_method` before the catch-all (copy the shap
 
 ### `OpCode::NewInstance`
 
-`Foo.new(args)` hits `NewInstance`, not class-method dispatch. Guard at the **top** of that handler before normal construction. See `Foo.new` in `CLAUDE.md`.
+`Foo.new(args)` hits `NewInstance`, not class-method dispatch. Guard at the **top** of that handler before normal construction. See `Foo.new` in `AGENT.md`.
 
 ```rust
 if class_name == "Set" {
