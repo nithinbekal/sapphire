@@ -1,5 +1,5 @@
 use crate::gc::{GcHeap, GcRef};
-use crate::native_dispatch::vm_value_partial_cmp;
+use crate::native::vm_value_partial_cmp;
 use crate::vm::{format_value_with_heap, HeapObject, VmError, VmValue};
 
 const METHOD_ARITIES: &[(&str, usize)] = &[

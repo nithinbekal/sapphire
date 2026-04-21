@@ -1,6 +1,6 @@
 # Adding a new stdlib class
 
-Native-backed stdlib work: a Sapphire stub, a `native_*` module, `pub mod` in `lib.rs`, wiring in `vm.rs` (and `native_dispatch.rs` for value types). References: `Process` / `Env` (normal class), `Socket` (side-table + `&mut self` on `Vm`), `Set` (heap value type).
+Native-backed stdlib work: a Sapphire stub, a `native_*` module, `pub mod` in `lib.rs`, wiring in `vm.rs` (and `native.rs` for value types). References: `Process` / `Env` (normal class), `Socket` (side-table + `&mut self` on `Vm`), `Set` (heap value type).
 
 **Checklist:** stub → `dispatch_*` → `lib.rs` mod → `vm.rs` (`load_stdlib`, class dispatch, instance dispatch if needed) → tests → `./scripts/ci`.
 
@@ -341,7 +341,7 @@ pub fn dispatch_set_method(
 
 Register with `pub mod native_set;` in `lib.rs` (§3).
 
-### `native_dispatch.rs`
+### `native.rs`
 
 ```rust
 VmValue::Set(_) => Some("Set"),           // primitive_class_name

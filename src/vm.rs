@@ -1,6 +1,6 @@
 use crate::chunk::{Constant, Function, OpCode};
 use crate::gc::{GcHeap, GcRef, Trace};
-use crate::native_dispatch::{
+use crate::native::{
     is_falsy, numeric_binop, numeric_cmp, primitive_class_name, try_native_method,
     value_type_name, vm_value_partial_cmp,
 };
