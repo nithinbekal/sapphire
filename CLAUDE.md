@@ -57,6 +57,7 @@ Key files:
 - `src/compiler.rs` — Compiles AST to bytecode; `compile()` for scripts, `compile_repl()` for REPL
 - `src/chunk.rs` — `Chunk` (bytecode + constants), `OpCode` enum, `Function`, `UpvalueDef`
 - `src/vm.rs` — Stack-based bytecode VM (`Vm::run`); defines `VmValue` (the runtime value type)
+- `src/native_dispatch.rs` — Native method implementations for all primitive types (`Int`, `Float`, `String`, `Bool`, `Nil`, `List`, `Map`, `Range`); first place to look when adding methods to an existing type
 - `src/value.rs` — `Value` enum: primitive constants only (`Int`, `Float`, `Bool`, `Str`, `Nil`) used in the compiler/chunk layer
 - `src/typechecker.rs` — Optional static type checker (two-pass: collect definitions, then check bodies); invoked only by `typecheck` subcommand
 - `src/error.rs` — Error types
@@ -70,7 +71,7 @@ Key files:
 - Callables: `Closure`, `NativeFunction`, `NativeMethod`, `Block`
 - OOP: `Class { name, fields, methods, class_methods, namespace, superclass }`, `Instance { class_name, fields, methods }`, `BoundMethod`
 
-`Instance` stores `fields` in a `Rc<RefCell<HashMap>>` and `methods` in a plain `HashMap`. `Class` stores instance methods, class methods (from `self { }` blocks), and nested classes (in `namespace`).
+`Instance` stores `fields` as a `GcRef` (a GC-managed heap reference; read via `self.heap.get_fields(r)`) and `methods` in an `Rc<HashMap>`. `Class` stores instance methods, class methods (from `self { }` blocks), and nested classes (in `namespace`).
 
 `value.rs` is a separate, simpler `Value` enum used only for compile-time constants embedded in `Chunk`.
 
