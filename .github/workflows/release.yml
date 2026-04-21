@@ -46,40 +46,9 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
 
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-
-      - name: Generate checksums
-        run: sha256sum sapphire-* > checksums.txt
-
-      - name: Extract changelog section
-        run: |
-          awk "/^## ${GITHUB_REF_NAME}/{found=1; next} found && /^## /{exit} found" CHANGELOG.md | sed '/^---$/d' > release_notes.txt
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            sapphire-*
-            checksums.txt
-          body_path: release_notes.txt
-
   build-wasm:
     name: Build WASM
-    needs: release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -103,9 +72,40 @@ jobs:
             --features wasm \
             --no-default-features
 
-      - name: Upload WASM to release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-dist
+          path: |
+            wasm-dist/sapphire_bg.wasm
+            wasm-dist/sapphire.js
+
+  release:
+    name: Create Release
+    needs: [build, build-wasm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: sha256sum sapphire-* > checksums.txt
+
+      - name: Extract changelog section
+        run: |
+          awk "/^## ${GITHUB_REF_NAME}/{found=1; next} found && /^## /{exit} found" CHANGELOG.md | sed '/^---$/d' > release_notes.txt
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            sapphire-*
             wasm-dist/sapphire_bg.wasm
             wasm-dist/sapphire.js
+            checksums.txt
+          body_path: release_notes.txt
