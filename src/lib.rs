@@ -5,7 +5,7 @@ pub mod datetime;
 pub mod error;
 pub mod gc;
 pub mod lexer;
-pub mod native_dispatch;
+pub mod native;
 pub mod native_env;
 pub mod native_file;
 pub mod native_float;

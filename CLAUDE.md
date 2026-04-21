@@ -57,7 +57,7 @@ Key files:
 - `src/compiler.rs` — Compiles AST to bytecode; `compile()` for scripts, `compile_repl()` for REPL
 - `src/chunk.rs` — `Chunk` (bytecode + constants), `OpCode` enum, `Function`, `UpvalueDef`
 - `src/vm.rs` — Stack-based bytecode VM (`Vm::run`); defines `VmValue` (the runtime value type)
-- `src/native_dispatch.rs` — Native method implementations for all primitive types (`Int`, `Float`, `String`, `Bool`, `Nil`, `List`, `Map`, `Range`); first place to look when adding methods to an existing type
+- `src/native.rs` — Routes native method calls to per-type `native_*` modules and holds shared value helpers; add methods in the appropriate `native_*` file and wire here if needed
 - `src/value.rs` — `Value` enum: primitive constants only (`Int`, `Float`, `Bool`, `Str`, `Nil`) used in the compiler/chunk layer
 - `src/typechecker.rs` — Optional static type checker (two-pass: collect definitions, then check bodies); invoked only by `typecheck` subcommand
 - `src/error.rs` — Error types
