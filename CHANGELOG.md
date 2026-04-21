@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.2
+
+**CI**
+
+- Reverted parallel WASM build — the native and WASM release jobs now run sequentially again
+
+---
+
 ## v0.5.1
 
 This is a version bump to verify the release pipeline.
