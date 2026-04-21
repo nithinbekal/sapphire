@@ -1,5 +1,5 @@
-use crate::gc::{GcHeap, GcRef};
-use crate::vm::{format_value_with_heap, HeapObject, VmError, VmValue};
+use crate::gc::GcHeap;
+use crate::vm::{HeapObject, VmError, VmValue};
 use std::cmp::Ordering;
 
 // ── Public utilities used throughout the VM ───────────────────────────────────
@@ -121,7 +121,7 @@ pub fn dispatch_native_method(
         VmValue::Bool(b) => dispatch_bool_method(*b, name, args, line),
         VmValue::Nil => dispatch_nil_method(name, args, line),
         VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
-        VmValue::Map(r) => dispatch_map_method(heap, *r, recv, name, args, line),
+        VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
         VmValue::Set(r) => crate::native_set::dispatch_set_method(heap, *r, recv, name, args, line),
         VmValue::Range { from, to } => {
             dispatch_range_method(heap, *from, *to, recv, name, args, line)
@@ -196,72 +196,6 @@ fn dispatch_nil_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValu
         ("nil?", []) => Ok(VmValue::Bool(true)),
         ("inspect", []) => Ok(VmValue::Str("nil".to_string())),
         _ => Err(type_err(&format!("Nil has no method '{}'", name))),
-    }
-}
-
-fn dispatch_map_method(
-    heap: &mut GcHeap<HeapObject>,
-    r: GcRef,
-    recv: &VmValue,
-    name: &str,
-    args: &[VmValue],
-    line: u32,
-) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
-    match name {
-        "size" if args.is_empty() => Ok(VmValue::Int(heap.get_map(r).len() as i64)),
-        "empty?" if args.is_empty() => Ok(VmValue::Bool(heap.get_map(r).is_empty())),
-        "keys" if args.is_empty() => {
-            let mut keys: Vec<VmValue> = heap
-                .get_map(r)
-                .keys()
-                .map(|k| VmValue::Str(k.clone()))
-                .collect();
-            keys.sort_by(vm_value_partial_cmp);
-            Ok(VmValue::List(heap.alloc(HeapObject::List(keys))))
-        }
-        "values" if args.is_empty() => {
-            let mut pairs: Vec<(String, VmValue)> = heap
-                .get_map(r)
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
-            let vals: Vec<VmValue> = pairs.into_iter().map(|(_, v)| v).collect();
-            Ok(VmValue::List(heap.alloc(HeapObject::List(vals))))
-        }
-        "has_key?" if args.len() == 1 => match &args[0] {
-            VmValue::Str(k) => Ok(VmValue::Bool(heap.get_map(r).contains_key(k.as_str()))),
-            _ => Err(type_err("has_key? expects a String")),
-        },
-        "get" if args.len() == 1 => match &args[0] {
-            VmValue::Str(k) => Ok(heap.get_map(r).get(k.as_str()).cloned().unwrap_or(VmValue::Nil)),
-            _ => Err(type_err("get expects a String key")),
-        },
-        "set" if args.len() == 2 => match &args[0] {
-            VmValue::Str(k) => {
-                let (k, v) = (k.clone(), args[1].clone());
-                heap.get_map_mut(r).insert(k, v);
-                Ok(args[1].clone())
-            }
-            _ => Err(type_err("set expects a String key")),
-        },
-        "delete" if args.len() == 1 => match &args[0] {
-            VmValue::Str(k) => Ok(heap.get_map_mut(r).remove(k.as_str()).unwrap_or(VmValue::Nil)),
-            _ => Err(type_err("delete expects a String key")),
-        },
-        "merge" if args.len() == 1 => match &args[0] {
-            VmValue::Map(other_r) => {
-                let mut new_map = heap.get_map(r).clone();
-                for (k, v) in heap.get_map(*other_r).iter() {
-                    new_map.insert(k.clone(), v.clone());
-                }
-                Ok(VmValue::Map(heap.alloc(HeapObject::Map(new_map))))
-            }
-            _ => Err(type_err("merge expects a Map")),
-        },
-        "to_s" if args.is_empty() => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
-        _ => Err(type_err(&format!("Map has no method '{}'", name))),
     }
 }
 
