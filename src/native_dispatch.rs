@@ -120,7 +120,7 @@ pub fn dispatch_native_method(
         VmValue::Str(s) => crate::native_string::dispatch_str_method(heap, s, name, args, line),
         VmValue::Bool(b) => dispatch_bool_method(*b, name, args, line),
         VmValue::Nil => dispatch_nil_method(name, args, line),
-        VmValue::List(r) => dispatch_list_method(heap, *r, recv, name, args, line),
+        VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => dispatch_map_method(heap, *r, recv, name, args, line),
         VmValue::Set(r) => crate::native_set::dispatch_set_method(heap, *r, recv, name, args, line),
         VmValue::Range { from, to } => {
@@ -196,123 +196,6 @@ fn dispatch_nil_method(name: &str, args: &[VmValue], line: u32) -> Result<VmValu
         ("nil?", []) => Ok(VmValue::Bool(true)),
         ("inspect", []) => Ok(VmValue::Str("nil".to_string())),
         _ => Err(type_err(&format!("Nil has no method '{}'", name))),
-    }
-}
-
-fn dispatch_list_method(
-    heap: &mut GcHeap<HeapObject>,
-    r: GcRef,
-    recv: &VmValue,
-    name: &str,
-    args: &[VmValue],
-    line: u32,
-) -> Result<VmValue, VmError> {
-    let type_err = |msg: &str| VmError::TypeError { message: msg.to_string(), line };
-    match name {
-        "size" if args.is_empty() => Ok(VmValue::Int(heap.get_list(r).len() as i64)),
-        "empty?" if args.is_empty() => Ok(VmValue::Bool(heap.get_list(r).is_empty())),
-        "first" if args.is_empty() => Ok(heap.get_list(r).first().cloned().unwrap_or(VmValue::Nil)),
-        "last" if args.is_empty() => Ok(heap.get_list(r).last().cloned().unwrap_or(VmValue::Nil)),
-        "pop" if args.is_empty() => Ok(heap.get_list_mut(r).pop().unwrap_or(VmValue::Nil)),
-        "reverse" if args.is_empty() => {
-            let v: Vec<VmValue> = heap.get_list(r).iter().cloned().rev().collect();
-            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-        }
-        "sort" if args.is_empty() => {
-            let mut v: Vec<VmValue> = heap.get_list(r).clone();
-            v.sort_by(vm_value_partial_cmp);
-            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-        }
-        "include?" if args.len() == 1 => Ok(VmValue::Bool(heap.get_list(r).contains(&args[0]))),
-        "append" if args.len() == 1 => {
-            heap.get_list_mut(r).push(args[0].clone());
-            Ok(recv.clone())
-        }
-        "prepend" if args.len() == 1 => {
-            heap.get_list_mut(r).insert(0, args[0].clone());
-            Ok(recv.clone())
-        }
-        "concat" if args.len() == 1 => match &args[0] {
-            VmValue::List(other_r) => {
-                let other_items: Vec<VmValue> = heap.get_list(*other_r).clone();
-                heap.get_list_mut(r).extend(other_items);
-                Ok(recv.clone())
-            }
-            _ => Err(type_err("concat expects a List")),
-        },
-        "join" => {
-            let sep = match args.first() {
-                Some(VmValue::Str(s)) => s.clone(),
-                None => String::new(),
-                _ => return Err(type_err("join expects a String")),
-            };
-            let s = heap
-                .get_list(r)
-                .iter()
-                .map(|v| format_value_with_heap(heap, v))
-                .collect::<Vec<_>>()
-                .join(&sep);
-            Ok(VmValue::Str(s))
-        }
-        "flatten" if args.is_empty() => {
-            fn flatten_list(heap: &GcHeap<HeapObject>, v: &VmValue) -> Vec<VmValue> {
-                match v {
-                    VmValue::List(inner) => heap
-                        .get_list(*inner)
-                        .iter()
-                        .flat_map(|el| flatten_list(heap, el))
-                        .collect(),
-                    other => vec![other.clone()],
-                }
-            }
-            let v: Vec<VmValue> = heap
-                .get_list(r)
-                .iter()
-                .flat_map(|el| flatten_list(heap, el))
-                .collect();
-            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-        }
-        "uniq" if args.is_empty() => {
-            let mut seen = Vec::new();
-            for item in heap.get_list(r).iter() {
-                if !seen.contains(item) {
-                    seen.push(item.clone());
-                }
-            }
-            Ok(VmValue::List(heap.alloc(HeapObject::List(seen))))
-        }
-        "min" if args.is_empty() => {
-            let v = heap.get_list(r);
-            if v.is_empty() {
-                return Ok(VmValue::Nil);
-            }
-            Ok(v.iter().min_by(|a, b| vm_value_partial_cmp(a, b)).cloned().unwrap())
-        }
-        "max" if args.is_empty() => {
-            let v = heap.get_list(r);
-            if v.is_empty() {
-                return Ok(VmValue::Nil);
-            }
-            Ok(v.iter().max_by(|a, b| vm_value_partial_cmp(a, b)).cloned().unwrap())
-        }
-        "sum" if args.is_empty() => {
-            let items: Vec<VmValue> = heap.get_list(r).clone();
-            let mut acc = VmValue::Int(0);
-            for item in items.iter() {
-                acc = match (&acc, item) {
-                    (VmValue::Int(a), VmValue::Int(b)) => VmValue::Int(a + b),
-                    (VmValue::Float(a), VmValue::Float(b)) => VmValue::Float(a + b),
-                    (VmValue::Int(a), VmValue::Float(b)) => VmValue::Float(*a as f64 + b),
-                    (VmValue::Float(a), VmValue::Int(b)) => VmValue::Float(a + *b as f64),
-                    _ => return Err(type_err("sum: non-numeric element")),
-                };
-            }
-            Ok(acc)
-        }
-        "any?" if args.is_empty() => Err(type_err("any? requires a block")),
-        "all?" if args.is_empty() => Err(type_err("all? requires a block")),
-        "to_s" if args.is_empty() => Ok(VmValue::Str(format_value_with_heap(heap, recv))),
-        _ => Err(type_err(&format!("List has no method '{}'", name))),
     }
 }
 
