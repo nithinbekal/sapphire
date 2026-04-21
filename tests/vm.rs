@@ -856,6 +856,19 @@ Greeter.hello()"#;
 }
 
 #[test]
+fn class_method_implicit_self_for_constants_and_methods() {
+    let src = r#"class Math {
+  PI = 3.141592653589793
+  self {
+    def tau { PI * 2 }
+    def double_tau { tau() * 2 }
+  }
+}
+Math.double_tau() == Math.tau() * 2"#;
+    assert_eq!(eval(src), VmValue::Bool(true));
+}
+
+#[test]
 fn class_method_with_args_self_block() {
     let src = r#"class Math {
   self {

@@ -50,6 +50,8 @@ struct FunctionState {
     /// Stack of active while-loop contexts, innermost last.
     loop_stack: Vec<LoopCtx>,
     return_type: Option<String>,
+    /// `self` in slot 0 refers to the class object (class method body).
+    implicit_self_is_class_receiver: bool,
 }
 
 impl FunctionState {
@@ -63,6 +65,7 @@ impl FunctionState {
             arity,
             loop_stack: Vec::new(),
             return_type: None,
+            implicit_self_is_class_receiver: false,
         }
     }
 }
@@ -453,6 +456,13 @@ impl Compiler {
                     self.emit(OpCode::GetLocal(slot));
                 } else if let Some(idx) = self.resolve_upvalue(depth, name) {
                     self.emit(OpCode::GetUpvalue(idx));
+                } else if self.implicit_class_self_dispatch(name) {
+                    self.emit(OpCode::GetSelf);
+                    let idx = self
+                        .state_mut()
+                        .chunk
+                        .add_constant(Constant::Str(name.clone()));
+                    self.emit(OpCode::Invoke(idx, 0));
                 } else if self.global_mode
                     || self.has_imports
                     || name.starts_with(|c: char| c.is_uppercase())
@@ -547,7 +557,9 @@ impl Compiler {
                     let is_unresolved = self.resolve_local(depth, name).is_none()
                         && self.resolve_upvalue(depth, name).is_none();
                     let self_in_scope = self.resolve_local(depth, "self").is_some();
-                    if is_unresolved && self_in_scope {
+                    let implicit_instance = is_unresolved && self_in_scope && !self.state().implicit_self_is_class_receiver;
+                    let implicit_class = is_unresolved && self.implicit_class_self_dispatch(name);
+                    if implicit_instance || implicit_class {
                         self.emit(OpCode::GetSelf);
                         let arg_count = args.len();
                         for arg in args {
@@ -749,6 +761,9 @@ impl Compiler {
                 let arity = params.len();
 
                 self.push_fn(name, arity, line);
+                let parent_idx = self.states.len() - 2;
+                self.state_mut().implicit_self_is_class_receiver =
+                    self.states[parent_idx].implicit_self_is_class_receiver;
                 self.state_mut().return_type = type_expr_name(return_type.as_ref());
                 // Slot 0 = the function itself — enables direct recursion by name.
                 self.state_mut().locals.push(LocalInfo {
@@ -823,6 +838,9 @@ impl Compiler {
                 let line = self.state().current_line;
                 let arity = params.len();
                 self.push_fn("<lambda>", arity, line);
+                let parent_idx = self.states.len() - 2;
+                let inherit_implicit_class = self.states[parent_idx].implicit_self_is_class_receiver;
+                self.state_mut().implicit_self_is_class_receiver = inherit_implicit_class;
                 // Slot 0 = the closure itself (mirrors named-function convention).
                 self.state_mut().locals.push(LocalInfo {
                     name: "<lambda>".to_string(),
@@ -888,6 +906,14 @@ impl Compiler {
     }
 
     // ── Variable resolution ───────────────────────────────────────────────────
+
+    /// True when `name` should compile as `self.name(...)` with the class as receiver
+    /// (inside a `self { }` class method): not a local/upvalue, and `self` is slot 0.
+    fn implicit_class_self_dispatch(&self, name: &str) -> bool {
+        self.state().implicit_self_is_class_receiver
+            && name != "self"
+            && self.resolve_local(self.states.len() - 1, "self").is_some()
+    }
 
     /// Look up `name` as a local in the function at `depth` (index into `states`).
     /// Returns the stack slot index if found.
@@ -1115,6 +1141,9 @@ impl Compiler {
         let line = self.state().current_line;
         let arity = block.params.len();
         self.push_fn("<block>", arity, line);
+        let parent_idx = self.states.len() - 2;
+        self.state_mut().implicit_self_is_class_receiver =
+            self.states[parent_idx].implicit_self_is_class_receiver;
         // Slot 0 = closure (anonymous; blocks don't recurse by name).
         self.state_mut().locals.push(LocalInfo {
             name: String::new(),
@@ -1170,6 +1199,7 @@ impl Compiler {
         for method in &class_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
+            self.state_mut().implicit_self_is_class_receiver = true;
             self.state_mut().return_type = type_expr_name(method.return_type.as_ref());
             self.state_mut().locals.push(LocalInfo {
                 name: "self".into(),
