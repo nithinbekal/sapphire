@@ -80,6 +80,9 @@ struct Compiler {
     /// `GetGlobal` fallback for unresolved variable references so that names
     /// defined in imported files (which run as globals) are accessible.
     has_imports: bool,
+    /// Class names from outermost to innermost while compiling nested `class` bodies.
+    /// Used to resolve bare uppercase names as class constants before globals.
+    enclosing_class_stack: Vec<String>,
 }
 
 impl Compiler {
@@ -88,6 +91,7 @@ impl Compiler {
             states: Vec::new(),
             global_mode: false,
             has_imports: false,
+            enclosing_class_stack: Vec::new(),
         }
     }
 
@@ -96,6 +100,7 @@ impl Compiler {
             states: Vec::new(),
             global_mode: false,
             has_imports: true,
+            enclosing_class_stack: Vec::new(),
         }
     }
 
@@ -104,6 +109,7 @@ impl Compiler {
             states: Vec::new(),
             global_mode: true,
             has_imports: false,
+            enclosing_class_stack: Vec::new(),
         }
     }
 
@@ -457,11 +463,7 @@ impl Compiler {
                     || self.has_imports
                     || name.starts_with(|c: char| c.is_uppercase())
                 {
-                    let idx = self
-                        .state_mut()
-                        .chunk
-                        .add_constant(Constant::Str(name.clone()));
-                    self.emit(OpCode::GetGlobal(idx));
+                    self.emit_maybe_lexical_or_global(name);
                 } else {
                     return Err(self.error(format!("undefined variable '{}'", name)));
                 }
@@ -1003,6 +1005,30 @@ impl Compiler {
 
     // ── Emit helpers ──────────────────────────────────────────────────────────
 
+    /// Uppercase names inside a class body resolve as class constants along the lexical
+    /// nesting chain (`GetLexicalConstant`); otherwise use `GetGlobal`.
+    fn emit_maybe_lexical_or_global(&mut self, name: &str) {
+        let uppercase = name.starts_with(|c: char| c.is_uppercase());
+        if uppercase && !self.enclosing_class_stack.is_empty() {
+            let enclosing = self.enclosing_class_stack.clone();
+            let name_idx = self
+                .state_mut()
+                .chunk
+                .add_constant(Constant::Str(name.to_string()));
+            let scope_idx = self.state_mut().chunk.add_constant(Constant::LexicalClassScope {
+                enclosing_classes: enclosing,
+                name_idx,
+            });
+            self.emit(OpCode::GetLexicalConstant(scope_idx));
+        } else {
+            let idx = self
+                .state_mut()
+                .chunk
+                .add_constant(Constant::Str(name.to_string()));
+            self.emit(OpCode::GetGlobal(idx));
+        }
+    }
+
     fn emit(&mut self, op: OpCode) {
         let line = self.state().current_line;
         self.state_mut().chunk.write(op, line);
@@ -1151,6 +1177,31 @@ impl Compiler {
     /// on the stack for the enclosing `DefClass` to pick up.
     #[allow(clippy::too_many_arguments)]
     fn compile_class(
+        &mut self,
+        name: &str,
+        superclass: Option<&Expr>,
+        fields: &[crate::ast::FieldDef],
+        methods: &[MethodDef],
+        nested: &[Expr],
+        constants: &[(String, Box<Expr>)],
+        bind: bool,
+    ) -> Result<(), CompileError> {
+        self.enclosing_class_stack.push(name.to_string());
+        let result = self.compile_class_body(
+            name,
+            superclass,
+            fields,
+            methods,
+            nested,
+            constants,
+            bind,
+        );
+        self.enclosing_class_stack.pop();
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn compile_class_body(
         &mut self,
         name: &str,
         superclass: Option<&Expr>,

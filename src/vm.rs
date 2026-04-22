@@ -272,6 +272,9 @@ impl From<&Constant> for VmValue {
             Constant::Str(s) => VmValue::Str(s.clone()),
             Constant::Function(func) => VmValue::Function(func.clone()),
             Constant::ClassDesc { .. } => panic!("ClassDesc cannot be used as a stack value"),
+            Constant::LexicalClassScope { .. } => {
+                panic!("LexicalClassScope cannot be used as a stack value")
+            }
         }
     }
 }
@@ -1971,6 +1974,56 @@ impl Vm {
                     let base = self.frames.last().unwrap().base;
                     let val = self.stack[base].clone();
                     self.stack.push(val);
+                }
+
+                OpCode::GetLexicalConstant(idx) => {
+                    let consts = &self.frames.last().unwrap().function.chunk.constants;
+                    let (enclosing, const_name) = match &consts[idx] {
+                        Constant::LexicalClassScope {
+                            enclosing_classes,
+                            name_idx,
+                        } => {
+                            let cn = match &consts[*name_idx] {
+                                Constant::Str(s) => s.clone(),
+                                _ => {
+                                    return Err(VmError::TypeError {
+                                        message: "GetLexicalConstant: expected string name"
+                                            .to_string(),
+                                        line,
+                                    });
+                                }
+                            };
+                            (enclosing_classes.clone(), cn)
+                        }
+                        _ => {
+                            return Err(VmError::TypeError {
+                                message: "GetLexicalConstant: expected LexicalClassScope constant"
+                                    .to_string(),
+                                line,
+                            });
+                        }
+                    };
+                    let mut val: Option<VmValue> = None;
+                    for class_name in enclosing.iter().rev() {
+                        if let Some(entry) = self.classes.get(class_name)
+                            && let Some(v) = entry.namespace.get(&const_name)
+                        {
+                            val = Some(v.clone());
+                            break;
+                        }
+                    }
+                    let resolved = if let Some(v) = val {
+                        v
+                    } else {
+                        self.globals
+                            .get(&const_name)
+                            .cloned()
+                            .ok_or_else(|| VmError::TypeError {
+                                message: format!("undefined variable '{}'", const_name),
+                                line,
+                            })?
+                    };
+                    self.stack.push(resolved);
                 }
 
                 // ── Block opcodes ─────────────────────────────────────────────
