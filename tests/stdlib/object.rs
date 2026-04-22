@@ -35,3 +35,35 @@ fn bool_methods() {
     assert_eq!(eval("true.to_s()"), VmValue::Str("true".into()));
     assert_eq!(eval("false.to_s()"), VmValue::Str("false".into()));
 }
+
+#[test]
+fn class_method() {
+    assert_eq!(
+        eval("class Dog {}\nDog.new.class.name"),
+        VmValue::Str("Dog".into())
+    );
+    assert_eq!(
+        eval("42.class.name"),
+        VmValue::Str("Int".into())
+    );
+    assert_eq!(
+        eval("\"hi\".class.name"),
+        VmValue::Str("String".into())
+    );
+}
+
+#[test]
+fn superclass_method() {
+    assert_eq!(
+        eval("class Animal {}\nclass Dog < Animal {}\nDog.superclass.name"),
+        VmValue::Str("Animal".into())
+    );
+    assert_eq!(
+        eval("Object.superclass"),
+        VmValue::Nil
+    );
+    assert_eq!(
+        eval("class Animal {}\nclass Dog < Animal {}\nDog.new.class.superclass.name"),
+        VmValue::Str("Animal".into())
+    );
+}

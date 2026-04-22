@@ -1617,6 +1617,27 @@ impl Vm {
                         continue;
                     }
 
+                    if method_name == "class" && arg_count == 0 {
+                        let recv = self.stack[recv_slot].clone();
+                        let result = match starting_class_name_for_is_a(&recv) {
+                            Some(cname) => match self.classes.get(&cname) {
+                                Some(entry) => VmValue::Class {
+                                    name: cname,
+                                    superclass: entry.superclass.clone(),
+                                    fields: entry.fields.clone(),
+                                    methods: entry.methods.clone(),
+                                    class_methods: entry.class_methods.clone(),
+                                    namespace: entry.namespace.clone(),
+                                },
+                                None => VmValue::Nil,
+                            },
+                            None => VmValue::Nil,
+                        };
+                        self.stack.truncate(recv_slot);
+                        self.stack.push(result);
+                        continue;
+                    }
+
                     // Lambda `.call(args)` — invoke the closure as a new frame.
                     if method_name == "call"
                         && let VmValue::Closure { function, upvalues } =
@@ -1651,6 +1672,7 @@ impl Vm {
                         ref namespace,
                         ref name,
                         ref methods,
+                        ref superclass,
                         ..
                     } = self.stack[recv_slot].clone()
                     {
@@ -1839,6 +1861,27 @@ impl Vm {
                                 Err(e) => return Err(e),
                             };
                             let result = self.finalize_dt(dt, line)?;
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
+                        } else if method_name == "name" && arg_count == 0 {
+                            let result = VmValue::Str(name.clone());
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
+                        } else if method_name == "superclass" && arg_count == 0 {
+                            let result = match superclass.as_deref() {
+                                Some(sname) => match self.classes.get(sname) {
+                                    Some(entry) => VmValue::Class {
+                                        name: sname.to_string(),
+                                        superclass: entry.superclass.clone(),
+                                        fields: entry.fields.clone(),
+                                        methods: entry.methods.clone(),
+                                        class_methods: entry.class_methods.clone(),
+                                        namespace: entry.namespace.clone(),
+                                    },
+                                    None => VmValue::Nil,
+                                },
+                                None => VmValue::Nil,
+                            };
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
                         } else if method_name == "instance_method_names" && arg_count == 0 {
