@@ -51,3 +51,19 @@ fn class_method() {
         VmValue::Str("String".into())
     );
 }
+
+#[test]
+fn superclass_method() {
+    assert_eq!(
+        eval("class Animal {}\nclass Dog < Animal {}\nDog.superclass.name"),
+        VmValue::Str("Animal".into())
+    );
+    assert_eq!(
+        eval("Object.superclass"),
+        VmValue::Nil
+    );
+    assert_eq!(
+        eval("class Animal {}\nclass Dog < Animal {}\nDog.new.class.superclass.name"),
+        VmValue::Str("Animal".into())
+    );
+}
