@@ -1,100 +1,52 @@
-# AGENT.md
+# AGENTS.md
 
-Guidance for AI coding agents working in this repository. For Claude Code, see also `CLAUDE.md` in this directory.
+Guidance for AI coding agents in this repository. For Claude Code, see `CLAUDE.md`.
 
-## After completing a task
+## When finishing work
 
-Always run `./scripts/ci` when done with a task. It runs all CI checks (cargo test, clippy, sapphire tests, examples) and reports pass/fail for each.
+Run **`./scripts/ci`** before you consider a task done. It runs `cargo test`, clippy, `sapphire test` on stdlib tests, and the examples smoke script.
 
-## What is Sapphire?
-
-Sapphire is an object-oriented scripting language implemented in Rust. It's Ruby-inspired with gradual typing. The CLI supports five main subcommands: `run`, `typecheck`, `test`, `console` (REPL), and `version`.
-
-## Build & Test Commands
+For quick iteration: `cargo test`, `cargo test <name> -- --nocapture`, `sapphire test [path]` (recursive `*_test.spr`).
 
 ```bash
-cargo build                              # debug build
-cargo test                               # run Rust tests (src/tests)
-cargo test <test_name>                   # run a specific Rust test
-cargo test <test_name> -- --nocapture    # run with stdout visible
-sapphire test [path]                     # run Sapphire tests (_test.spr files)
-sapphire test ./stdlib/tests             # run tests in a specific directory
-./scripts/ci                             # run all CI checks (cargo test, clippy, sapphire test, examples)
+cargo build
+cargo test
+cargo test <test_name> -- --nocapture
+sapphire test [path]
+./scripts/ci
 ```
 
-## Testing Framework
+## What Sapphire is
 
-Sapphire includes two testing approaches:
+Ruby-inspired, gradually typed, object-oriented scripting in Rust. User code compiles to bytecode and runs on a stack VM (no AST interpreter on the hot path). CLI: `run`, `typecheck`, `test`, `console`, `version`.
 
-**Rust integration tests** in `tests/` run the VM through the Rust API. Common patterns:
-- `eval(src)` — compile and run source, return `VmValue`
-- `eval_with_stdlib(src)` — same but with stdlib loaded
-- `eval_err(src)` — assert that code raises a `VmError`
+**Pipeline:** Lexer → Parser → Compiler → VM. Same path for `run`, tests, and REPL.
 
-**Sapphire tests** are Sapphire files ending in `_test.spr` that extend the `Test` class (from `stdlib/src/test.spr`). Tests are discovered and run recursively with `sapphire test [path]`, which outputs:
-- `.` for passing tests, `F` for failures
-- Summary line showing test count and timing (tests/sec)
+**Where things live:** `src/main.rs` (CLI), `lexer` / `parser` / `ast` / `compiler` / `chunk` / `vm` / `typechecker` / `native` (+ `native_*`), `stdlib/` embedded and loaded via `vm.load_stdlib()`. Module-by-module map: [`docs/architecture.md`](docs/architecture.md). Opcodes: [`docs/opcodes.md`](docs/opcodes.md). GC: [`docs/gc.md`](docs/gc.md).
 
-Test classes inherit from `Test` and provide assertion methods:
-- `assert(cond)` — fails if condition is falsy
-- `assert_equal(expected, actual)` — fails with formatted message on mismatch
-- `assert_nil(obj)` — fails unless value is nil
-- `assert_in_delta(expected, actual, delta)` — fuzzy float comparison
-- `assert_raises { block }` — fails unless block raises an exception
+**Values:** Runtime values are `VmValue` in `src/vm.rs`. Chunk constant pool uses the smaller `Value` in `src/value.rs`. Heap layout details: `docs/gc.md` and `vm.rs`.
 
-## Architecture
+## Testing
 
-There is one execution pipeline: **Lexer → Parser → Compiler → VM**
+- **Rust:** Integration tests under `tests/`; helpers like `eval`, `eval_with_stdlib`, `eval_err` are common.
+- **Sapphire:** Files ending in `_test.spr`, classes subclass `Test`; assertions live in `stdlib/src/test.spr`. Runner: `sapphire test [path]` (`.` pass, `F` fail, summary at end).
 
-All execution paths (`run`, `test`, `console`, and the REPL loop) go through this same pipeline. There is no tree-walk interpreter.
+## Compiler / VM gotchas
 
-Key files:
-- `src/main.rs` — CLI entry point; routes to `run_file`, `typecheck_file`, `run_tests`, or `run_repl`
-- `src/lexer.rs` — Tokenizes source into `Token`s
-- `src/token.rs` — Token type definitions
-- `src/parser.rs` — Recursive descent parser producing an AST; `call()` handles method/field access and auto-call behavior
-- `src/ast.rs` — All AST node definitions (`Expr` enum, `MethodDef`, `Block`, etc.)
-- `src/compiler.rs` — Compiles AST to bytecode; `compile()` for scripts, `compile_repl()` for REPL
-- `src/chunk.rs` — `Chunk` (bytecode + constants), `OpCode` enum, `Function`, `UpvalueDef`
-- `src/vm.rs` — Stack-based bytecode VM (`Vm::run`); defines `VmValue` (the runtime value type)
-- `src/native.rs` — Routes native method calls to per-type `native_*` modules and holds shared value helpers; add methods in the appropriate `native_*` file and wire here if needed
-- `src/value.rs` — `Value` enum: primitive constants only (`Int`, `Float`, `Bool`, `Str`, `Nil`) used in the compiler/chunk layer
-- `src/typechecker.rs` — Optional static type checker (two-pass: collect definitions, then check bodies); invoked only by `typecheck` subcommand
-- `src/error.rs` — Error types
-- `stdlib/` — Standard library written in Sapphire itself, embedded in the binary and loaded by `vm.load_stdlib()`
+- `Call { callee: Get { object, name }, args }` → `OpCode::Invoke(name, arg_count)`; `Call` on a variable → `OpCode::Call` after pushing callee.
+- Zero-arg calls: `obj.foo` and `obj.foo()` parse the same; `def foo { }` and `def foo() { }` the same for zero-arg defs.
+- `Expr::Get` without call appears mainly as lvalue / non-call contexts.
+- **`Foo.new(args)` → `OpCode::NewInstance`**, not `Invoke("new", …)` (`compiler.rs`). Class-method dispatch in `vm.rs` is not used for `new`; hook construction in the `NewInstance` handler.
 
-## Runtime Value System
+## Language constraints
 
-`VmValue` (defined in `src/vm.rs`) is the runtime representation of all values. Key variants:
-- Primitives: `Int(i64)`, `Float(f64)`, `Bool(bool)`, `Str(String)`, `Nil`
-- Collections: `List`, `Map`, `Range { from, to }`
-- Callables: `Closure`, `NativeFunction`, `NativeMethod`, `Block`
-- OOP: `Class { name, fields, methods, class_methods, namespace, superclass }`, `Instance { class_name, fields, methods }`, `BoundMethod`
+- No globals, class vars, or metaprogramming.
+- Top-level `def` becomes `Object` methods.
+- Primitives get methods via stdlib classes.
+- Single inheritance; `defp` private; `self { }` for class methods.
+- Gradual types: optional annotations, runtime-checked when present.
+- Imports: relative (`./`, `../`), `.spr` implied, each file runs once.
 
-`Instance` stores `fields` as a `GcRef` (a GC-managed heap reference; read via `self.heap.get_fields(r)`) and `methods` in an `Rc<HashMap>`. `Class` stores instance methods, class methods (from `self { }` blocks), and nested classes (in `namespace`).
+## Standard library
 
-`value.rs` is a separate, simpler `Value` enum used only for compile-time constants embedded in `Chunk`.
-
-## Key Compiler Patterns
-
-- `Call { callee: Get { object, name }, args }` compiles to `OpCode::Invoke(name, arg_count)` — the common fast path for method dispatch
-- `Call { callee: Variable(name), args }` compiles to `OpCode::Call(arg_count)` after pushing the callee
-- Zero-arg method calls don't require parentheses: `obj.foo` and `obj.foo()` are equivalent (both parse to `Expr::Call` wrapping `Expr::Get`)
-- `def foo { }` and `def foo() { }` are equivalent (parentheses optional on zero-arg definitions)
-- `Expr::Get` (bare field access without call) is only emitted when used as an lvalue or in specific non-call contexts
-- **`Foo.new(args)` always compiles to `OpCode::NewInstance`**, not `Invoke("new", …)` — special-cased in `src/compiler.rs`. The class-method dispatch chain in `vm.rs` is never reached for `new`. To intercept construction of a new value type, add a guard at the top of the `OpCode::NewInstance` handler, not in the class-method chain.
-
-## Language Design Constraints
-
-- No global variables, class variables, or metaprogramming
-- Top-level `def` desugars into `Object` methods (Ruby-style)
-- Primitives (`Int`, `Float`, `Str`, etc.) are objects with methods via stdlib classes
-- Single inheritance; `defp` for private methods; `self { }` block for class methods
-- Gradual typing: type annotations on parameters/return types are optional but enforced at runtime when present
-- Imports are relative paths (`./` or `../`), `.spr` extension added automatically; each file executes once
-
-## Standard Library
-
-Stdlib files in `stdlib/` are embedded as string literals and loaded during `vm.load_stdlib()`. Each file adds methods to a primitive type's class (`int.spr`, `float.spr`, `string.spr`, `bool.spr`, `nil.spr`, `list.spr`, `map.spr`) plus `object.spr` for the base `Object` class.
-
-See `docs/adding-stdlib-class.md` for a step-by-step guide to adding a new stdlib class backed by native Rust dispatch.
+Sources under `stdlib/` (mostly `stdlib/src/`), embedded and loaded in `load_stdlib()`. New primitive-backed classes: [`docs/adding-stdlib-class.md`](docs/adding-stdlib-class.md).
