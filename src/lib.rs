@@ -17,6 +17,7 @@ pub mod native_map;
 pub mod native_nil;
 pub mod native_process;
 pub mod native_range;
+pub mod native_regex;
 pub mod native_set;
 pub mod native_string;
 pub mod native_socket;

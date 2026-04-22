@@ -397,6 +397,9 @@ pub struct Vm {
     /// Open TCP sockets keyed by integer fd; lives outside the GC.
     sockets: HashMap<i64, std::io::BufReader<std::net::TcpStream>>,
     next_socket_id: i64,
+    /// Compiled regexes keyed by integer id; lives outside the GC.
+    regexes: HashMap<i64, regex::Regex>,
+    next_regex_id: i64,
 }
 
 impl Vm {
@@ -424,6 +427,8 @@ impl Vm {
             output: None,
             sockets: HashMap::new(),
             next_socket_id: 0,
+            regexes: HashMap::new(),
+            next_regex_id: 0,
         }
     }
 
@@ -442,6 +447,8 @@ impl Vm {
             output: None,
             sockets: HashMap::new(),
             next_socket_id: 0,
+            regexes: HashMap::new(),
+            next_regex_id: 0,
         }
     }
 
@@ -676,6 +683,133 @@ impl Vm {
         }
     }
 
+    fn dispatch_regex_instance(
+        &mut self,
+        fields_ref: crate::gc::GcRef,
+        method_name: &str,
+        args: &[VmValue],
+        line: u32,
+    ) -> Result<VmValue, VmError> {
+        let fields = self.heap.get_fields(fields_ref).clone();
+        let id = crate::native_regex::extract_id(&fields, line)?;
+        let re = self.regexes.get(&id).ok_or_else(|| {
+            VmError::TypeError {
+                message: format!("regex id {} not found", id),
+                line,
+            }
+        })?;
+        match method_name {
+            "match?" => {
+                let text = match args {
+                    [VmValue::Str(s)] => s.clone(),
+                    _ => {
+                        return Err(VmError::TypeError {
+                            message: "regex.match? expects a String".into(),
+                            line,
+                        })
+                    }
+                };
+                Ok(VmValue::Bool(crate::native_regex::regex_match_bool(re, &text)))
+            }
+            "match" => {
+                let text = match args {
+                    [VmValue::Str(s)] => s.clone(),
+                    _ => {
+                        return Err(VmError::TypeError {
+                            message: "regex.match expects a String".into(),
+                            line,
+                        })
+                    }
+                };
+                match re.captures(&text) {
+                    None => Ok(VmValue::Nil),
+                    Some(caps) => {
+                        let full = caps.get(0).unwrap().as_str().to_string();
+                        let start = caps.get(0).unwrap().start() as i64;
+                        let end = caps.get(0).unwrap().end() as i64;
+                        let capture_list: Vec<VmValue> = caps
+                            .iter()
+                            .skip(1)
+                            .map(|m| match m {
+                                Some(m) => VmValue::Str(m.as_str().to_string()),
+                                None => VmValue::Nil,
+                            })
+                            .collect();
+                        let methods = self
+                            .classes
+                            .get("Match")
+                            .map(|e| e.methods.clone())
+                            .ok_or_else(|| VmError::TypeError {
+                                message: "Regex.Match class not loaded".to_string(),
+                                line,
+                            })?;
+                        let mut match_fields = HashMap::new();
+                        match_fields.insert("full".to_string(), VmValue::Str(full));
+                        match_fields.insert("captures".to_string(), self.alloc_list(capture_list));
+                        match_fields.insert("start".to_string(), VmValue::Int(start));
+                        match_fields.insert("end_pos".to_string(), VmValue::Int(end));
+                        let gc_fields = self.alloc_fields(match_fields);
+                        Ok(VmValue::Instance {
+                            class_name: "Match".to_string(),
+                            fields: gc_fields,
+                            methods,
+                        })
+                    }
+                }
+            }
+            "scan" => {
+                let text = match args {
+                    [VmValue::Str(s)] => s.clone(),
+                    _ => {
+                        return Err(VmError::TypeError {
+                            message: "regex.scan expects a String".into(),
+                            line,
+                        })
+                    }
+                };
+                let matches = crate::native_regex::regex_scan(re, &text);
+                let match_vals: Vec<VmValue> = matches.into_iter().map(VmValue::Str).collect();
+                Ok(self.alloc_list(match_vals))
+            }
+            "replace" => {
+                let (text, replacement) = match args {
+                    [VmValue::Str(t), VmValue::Str(r)] => (t.clone(), r.clone()),
+                    _ => {
+                        return Err(VmError::TypeError {
+                            message: "regex.replace expects (String, String)".into(),
+                            line,
+                        })
+                    }
+                };
+                Ok(VmValue::Str(crate::native_regex::regex_replace(
+                    re,
+                    &text,
+                    &replacement,
+                )))
+            }
+            "replace_all" => {
+                let (text, replacement) = match args {
+                    [VmValue::Str(t), VmValue::Str(r)] => (t.clone(), r.clone()),
+                    _ => {
+                        return Err(VmError::TypeError {
+                            message: "regex.replace_all expects (String, String)".into(),
+                            line,
+                        })
+                    }
+                };
+                Ok(VmValue::Str(crate::native_regex::regex_replace_all(
+                    re,
+                    &text,
+                    &replacement,
+                )))
+            }
+            _ => Err(VmError::TypeError {
+                message: format!("Regex has no method '{}'", method_name),
+                line,
+            }),
+        }
+    }
+
     pub fn format_value(&self, val: &VmValue) -> String {
         format_value_with_heap(&self.heap, val)
     }
@@ -724,6 +858,7 @@ impl Vm {
             ("stdlib/list.spr", include_str!("../stdlib/src/list.spr")),
             ("stdlib/map.spr", include_str!("../stdlib/src/map.spr")),
             ("stdlib/set.spr", include_str!("../stdlib/src/set.spr")),
+            ("stdlib/regex.spr", include_str!("../stdlib/src/regex.spr")),
             ("stdlib/test.spr", include_str!("../stdlib/src/test.spr")),
             ("stdlib/file.spr", include_str!("../stdlib/src/file.spr")),
             ("stdlib/env.spr", include_str!("../stdlib/src/env.spr")),
@@ -1240,6 +1375,55 @@ impl Vm {
                             });
                         }
                     };
+                    // Regex.new("pattern") / Regex.new("pattern", ignore_case: true)
+                    if class_name == "Regex" {
+                        let pattern = match self.stack.get(base + 2) {
+                            Some(VmValue::Str(s)) => s.clone(),
+                            Some(_) => {
+                                return Err(VmError::TypeError {
+                                    message: "Regex.new expects a String pattern".to_string(),
+                                    line,
+                                });
+                            }
+                            None => {
+                                return Err(VmError::TypeError {
+                                    message: "Regex.new requires a pattern argument".to_string(),
+                                    line,
+                                });
+                            }
+                        };
+                        let mut ignore_case = false;
+                        for i in 1..n_pairs {
+                            if let Some(VmValue::Str(name)) = self.stack.get(base + 1 + i * 2)
+                                && name == "ignore_case"
+                                && let Some(VmValue::Bool(b)) = self.stack.get(base + 2 + i * 2)
+                            {
+                                ignore_case = *b;
+                            }
+                        }
+                        let re = crate::native_regex::build_regex(&pattern, ignore_case, line)?;
+                        let id = self.next_regex_id;
+                        self.next_regex_id += 1;
+                        self.regexes.insert(id, re);
+                        let methods = self
+                            .classes
+                            .get("Regex")
+                            .map(|e| e.methods.clone())
+                            .ok_or_else(|| VmError::TypeError {
+                                message: "Regex class not loaded".to_string(),
+                                line,
+                            })?;
+                        let mut fields = HashMap::new();
+                        fields.insert("id".to_string(), VmValue::Int(id));
+                        let gc_fields = self.alloc_fields(fields);
+                        self.stack.drain(base..);
+                        self.stack.push(VmValue::Instance {
+                            class_name: "Regex".to_string(),
+                            fields: gc_fields,
+                            methods,
+                        });
+                        continue;
+                    }
                     // Set.new() / Set.new([items]) — intercept before normal instance allocation.
                     if class_name == "Set" {
                         let list_val = if n_pairs == 0 {
@@ -1796,6 +1980,24 @@ impl Vm {
                         }
                     }
 
+                    let mut regex_handled = false;
+                    if dt_class == "Regex" {
+                        let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                        match self.dispatch_regex_instance(dt_fields, &method_name, &args, line) {
+                            Ok(result) => {
+                                self.stack.truncate(recv_slot);
+                                self.stack.push(result);
+                                regex_handled = true;
+                            }
+                            Err(VmError::Raised(val)) => {
+                                self.stack.truncate(recv_slot);
+                                self.raise_value(val)?;
+                                continue;
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+
                     let mut socket_handled = false;
                     if dt_class == "Socket" {
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
@@ -1814,7 +2016,7 @@ impl Vm {
                         }
                     }
 
-                    if socket_handled || dt_handled {
+                    if regex_handled || socket_handled || dt_handled {
                         // already handled above
                     } else if let Some(method) = method_opt {
                         if method.private {

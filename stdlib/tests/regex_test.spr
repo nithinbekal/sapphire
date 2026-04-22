@@ -1,0 +1,127 @@
+class RegexTest < Test {
+  def test_new_basic {
+    r = Regex.new("[0-9]+")
+    assert(r)
+  }
+
+  def test_new_with_ignore_case {
+    r = Regex.new("[a-z]+", ignore_case: true)
+    assert(r)
+  }
+
+  def test_match_question_mark_true {
+    r = Regex.new("[0-9]+")
+    assert(r.match?("foo123"))
+  }
+
+  def test_match_question_mark_false {
+    r = Regex.new("[0-9]+")
+    assert(!r.match?("foobar"))
+  }
+
+  def test_match_returns_match_object {
+    r = Regex.new("[0-9]+")
+    m = r.match("foo123bar")
+    assert(m)
+    assert_equal("123", m.full)
+    assert_equal(3, m.start)
+    assert_equal(6, m.end_pos)
+  }
+
+  def test_match_returns_nil_on_no_match {
+    r = Regex.new("[0-9]+")
+    m = r.match("foobar")
+    assert_nil(m)
+  }
+
+  def test_match_with_captures {
+    r = Regex.new("([a-z]+)([0-9]+)")
+    m = r.match("foo123")
+    assert(m)
+    assert_equal("foo123", m.full)
+    assert_equal(2, m.captures.size())
+    assert_equal("foo", m.captures[0])
+    assert_equal("123", m.captures[1])
+  }
+
+  def test_match_with_no_captures {
+    r = Regex.new("[0-9]+")
+    m = r.match("123")
+    assert(m)
+    assert_equal(0, m.captures.size())
+  }
+
+  def test_scan_returns_all_matches {
+    r = Regex.new("[0-9]+")
+    matches = r.scan("foo123bar456baz789")
+    assert_equal(3, matches.size())
+    assert_equal("123", matches[0])
+    assert_equal("456", matches[1])
+    assert_equal("789", matches[2])
+  }
+
+  def test_scan_returns_empty_list_on_no_match {
+    r = Regex.new("[0-9]+")
+    matches = r.scan("foobar")
+    assert_equal(0, matches.size())
+  }
+
+  def test_replace_replaces_first_match {
+    r = Regex.new("[0-9]+")
+    result = r.replace("foo123bar456", "X")
+    assert_equal("fooXbar456", result)
+  }
+
+  def test_replace_all_replaces_all_matches {
+    r = Regex.new("[0-9]+")
+    result = r.replace_all("foo123bar456", "X")
+    assert_equal("fooXbarX", result)
+  }
+
+  def test_ignore_case_flag {
+    r = Regex.new("hello", ignore_case: true)
+    assert(r.match?("HELLO"))
+    assert(r.match?("Hello"))
+    assert(r.match?("hello"))
+  }
+
+  def test_ignore_case_false_by_default {
+    r = Regex.new("hello")
+    assert(!r.match?("HELLO"))
+    assert(r.match?("hello"))
+  }
+
+  def test_word_boundary {
+    r = Regex.new("\\bfoo\\b")
+    assert(r.match?("foo bar"))
+    assert(!r.match?("foobar"))
+  }
+
+  def test_dot_matches_any_char {
+    r = Regex.new("f.o")
+    assert(r.match?("foo"))
+    assert(r.match?("fao"))
+    assert(!r.match?("fo"))
+  }
+
+  def test_optional_quantifier {
+    r = Regex.new("colou?r")
+    assert(r.match?("color"))
+    assert(r.match?("colour"))
+  }
+
+  def test_plus_quantifier {
+    r = Regex.new("a+")
+    m = r.match("baaac")
+    assert(m)
+    assert_equal("aaa", m.full)
+  }
+
+  def test_star_quantifier {
+    r = Regex.new("ba*")
+    m1 = r.match("b")
+    assert_equal("b", m1.full)
+    m2 = r.match("baa")
+    assert_equal("baa", m2.full)
+  }
+}

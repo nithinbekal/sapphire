@@ -16,6 +16,7 @@ rustyline = { version = "14", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 jiff = { version = "0.2", features = ["tzdb-bundle-always", "std", "tz-system"], default-features = false }
+regex = "1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
