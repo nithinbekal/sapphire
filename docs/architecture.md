@@ -41,7 +41,7 @@ Each row is `src/<module>.rs` (except `lexer` / `token`, two files).
 ## Execution pipeline
 
 ```mermaid
-flowchart LR
+flowchart TB
   L["lexer + token"] --> P[parser] --> A[ast]
   A -->|typecheck| TC[typechecker<br/>define pass, then bodies]
   A -->|run / test / wasm / file| CMP["compiler<br/>or compile_repl"]
