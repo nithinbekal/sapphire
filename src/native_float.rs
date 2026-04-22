@@ -1,5 +1,9 @@
 use crate::vm::{VmError, VmValue};
 
+pub const NATIVE_METHOD_NAMES: &[&str] = &[
+    "ceil", "floor", "infinite?", "nan?", "round", "sqrt", "to_i", "to_s",
+];
+
 const METHOD_ARITIES: &[(&str, usize)] = &[
     ("ceil", 0),
     ("floor", 0),

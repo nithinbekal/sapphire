@@ -1,6 +1,29 @@
 use crate::gc::GcHeap;
 use crate::vm::{HeapObject, VmError, VmValue};
 
+pub const NATIVE_METHOD_NAMES: &[&str] = &[
+    "bytes",
+    "chars",
+    "chomp",
+    "downcase",
+    "empty?",
+    "ends_with?",
+    "include?",
+    "lines",
+    "replace",
+    "replace_all",
+    "reverse",
+    "size",
+    "slice",
+    "split",
+    "starts_with?",
+    "to_f",
+    "to_i",
+    "to_s",
+    "trim",
+    "upcase",
+];
+
 const METHOD_ARITIES: &[(&str, usize)] = &[
     ("bytes", 0),
     ("chars", 0),

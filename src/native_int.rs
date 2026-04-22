@@ -1,5 +1,7 @@
 use crate::vm::{VmError, VmValue};
 
+pub const NATIVE_METHOD_NAMES: &[&str] = &["pow", "to_f", "to_s"];
+
 const METHOD_ARITIES: &[(&str, usize)] = &[
     ("pow", 1),
     ("to_f", 0),

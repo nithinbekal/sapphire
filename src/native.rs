@@ -148,3 +148,16 @@ pub fn try_native_method(
         result => Some(result),
     }
 }
+
+/// Rust native instance method names for a stdlib primitive class, merged into
+/// that class's method table at `DefClass` so `Invoke` uses one lookup path.
+pub fn primitive_native_method_names(class_name: &str) -> &'static [&'static str] {
+    match class_name {
+        "Int" => crate::native_int::NATIVE_METHOD_NAMES,
+        "Float" => crate::native_float::NATIVE_METHOD_NAMES,
+        "String" => crate::native_string::NATIVE_METHOD_NAMES,
+        "Bool" => crate::native_bool::NATIVE_METHOD_NAMES,
+        "Nil" => crate::native_nil::NATIVE_METHOD_NAMES,
+        _ => &[],
+    }
+}

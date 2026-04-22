@@ -1,8 +1,8 @@
 use crate::chunk::{Constant, Function, OpCode};
 use crate::gc::{GcHeap, GcRef, Trace};
 use crate::native::{
-    is_falsy, numeric_binop, numeric_cmp, primitive_class_name, try_native_method,
-    value_type_name, vm_value_partial_cmp,
+    dispatch_native_method, is_falsy, numeric_binop, numeric_cmp, primitive_class_name,
+    primitive_native_method_names, try_native_method, value_type_name, vm_value_partial_cmp,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -194,7 +194,7 @@ pub enum VmValue {
         #[allow(dead_code)]
         superclass: Option<String>,
         fields: Vec<(String, VmValue)>,
-        methods: Rc<HashMap<String, VmMethod>>,
+        methods: Rc<HashMap<String, MethodImpl>>,
         class_methods: Rc<HashMap<String, VmMethod>>,
         /// Nested class definitions, accessible as `Outer.Inner`.
         namespace: Rc<HashMap<String, VmValue>>,
@@ -203,7 +203,7 @@ pub enum VmValue {
     Instance {
         class_name: String,
         fields: GcRef,
-        methods: Rc<HashMap<String, VmMethod>>,
+        methods: Rc<HashMap<String, MethodImpl>>,
     },
 }
 
@@ -216,6 +216,16 @@ pub struct VmMethod {
     /// Name of the class this method was defined in; empty for block closures.
     pub defined_in: String,
     pub private: bool,
+}
+
+/// Instance method: Sapphire bytecode or a Rust native registered on the same map.
+#[derive(Debug, Clone)]
+pub enum MethodImpl {
+    User(VmMethod),
+    Native {
+        defined_in: String,
+        private: bool,
+    },
 }
 
 impl PartialEq for VmValue {
@@ -357,9 +367,12 @@ struct CallFrame {
 /// Per-class metadata stored by DefClass.
 ///
 /// `methods` holds the *merged* (inherited + own) method table — the same map
-/// that lives on `VmValue::Class`.  Using the merged table means:
+/// that lives on `VmValue::Class`.  Values are [`MethodImpl`]: Sapphire methods
+/// plus [`MethodImpl::Native`] entries overlaid for immediate primitives
+/// (`Int`, `Float`, …) at `DefClass`.  Using the merged table means:
 ///
-/// * Primitive dispatch (`Invoke` on Int/Str/…) finds inherited Object methods.
+/// * Primitive `Invoke` resolves `Int`/`String`/… through this map (and
+///   `try_native_method` fallback for `List`/`Map`/`Set`/`Range` natives).
 /// * `SuperInvoke` looks up `classes[super_name].methods` and gets the
 ///   correct merged map for that ancestor level.
 struct ClassEntry {
@@ -367,7 +380,7 @@ struct ClassEntry {
     /// The merged (inherited + own) field list with default values.
     fields: Vec<(String, VmValue)>,
     /// Merged (inherited + own) instance methods.
-    methods: Rc<HashMap<String, VmMethod>>,
+    methods: Rc<HashMap<String, MethodImpl>>,
     /// Merged (inherited + own) class methods.
     class_methods: Rc<HashMap<String, VmMethod>>,
     /// Constants defined in the class body (e.g. `PI = 3.14`).
@@ -400,6 +413,18 @@ pub struct Vm {
     /// Compiled regexes keyed by integer id; lives outside the GC.
     regexes: HashMap<i64, regex::Regex>,
     next_regex_id: i64,
+}
+
+fn overlay_primitive_native_methods(class_name: &str, mm: &mut HashMap<String, MethodImpl>) {
+    for &name in primitive_native_method_names(class_name) {
+        mm.insert(
+            name.to_string(),
+            MethodImpl::Native {
+                defined_in: class_name.to_string(),
+                private: false,
+            },
+        );
+    }
 }
 
 impl Vm {
@@ -1272,19 +1297,19 @@ impl Vm {
                             _ => panic!("DefClass: class method is not a closure"),
                         }
                     }
-                    let mut own_methods: HashMap<String, VmMethod> = HashMap::new();
+                    let mut own_methods: HashMap<String, MethodImpl> = HashMap::new();
                     for (mname, closure) in method_names.iter().zip(instance_closures) {
                         match closure {
                             VmValue::Closure { function, upvalues } => {
                                 let private = private_methods.contains(mname);
                                 own_methods.insert(
                                     mname.clone(),
-                                    VmMethod {
+                                    MethodImpl::User(VmMethod {
                                         function: function.clone(),
                                         upvalues: upvalues.clone(),
                                         defined_in: class_name.clone(),
                                         private,
-                                    },
+                                    }),
                                 );
                             }
                             _ => panic!("DefClass: method is not a closure"),
@@ -1325,11 +1350,14 @@ impl Vm {
                             mf.extend(own_fields);
                             let mut mm = parent_methods;
                             mm.extend(own_methods);
+                            overlay_primitive_native_methods(&class_name, &mut mm);
                             let mut mc = parent_class_methods;
                             mc.extend(own_class_methods);
                             (mf, mm, mc)
                         } else {
-                            (own_fields, own_methods, own_class_methods)
+                            let mut mm = own_methods;
+                            overlay_primitive_native_methods(&class_name, &mut mm);
+                            (own_fields, mm, own_class_methods)
                         };
                     let merged_rc = Rc::new(merged_methods);
                     let merged_class_rc = Rc::new(merged_class_methods);
@@ -1505,44 +1533,79 @@ impl Vm {
                         },
                         // For primitives, treat `obj.name` as a zero-arg method call.
                         ref other => {
-                            match try_native_method(&mut self.heap, other, &name, &[], line) {
-                                Some(Ok(result)) => {
-                                    self.stack.push(result);
+                            if matches!(
+                                other,
+                                VmValue::List(_)
+                                    | VmValue::Map(_)
+                                    | VmValue::Set(_)
+                                    | VmValue::Range { .. }
+                            ) {
+                                match try_native_method(
+                                    &mut self.heap,
+                                    other,
+                                    &name,
+                                    &[],
+                                    line,
+                                ) {
+                                    Some(Ok(result)) => {
+                                        self.stack.push(result);
+                                        continue;
+                                    }
+                                    Some(Err(e)) => return Err(e),
+                                    None => {}
                                 }
-                                Some(Err(e)) => return Err(e),
-                                None => {
-                                    // Try compiled stdlib methods from class registry.
-                                    let method = primitive_class_name(other)
-                                        .and_then(|cls| self.classes.get(cls))
-                                        .and_then(|entry| entry.methods.get(&name).cloned());
-                                    match method {
-                                        Some(m) => {
-                                            let recv_slot = self.stack.len();
-                                            self.stack.push(other.clone());
-                                            let class_name = Some(m.defined_in.clone());
-                                            self.frames.push(CallFrame {
-                                                function: m.function,
-                                                upvalues: m.upvalues,
-                                                ip: 0,
-                                                base: recv_slot,
-                                                block: None,
-                                                is_block_caller: false,
-                                                is_native_block: false,
-                                                rescues: vec![],
-                                                class_name,
-                                            });
-                                        }
-                                        None => {
-                                            return Err(VmError::TypeError {
-                                                message: format!(
-                                                    "cannot get field '{}' on {}",
-                                                    name, other
-                                                ),
-                                                line,
-                                            });
-                                        }
+                            }
+                            let resolved = primitive_class_name(other)
+                                .and_then(|cls| self.classes.get(cls))
+                                .and_then(|entry| entry.methods.get(&name).cloned());
+                            match resolved {
+                                Some(MethodImpl::Native { .. }) => {
+                                    match dispatch_native_method(
+                                        &mut self.heap,
+                                        other,
+                                        &name,
+                                        &[],
+                                        line,
+                                    ) {
+                                        Ok(result) => self.stack.push(result),
+                                        Err(e) => return Err(e),
                                     }
                                 }
+                                Some(MethodImpl::User(m)) => {
+                                    let recv_slot = self.stack.len();
+                                    self.stack.push(other.clone());
+                                    let class_name = Some(m.defined_in.clone());
+                                    self.frames.push(CallFrame {
+                                        function: m.function,
+                                        upvalues: m.upvalues,
+                                        ip: 0,
+                                        base: recv_slot,
+                                        block: None,
+                                        is_block_caller: false,
+                                        is_native_block: false,
+                                        rescues: vec![],
+                                        class_name,
+                                    });
+                                }
+                                None => match try_native_method(
+                                    &mut self.heap,
+                                    other,
+                                    &name,
+                                    &[],
+                                    line,
+                                ) {
+                                    Some(Ok(result)) => self.stack.push(result),
+                                    Some(Err(e)) => return Err(e),
+                                    None => {
+                                        return Err(VmError::TypeError {
+                                            message: format!(
+                                                "cannot get field '{}' on {}",
+                                                name, other
+                                            ),
+                                            line,
+                                        });
+                                    }
+                                },
                             }
                         }
                     }
@@ -1887,7 +1950,10 @@ impl Vm {
                         } else if method_name == "instance_method_names" && arg_count == 0 {
                             let mut names: Vec<VmValue> = methods
                                 .iter()
-                                .filter(|(_, m)| !m.private)
+                                .filter(|(_, m)| match m {
+                                    MethodImpl::User(u) => !u.private,
+                                    MethodImpl::Native { private, .. } => !*private,
+                                })
                                 .map(|(k, _)| VmValue::Str(k.clone()))
                                 .collect();
                             names.sort_by(vm_value_partial_cmp);
@@ -1903,27 +1969,71 @@ impl Vm {
                         continue;
                     }
 
-                    // Try native dispatch for non-Instance types.
+                    // Primitive / non-instance: merged class method table (includes
+                    // [`MethodImpl::Native`] overlays) with direct native fallback for
+                    // `Range` or when the stdlib class is not loaded.
                     let is_instance = matches!(&self.stack[recv_slot], VmValue::Instance { .. });
                     if !is_instance {
                         let recv = self.stack[recv_slot].clone();
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                        // Try Rust native method first; if not found try compiled stdlib.
-                        match try_native_method(&mut self.heap, &recv, &method_name, &args, line) {
-                            Some(Ok(result)) => {
+                        // Heap primitives (and Range): try Rust dispatch first so natives
+                        // like `Set#to_s` win over inherited `Object#to_s` in the merged map.
+                        if matches!(
+                            &recv,
+                            VmValue::List(_)
+                                | VmValue::Map(_)
+                                | VmValue::Set(_)
+                                | VmValue::Range { .. }
+                        ) {
+                            match try_native_method(
+                                &mut self.heap,
+                                &recv,
+                                &method_name,
+                                &args,
+                                line,
+                            ) {
+                                Some(Ok(result)) => {
+                                    self.stack.truncate(recv_slot);
+                                    self.stack.push(result);
+                                    continue;
+                                }
+                                Some(Err(e)) => return Err(e),
+                                None => {}
+                            }
+                        }
+                        let resolved = primitive_class_name(&recv)
+                            .and_then(|cls| self.classes.get(cls))
+                            .and_then(|entry| entry.methods.get(&method_name).cloned());
+                        match resolved {
+                            Some(MethodImpl::Native { private, defined_in }) => {
+                                if private {
+                                    let caller_class = self
+                                        .frames
+                                        .last()
+                                        .and_then(|f| f.class_name.as_deref())
+                                        .unwrap_or("");
+                                    if caller_class != defined_in {
+                                        return Err(VmError::TypeError {
+                                            message: format!(
+                                                "private method '{}' called from outside class",
+                                                method_name
+                                            ),
+                                            line,
+                                        });
+                                    }
+                                }
+                                let result = dispatch_native_method(
+                                    &mut self.heap,
+                                    &recv,
+                                    &method_name,
+                                    &args,
+                                    line,
+                                )?;
                                 self.stack.truncate(recv_slot);
                                 self.stack.push(result);
                                 continue;
                             }
-                            Some(Err(e)) => return Err(e),
-                            None => {}
-                        }
-                        // Native didn't handle it — look in the class registry.
-                        let method = primitive_class_name(&recv)
-                            .and_then(|cls| self.classes.get(cls))
-                            .and_then(|entry| entry.methods.get(&method_name).cloned());
-                        match method {
-                            Some(m) => {
+                            Some(MethodImpl::User(m)) => {
                                 if m.private {
                                     let caller_class = self
                                         .frames
@@ -1949,8 +2059,6 @@ impl Vm {
                                         line,
                                     });
                                 }
-                                // recv and args are already on the stack at recv_slot..
-                                // so the new frame's slot 0 = recv, slots 1.. = args.
                                 let class_name = Some(m.defined_in.clone());
                                 self.frames.push(CallFrame {
                                     function: m.function,
@@ -1965,12 +2073,29 @@ impl Vm {
                                 });
                                 continue;
                             }
-                            None => {
-                                return Err(VmError::TypeError {
-                                    message: format!("'{}' has no method '{}'", recv, method_name),
-                                    line,
-                                });
-                            }
+                            None => match try_native_method(
+                                &mut self.heap,
+                                &recv,
+                                &method_name,
+                                &args,
+                                line,
+                            ) {
+                                Some(Ok(result)) => {
+                                    self.stack.truncate(recv_slot);
+                                    self.stack.push(result);
+                                    continue;
+                                }
+                                Some(Err(e)) => return Err(e),
+                                None => {
+                                    return Err(VmError::TypeError {
+                                        message: format!(
+                                            "'{}' has no method '{}'",
+                                            recv, method_name
+                                        ),
+                                        line,
+                                    });
+                                }
+                            },
                         }
                     }
 
@@ -2062,43 +2187,76 @@ impl Vm {
                     if regex_handled || socket_handled || dt_handled {
                         // already handled above
                     } else if let Some(method) = method_opt {
-                        if method.private {
-                            let caller_class = self
-                                .frames
-                                .last()
-                                .and_then(|f| f.class_name.as_deref())
-                                .unwrap_or("");
-                            if caller_class != method.defined_in {
-                                return Err(VmError::TypeError {
-                                    message: format!(
-                                        "private method '{}' called from outside class",
-                                        method_name
-                                    ),
+                        match method {
+                            MethodImpl::Native { private, defined_in } => {
+                                if private {
+                                    let caller_class = self
+                                        .frames
+                                        .last()
+                                        .and_then(|f| f.class_name.as_deref())
+                                        .unwrap_or("");
+                                    if caller_class != defined_in {
+                                        return Err(VmError::TypeError {
+                                            message: format!(
+                                                "private method '{}' called from outside class",
+                                                method_name
+                                            ),
+                                            line,
+                                        });
+                                    }
+                                }
+                                let recv = self.stack[recv_slot].clone();
+                                let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                                let result = dispatch_native_method(
+                                    &mut self.heap,
+                                    &recv,
+                                    &method_name,
+                                    &args,
                                     line,
+                                )?;
+                                self.stack.truncate(recv_slot);
+                                self.stack.push(result);
+                            }
+                            MethodImpl::User(m) => {
+                                if m.private {
+                                    let caller_class = self
+                                        .frames
+                                        .last()
+                                        .and_then(|f| f.class_name.as_deref())
+                                        .unwrap_or("");
+                                    if caller_class != m.defined_in {
+                                        return Err(VmError::TypeError {
+                                            message: format!(
+                                                "private method '{}' called from outside class",
+                                                method_name
+                                            ),
+                                            line,
+                                        });
+                                    }
+                                }
+                                if m.function.arity != arg_count {
+                                    return Err(VmError::TypeError {
+                                        message: format!(
+                                            "method '{}' expects {} arg(s), got {}",
+                                            method_name, m.function.arity, arg_count
+                                        ),
+                                        line,
+                                    });
+                                }
+                                let class_name = Some(m.defined_in.clone());
+                                self.frames.push(CallFrame {
+                                    function: m.function,
+                                    upvalues: m.upvalues,
+                                    ip: 0,
+                                    base: recv_slot,
+                                    block: None,
+                                    is_block_caller: false,
+                                    is_native_block: false,
+                                    rescues: vec![],
+                                    class_name,
                                 });
                             }
                         }
-                        if method.function.arity != arg_count {
-                            return Err(VmError::TypeError {
-                                message: format!(
-                                    "method '{}' expects {} arg(s), got {}",
-                                    method_name, method.function.arity, arg_count
-                                ),
-                                line,
-                            });
-                        }
-                        let class_name = Some(method.defined_in.clone());
-                        self.frames.push(CallFrame {
-                            function: method.function,
-                            upvalues: method.upvalues,
-                            ip: 0,
-                            base: recv_slot,
-                            block: None,
-                            is_block_caller: false,
-                            is_native_block: false,
-                            rescues: vec![],
-                            class_name,
-                        });
                     } else if arg_count == 0 {
                         // No method found — fall back to field read (attr-declared fields accessed without parens)
                         let field_val = match &self.stack[recv_slot] {
@@ -2167,6 +2325,13 @@ impl Vm {
                             });
                         }
                     };
+                    let recv_slot = self
+                        .stack
+                        .len()
+                        .checked_sub(arg_count + 1)
+                        .ok_or(VmError::StackUnderflow)?;
+                    let recv = self.stack[recv_slot].clone();
+                    let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
                     let method = match self.classes.get(&super_name) {
                         Some(entry) => {
                             entry.methods.get(&method_name).cloned().ok_or_else(|| {
@@ -2186,33 +2351,43 @@ impl Vm {
                             });
                         }
                     };
-                    let recv_slot = self
-                        .stack
-                        .len()
-                        .checked_sub(arg_count + 1)
-                        .ok_or(VmError::StackUnderflow)?;
-                    if method.function.arity != arg_count {
-                        return Err(VmError::TypeError {
-                            message: format!(
-                                "method '{}' expects {} arg(s), got {}",
-                                method_name, method.function.arity, arg_count
-                            ),
-                            line,
-                        });
+                    match method {
+                        MethodImpl::Native { .. } => {
+                            let result = dispatch_native_method(
+                                &mut self.heap,
+                                &recv,
+                                &method_name,
+                                &args,
+                                line,
+                            )?;
+                            self.stack.truncate(recv_slot);
+                            self.stack.push(result);
+                        }
+                        MethodImpl::User(m) => {
+                            if m.function.arity != arg_count {
+                                return Err(VmError::TypeError {
+                                    message: format!(
+                                        "method '{}' expects {} arg(s), got {}",
+                                        method_name, m.function.arity, arg_count
+                                    ),
+                                    line,
+                                });
+                            }
+                            // Use super_name as the class for the new frame so chained
+                            // super calls continue up the inheritance chain correctly.
+                            self.frames.push(CallFrame {
+                                function: m.function,
+                                upvalues: m.upvalues,
+                                ip: 0,
+                                base: recv_slot,
+                                block: None,
+                                is_block_caller: false,
+                                is_native_block: false,
+                                rescues: vec![],
+                                class_name: Some(super_name),
+                            });
+                        }
                     }
-                    // Use super_name as the class for the new frame so chained
-                    // super calls continue up the inheritance chain correctly.
-                    self.frames.push(CallFrame {
-                        function: method.function,
-                        upvalues: method.upvalues,
-                        ip: 0,
-                        base: recv_slot,
-                        block: None,
-                        is_block_caller: false,
-                        is_native_block: false,
-                        rescues: vec![],
-                        class_name: Some(super_name),
-                    });
                 }
 
                 OpCode::GetSelf => {
@@ -2399,8 +2574,7 @@ impl Vm {
                             .and_then(|cls| self.classes.get(cls))
                             .and_then(|entry| entry.methods.get(&method_name).cloned());
                         match method {
-                            Some(m) => {
-                                // Stack is still [..., recv, args...]; leave it for the frame.
+                            Some(MethodImpl::User(m)) => {
                                 let class_name = Some(m.defined_in.clone());
                                 self.frames.push(CallFrame {
                                     function: m.function,
@@ -2414,6 +2588,15 @@ impl Vm {
                                     class_name,
                                 });
                                 continue;
+                            }
+                            Some(MethodImpl::Native { .. }) => {
+                                return Err(VmError::TypeError {
+                                    message: format!(
+                                        "cannot pass a block to native method '{}'",
+                                        method_name
+                                    ),
+                                    line,
+                                });
                             }
                             None => {
                                 return Err(VmError::TypeError {
@@ -2434,13 +2617,25 @@ impl Vm {
                             })?,
                         _ => unreachable!(),
                     };
-                    if method.private {
+                    let m = match method {
+                        MethodImpl::User(m) => m,
+                        MethodImpl::Native { .. } => {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "cannot pass a block to native method '{}'",
+                                    method_name
+                                ),
+                                line,
+                            });
+                        }
+                    };
+                    if m.private {
                         let caller_class = self
                             .frames
                             .last()
                             .and_then(|f| f.class_name.as_deref())
                             .unwrap_or("");
-                        if caller_class != method.defined_in {
+                        if caller_class != m.defined_in {
                             return Err(VmError::TypeError {
                                 message: format!(
                                     "private method '{}' called from outside class",
@@ -2450,19 +2645,19 @@ impl Vm {
                             });
                         }
                     }
-                    if method.function.arity != arg_count {
+                    if m.function.arity != arg_count {
                         return Err(VmError::TypeError {
                             message: format!(
                                 "method '{}' expects {} arg(s), got {}",
-                                method_name, method.function.arity, arg_count
+                                method_name, m.function.arity, arg_count
                             ),
                             line,
                         });
                     }
-                    let class_name = Some(method.defined_in.clone());
+                    let class_name = Some(m.defined_in.clone());
                     self.frames.push(CallFrame {
-                        function: method.function,
-                        upvalues: method.upvalues,
+                        function: m.function,
+                        upvalues: m.upvalues,
                         ip: 0,
                         base: recv_slot,
                         block,
@@ -3464,9 +3659,16 @@ impl Vm {
             let mut tests: Vec<(String, VmMethod)> = entry
                 .methods
                 .iter()
-                .filter(|(name, _)| name.starts_with("test_"))
-                .map(|(name, method)| {
-                    (name.trim_start_matches("test_").to_string(), method.clone())
+                .filter_map(|(name, m)| {
+                    if !name.starts_with("test_") {
+                        return None;
+                    }
+                    match m {
+                        MethodImpl::User(u) => {
+                            Some((name.trim_start_matches("test_").to_string(), u.clone()))
+                        }
+                        MethodImpl::Native { .. } => None,
+                    }
                 })
                 .collect();
             tests.sort_by(|a, b| a.0.cmp(&b.0));
@@ -3532,7 +3734,7 @@ impl Vm {
         };
 
         // Call setup if defined and not the base no-op from Test itself.
-        if let Some(setup) = methods.get("setup") {
+        if let Some(MethodImpl::User(setup)) = methods.get("setup") {
             self.call_method_on_instance(instance.clone(), setup)?;
         }
 
@@ -3540,7 +3742,7 @@ impl Vm {
         self.call_method_on_instance(instance.clone(), test_method)?;
 
         // Call teardown if defined.
-        if let Some(teardown) = methods.get("teardown") {
+        if let Some(MethodImpl::User(teardown)) = methods.get("teardown") {
             self.call_method_on_instance(instance.clone(), teardown)?;
         }
 
