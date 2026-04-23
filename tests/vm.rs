@@ -800,9 +800,9 @@ fn map_methods() {
 #[test]
 fn nil_bool_methods() {
     assert_eq!(eval("nil.nil?()"), VmValue::Bool(true));
-    assert_eq!(eval("false.nil?()"), VmValue::Bool(false));
     assert_eq!(eval("nil.to_s()"), VmValue::Str("".into()));
-    assert_eq!(eval("true.to_s()"), VmValue::Str("true".into()));
+    assert_eq!(eval_with_stdlib("false.nil?()"), VmValue::Bool(false));
+    assert_eq!(eval_with_stdlib("true.to_s()"), VmValue::Str("true".into()));
 }
 
 #[test]

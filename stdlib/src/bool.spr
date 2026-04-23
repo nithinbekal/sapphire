@@ -1,13 +1,14 @@
 # Bool is the type of true and false.
-# It provides string conversion for printing and interpolation.
 #
 class Bool {
+  def nil? { false }
+
   # Returns "true" or "false" as a string.
   #
-  #   true.to_s()    # "true"
-  #   false.to_s()   # "false"
+  #   true.to_s    # "true"
+  #   false.to_s   # "false"
   #
-  def to_s() {
+  def to_s {
     if self { "true" } else { "false" }
   }
 }
