@@ -40,6 +40,7 @@ pub fn value_type_name(val: &VmValue) -> &str {
         VmValue::Class { name, .. } => name.as_str(),
         VmValue::Function(_) => "Function",
         VmValue::Closure { .. } => "Function",
+        VmValue::ClassObj(_) => "Class",
     }
 }
 

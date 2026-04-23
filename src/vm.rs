@@ -12,6 +12,14 @@ use std::rc::Rc;
 
 // ── GC heap objects ───────────────────────────────────────────────────────────
 
+/// A method that lives in a `ClassObject` method table.
+/// Only the `Bytecode` variant is used in the initial bootstrap increment;
+/// the enum is open for `Native` methods in future increments.
+#[derive(Debug, Clone)]
+pub enum SapphireMethod {
+    Bytecode(VmMethod),
+}
+
 /// Objects managed by the GC heap — all types that can form reference cycles.
 pub enum HeapObject {
     List(Vec<VmValue>),
@@ -19,6 +27,16 @@ pub enum HeapObject {
     Set(Vec<VmValue>),
     /// Instance field storage.
     Fields(HashMap<String, VmValue>),
+    /// A heap-allocated class object in the Ruby-style object model.
+    /// `class_ref` points to the class's own class (e.g. every ClassObject's
+    /// class_ref points to the `Class` ClassObject, and `Class.class_ref`
+    /// points to itself).  `None` only transiently during two-phase bootstrap.
+    ClassObject {
+        name: String,
+        superclass: Option<GcRef>,
+        class_ref: Option<GcRef>,
+        methods: HashMap<String, SapphireMethod>,
+    },
 }
 
 impl Trace for HeapObject {
@@ -28,6 +46,18 @@ impl Trace for HeapObject {
             HeapObject::Map(m) => m.values().for_each(|val| collect_refs(val, out)),
             HeapObject::Set(v) => v.iter().for_each(|val| collect_refs(val, out)),
             HeapObject::Fields(f) => f.values().for_each(|val| collect_refs(val, out)),
+            HeapObject::ClassObject { superclass, class_ref, methods, .. } => {
+                if let Some(r) = superclass { out.push(*r); }
+                if let Some(r) = class_ref  { out.push(*r); }
+                for m in methods.values() {
+                    let SapphireMethod::Bytecode(vm_method) = m;
+                    for uv in &vm_method.upvalues {
+                        if let UpvalueState::Closed(v) = &*uv.0.borrow() {
+                            collect_refs(v, out);
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -35,7 +65,9 @@ impl Trace for HeapObject {
 /// Push all GcRefs contained directly in `val` into `out`.
 fn collect_refs(val: &VmValue, out: &mut Vec<GcRef>) {
     match val {
-        VmValue::List(r) | VmValue::Map(r) | VmValue::Set(r) => out.push(*r),
+        VmValue::List(r) | VmValue::Map(r) | VmValue::Set(r) | VmValue::ClassObj(r) => {
+            out.push(*r)
+        }
         VmValue::Instance { fields, .. } => out.push(*fields),
         _ => {}
     }
@@ -205,6 +237,8 @@ pub enum VmValue {
         fields: GcRef,
         methods: Rc<HashMap<String, VmMethod>>,
     },
+    /// A heap-allocated class object in the Ruby-style object model.
+    ClassObj(GcRef),
 }
 
 /// A compiled method: a function together with any upvalues it closed over,
@@ -239,6 +273,7 @@ impl PartialEq for VmValue {
             (VmValue::Instance { fields: f1, .. }, VmValue::Instance { fields: f2, .. }) => {
                 f1 == f2
             }
+            (VmValue::ClassObj(a), VmValue::ClassObj(b)) => a == b,
             _ => false,
         }
     }
@@ -260,6 +295,7 @@ impl fmt::Display for VmValue {
             VmValue::Range { from, to } => write!(f, "{}..{}", from, to),
             VmValue::Class { name, .. } => write!(f, "<class {}>", name),
             VmValue::Instance { class_name, .. } => write!(f, "#<{}>", class_name),
+            VmValue::ClassObj(_) => write!(f, "<class>"),
         }
     }
 }
@@ -354,6 +390,15 @@ struct CallFrame {
 
 // ── VM ────────────────────────────────────────────────────────────────────────
 
+/// GcRefs to the core class objects bootstrapped before stdlib loads.
+/// Kept here so they are always reachable as GC roots.
+#[derive(Debug, Clone, Default)]
+pub struct CoreClasses {
+    pub object: Option<GcRef>,
+    pub class_cls: Option<GcRef>,
+    pub set_cls: Option<GcRef>,
+}
+
 /// Per-class metadata stored by DefClass.
 ///
 /// `methods` holds the *merged* (inherited + own) method table — the same map
@@ -400,6 +445,8 @@ pub struct Vm {
     /// Compiled regexes keyed by integer id; lives outside the GC.
     regexes: HashMap<i64, regex::Regex>,
     next_regex_id: i64,
+    /// GcRefs to the bootstrapped core class objects (Object, Class, Set, …).
+    core_classes: CoreClasses,
 }
 
 impl Vm {
@@ -429,6 +476,7 @@ impl Vm {
             next_socket_id: 0,
             regexes: HashMap::new(),
             next_regex_id: 0,
+            core_classes: CoreClasses::default(),
         }
     }
 
@@ -449,6 +497,7 @@ impl Vm {
             next_socket_id: 0,
             regexes: HashMap::new(),
             next_regex_id: 0,
+            core_classes: CoreClasses::default(),
         }
     }
 
@@ -835,6 +884,17 @@ impl Vm {
                 collect_refs(v, &mut out);
             }
         }
+        // Core class objects are permanent roots.
+        for r in [
+            self.core_classes.object,
+            self.core_classes.class_cls,
+            self.core_classes.set_cls,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            out.push(r);
+        }
         out
     }
 
@@ -845,8 +905,57 @@ impl Vm {
         }
     }
 
+    /// Allocate the Object / Class / Set class objects and wire their `class_ref`
+    /// pointers.  Must be called before `load_stdlib` so that `DefClass` can
+    /// mirror bytecode methods into these objects as each `.spr` file runs.
+    fn bootstrap_core_classes(&mut self) {
+        let object = self.heap.alloc(HeapObject::ClassObject {
+            name: "Object".into(),
+            superclass: None,
+            class_ref: None,
+            methods: HashMap::new(),
+        });
+        let class_cls = self.heap.alloc(HeapObject::ClassObject {
+            name: "Class".into(),
+            superclass: Some(object),
+            class_ref: None,
+            methods: HashMap::new(),
+        });
+        let set_cls = self.heap.alloc(HeapObject::ClassObject {
+            name: "Set".into(),
+            superclass: Some(object),
+            class_ref: None,
+            methods: HashMap::new(),
+        });
+
+        // Two-phase fixup: set class_ref now that class_cls is known.
+        for r in [object, class_cls, set_cls] {
+            if let HeapObject::ClassObject { class_ref, .. } = self.heap.get_mut(r) {
+                *class_ref = Some(class_cls);
+            }
+        }
+
+        self.core_classes = CoreClasses {
+            object: Some(object),
+            class_cls: Some(class_cls),
+            set_cls: Some(set_cls),
+        };
+    }
+
+    /// Return the `GcRef` for the bootstrapped ClassObject with the given name,
+    /// if one exists.
+    fn find_core_class_obj(&self, name: &str) -> Option<GcRef> {
+        match name {
+            "Object" => self.core_classes.object,
+            "Class"  => self.core_classes.class_cls,
+            "Set"    => self.core_classes.set_cls,
+            _ => None,
+        }
+    }
+
     /// Compile and execute the stdlib Sapphire files to populate the class registry.
     pub fn load_stdlib(&mut self) -> Result<(), VmError> {
+        self.bootstrap_core_classes();
         const SOURCES: &[(&str, &str)] = &[
             ("stdlib/object.spr", include_str!("../stdlib/src/object.spr")),
             ("stdlib/nil.spr", include_str!("../stdlib/src/nil.spr")),
@@ -902,6 +1011,13 @@ impl Vm {
             };
             self.globals.insert(cname, val);
         }
+        // Overwrite bootstrapped class names with their ClassObj values so that
+        // `Object`, `Class`, and `Set` resolve to the new heap-allocated class
+        // objects rather than old-style VmValue::Class entries.
+        let cc = self.core_classes.clone();
+        if let Some(r) = cc.object    { self.globals.insert("Object".into(), VmValue::ClassObj(r)); }
+        if let Some(r) = cc.class_cls { self.globals.insert("Class".into(),  VmValue::ClassObj(r)); }
+        if let Some(r) = cc.set_cls   { self.globals.insert("Set".into(),    VmValue::ClassObj(r)); }
         Ok(())
     }
 
@@ -1344,6 +1460,20 @@ impl Vm {
                             namespace: namespace_rc.clone(),
                         },
                     );
+                    // Mirror bytecode methods into the bootstrapped ClassObject if
+                    // this is a core class (Object, Class, Set, …).
+                    if let Some(class_obj_ref) = self.find_core_class_obj(&class_name) {
+                        for (mname, vm_method) in merged_rc.iter() {
+                            if let HeapObject::ClassObject { methods, .. } =
+                                self.heap.get_mut(class_obj_ref)
+                            {
+                                methods.insert(
+                                    mname.clone(),
+                                    SapphireMethod::Bytecode(vm_method.clone()),
+                                );
+                            }
+                        }
+                    }
                     self.stack.push(VmValue::Class {
                         name: class_name,
                         superclass: effective_super,
@@ -1368,6 +1498,21 @@ impl Vm {
                             methods,
                             ..
                         } => (name.clone(), fields.clone(), methods.clone()),
+                        VmValue::ClassObj(r) => {
+                            // Resolve name from the heap, then look up fields/methods
+                            // in ClassEntry so the normal constructor path works.
+                            let r = *r;
+                            let name = match self.heap.get(r) {
+                                HeapObject::ClassObject { name, .. } => name.clone(),
+                                _ => unreachable!(),
+                            };
+                            match self.classes.get(&name) {
+                                Some(entry) => {
+                                    (name, entry.fields.clone(), entry.methods.clone())
+                                }
+                                None => (name, vec![], Rc::new(HashMap::new())),
+                            }
+                        }
                         other => {
                             return Err(VmError::TypeError {
                                 message: format!("'{}' is not a class", other),
@@ -1619,19 +1764,38 @@ impl Vm {
 
                     if method_name == "class" && arg_count == 0 {
                         let recv = self.stack[recv_slot].clone();
-                        let result = match starting_class_name_for_is_a(&recv) {
-                            Some(cname) => match self.classes.get(&cname) {
-                                Some(entry) => VmValue::Class {
-                                    name: cname,
-                                    superclass: entry.superclass.clone(),
-                                    fields: entry.fields.clone(),
-                                    methods: entry.methods.clone(),
-                                    class_methods: entry.class_methods.clone(),
-                                    namespace: entry.namespace.clone(),
+                        // For bootstrapped types, return the heap-allocated ClassObj.
+                        let bootstrapped = match &recv {
+                            VmValue::Set(_) => self.core_classes.set_cls.map(VmValue::ClassObj),
+                            VmValue::ClassObj(r) => {
+                                let r = *r;
+                                if let HeapObject::ClassObject { class_ref: Some(cr), .. } =
+                                    self.heap.get(r)
+                                {
+                                    Some(VmValue::ClassObj(*cr))
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        };
+                        let result = if let Some(v) = bootstrapped {
+                            v
+                        } else {
+                            match starting_class_name_for_is_a(&recv) {
+                                Some(cname) => match self.classes.get(&cname) {
+                                    Some(entry) => VmValue::Class {
+                                        name: cname,
+                                        superclass: entry.superclass.clone(),
+                                        fields: entry.fields.clone(),
+                                        methods: entry.methods.clone(),
+                                        class_methods: entry.class_methods.clone(),
+                                        namespace: entry.namespace.clone(),
+                                    },
+                                    None => VmValue::Nil,
                                 },
                                 None => VmValue::Nil,
-                            },
-                            None => VmValue::Nil,
+                            }
                         };
                         self.stack.truncate(recv_slot);
                         self.stack.push(result);
@@ -1663,6 +1827,34 @@ impl Vm {
                             rescues: vec![],
                             class_name: None,
                         });
+                        continue;
+                    }
+
+                    // ClassObj method dispatch: receiver is a bootstrapped ClassObject.
+                    if let VmValue::ClassObj(class_obj_ref) = self.stack[recv_slot].clone() {
+                        let result = if method_name == "name" && arg_count == 0 {
+                            let name = match self.heap.get(class_obj_ref) {
+                                HeapObject::ClassObject { name, .. } => name.clone(),
+                                _ => unreachable!(),
+                            };
+                            VmValue::Str(name)
+                        } else if method_name == "superclass" && arg_count == 0 {
+                            let superclass_ref = match self.heap.get(class_obj_ref) {
+                                HeapObject::ClassObject { superclass, .. } => *superclass,
+                                _ => unreachable!(),
+                            };
+                            match superclass_ref {
+                                Some(r) => VmValue::ClassObj(r),
+                                None => VmValue::Nil,
+                            }
+                        } else {
+                            return Err(VmError::TypeError {
+                                message: format!("unknown class method '{}'", method_name),
+                                line,
+                            });
+                        };
+                        self.stack.truncate(recv_slot);
+                        self.stack.push(result);
                         continue;
                     }
 

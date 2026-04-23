@@ -67,3 +67,37 @@ fn superclass_method() {
         VmValue::Str("Animal".into())
     );
 }
+
+#[test]
+fn class_obj_bootstrap() {
+    // Set instances return the bootstrapped ClassObj for Set.
+    assert_eq!(
+        eval("Set.new.class.name"),
+        VmValue::Str("Set".into())
+    );
+    // The Set ClassObj's class is Class.
+    assert_eq!(
+        eval("Set.new.class.class.name"),
+        VmValue::Str("Class".into())
+    );
+    // Class.class is Class (circular).
+    assert_eq!(
+        eval("Set.new.class.class.class.name"),
+        VmValue::Str("Class".into())
+    );
+    // Object.superclass is nil (root of the hierarchy).
+    assert_eq!(
+        eval("Object.superclass"),
+        VmValue::Nil
+    );
+    // Set's ClassObj is accessible directly and has the right name.
+    assert_eq!(
+        eval("Set.name"),
+        VmValue::Str("Set".into())
+    );
+    // Class.name works.
+    assert_eq!(
+        eval("Class.name"),
+        VmValue::Str("Class".into())
+    );
+}
