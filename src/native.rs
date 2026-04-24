@@ -116,7 +116,6 @@ pub fn dispatch_native_method(
     line: u32,
 ) -> Result<VmValue, VmError> {
     match recv {
-        VmValue::Int(n) => crate::native_int::dispatch_int_method(*n, name, args, line),
         VmValue::Float(n) => crate::native_float::dispatch_float_method(*n, name, args, line),
         VmValue::Str(s) => crate::native_string::dispatch_str_method(heap, s, name, args, line),
         VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),

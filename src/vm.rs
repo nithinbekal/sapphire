@@ -425,6 +425,7 @@ pub struct CoreClasses {
     pub class_cls: Option<GcRef>,
     pub set_cls: Option<GcRef>,
     pub nil_cls: Option<GcRef>,
+    pub int_cls: Option<GcRef>,
 }
 
 /// Per-class metadata stored by DefClass.
@@ -922,6 +923,7 @@ impl Vm {
             self.core_classes.class_cls,
             self.core_classes.set_cls,
             self.core_classes.nil_cls,
+            self.core_classes.int_cls,
         ]
         .into_iter()
         .flatten()
@@ -966,9 +968,15 @@ impl Vm {
             class_ref: None,
             methods: HashMap::new(),
         });
+        let int_cls = self.heap.alloc(HeapObject::ClassObject {
+            name: "Int".into(),
+            superclass: Some(object),
+            class_ref: None,
+            methods: HashMap::new(),
+        });
 
         // Two-phase fixup: set class_ref now that class_cls is known.
-        for r in [object, class_cls, set_cls, nil_cls] {
+        for r in [object, class_cls, set_cls, nil_cls, int_cls] {
             if let HeapObject::ClassObject { class_ref, .. } = self.heap.get_mut(r) {
                 *class_ref = Some(class_cls);
             }
@@ -979,14 +987,17 @@ impl Vm {
             class_cls: Some(class_cls),
             set_cls: Some(set_cls),
             nil_cls: Some(nil_cls),
+            int_cls: Some(int_cls),
         };
         crate::native_set::register_methods(&mut self.heap, set_cls);
         crate::native_nil::register_methods(&mut self.heap, nil_cls);
+        crate::native_int::register_methods(&mut self.heap, int_cls);
     }
 
     /// Bootstrapped `ClassObject` for this primitive receiver, if any.
     fn class_object_for_primitive(&self, recv: &VmValue) -> Option<GcRef> {
         match recv {
+            VmValue::Int(_) => self.core_classes.int_cls,
             VmValue::Nil => self.core_classes.nil_cls,
             VmValue::Set(_) => self.core_classes.set_cls,
             _ => None,
@@ -1018,6 +1029,7 @@ impl Vm {
             "Class"  => self.core_classes.class_cls,
             "Set"    => self.core_classes.set_cls,
             "Nil"    => self.core_classes.nil_cls,
+            "Int"    => self.core_classes.int_cls,
             _ => None,
         }
     }
@@ -1087,6 +1099,7 @@ impl Vm {
         if let Some(r) = cc.class_cls { self.globals.insert("Class".into(),  VmValue::ClassObj(r)); }
         if let Some(r) = cc.set_cls   { self.globals.insert("Set".into(),    VmValue::ClassObj(r)); }
         if let Some(r) = cc.nil_cls   { self.globals.insert("Nil".into(),    VmValue::ClassObj(r)); }
+        if let Some(r) = cc.int_cls  { self.globals.insert("Int".into(),    VmValue::ClassObj(r)); }
         Ok(())
     }
 
@@ -1842,6 +1855,7 @@ impl Vm {
                         let recv = self.stack[recv_slot].clone();
                         // For bootstrapped types, return the heap-allocated ClassObj.
                         let bootstrapped = match &recv {
+                            VmValue::Int(_) => self.core_classes.int_cls.map(VmValue::ClassObj),
                             VmValue::Nil => self.core_classes.nil_cls.map(VmValue::ClassObj),
                             VmValue::Set(_) => self.core_classes.set_cls.map(VmValue::ClassObj),
                             VmValue::ClassObj(r) => {
