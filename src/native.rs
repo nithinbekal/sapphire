@@ -107,32 +107,14 @@ fn to_float(v: &VmValue) -> Option<f64> {
 
 // ── Native method dispatch ────────────────────────────────────────────────────
 
-/// Dispatch a native (non-block) method call on a built-in type.
-pub fn dispatch_native_method(
-    _heap: &mut GcHeap<HeapObject>,
-    recv: &VmValue,
-    name: &str,
-    _args: &[VmValue],
-    line: u32,
-) -> Result<VmValue, VmError> {
-    Err(VmError::TypeError {
-        message: format!("'{}' has no method '{}'", recv, name),
-        line,
-    })
-}
-
-/// Like `dispatch_native_method` but returns `None` when no native handler
-/// exists for this method, allowing callers to try the class registry next.
-/// Any real type error (wrong arg count, wrong type, etc.) is still `Some(Err)`.
+/// Returns `None` so callers fall through to the class registry.
+/// Non-block primitives are handled via `ClassObject` / `define_native_method` first.
 pub fn try_native_method(
-    heap: &mut GcHeap<HeapObject>,
-    recv: &VmValue,
-    name: &str,
-    args: &[VmValue],
-    line: u32,
+    _heap: &mut GcHeap<HeapObject>,
+    _recv: &VmValue,
+    _name: &str,
+    _args: &[VmValue],
+    _line: u32,
 ) -> Option<Result<VmValue, VmError>> {
-    match dispatch_native_method(heap, recv, name, args, line) {
-        Err(VmError::TypeError { ref message, .. }) if message.contains("has no method") => None,
-        result => Some(result),
-    }
+    None
 }
