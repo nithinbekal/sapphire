@@ -116,7 +116,6 @@ pub fn dispatch_native_method(
     line: u32,
 ) -> Result<VmValue, VmError> {
     match recv {
-        VmValue::Str(s) => crate::native_string::dispatch_str_method(heap, s, name, args, line),
         VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
         VmValue::Range { from, to } => crate::native_range::dispatch_range_method(

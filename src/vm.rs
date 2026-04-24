@@ -20,11 +20,28 @@ pub type NativeFn = fn(
     u32,
 ) -> Result<VmValue, VmError>;
 
+/// Inclusive arity bounds for a [`SapphireMethod::Native`] (`min`..=`max` arguments).
+#[derive(Clone, Copy)]
+pub struct NativeArity {
+    pub min: usize,
+    pub max: usize,
+}
+
+impl From<usize> for NativeArity {
+    fn from(n: usize) -> Self {
+        Self { min: n, max: n }
+    }
+}
+
 /// A method that lives in a `ClassObject` method table.
 #[derive(Clone)]
 pub enum SapphireMethod {
     Bytecode(VmMethod),
-    Native { arity: usize, func: NativeFn },
+    Native {
+        min_arity: usize,
+        max_arity: usize,
+        func: NativeFn,
+    },
 }
 
 /// Objects managed by the GC heap — all types that can form reference cycles.
@@ -137,14 +154,19 @@ pub fn define_native_method(
     heap: &mut GcHeap<HeapObject>,
     class_ref: GcRef,
     name: &str,
-    arity: usize,
+    arity: impl Into<NativeArity>,
     func: NativeFn,
 ) {
+    let NativeArity { min, max } = arity.into();
     match heap.get_mut(class_ref) {
         HeapObject::ClassObject { methods, .. } => {
             methods.insert(
                 name.to_string(),
-                SapphireMethod::Native { arity, func },
+                SapphireMethod::Native {
+                    min_arity: min,
+                    max_arity: max,
+                    func,
+                },
             );
         }
         _ => panic!("define_native_method: GcRef is not a ClassObject"),
@@ -427,6 +449,7 @@ pub struct CoreClasses {
     pub nil_cls: Option<GcRef>,
     pub int_cls: Option<GcRef>,
     pub float_cls: Option<GcRef>,
+    pub string_cls: Option<GcRef>,
 }
 
 /// Per-class metadata stored by DefClass.
@@ -926,6 +949,7 @@ impl Vm {
             self.core_classes.nil_cls,
             self.core_classes.int_cls,
             self.core_classes.float_cls,
+            self.core_classes.string_cls,
         ]
         .into_iter()
         .flatten()
@@ -982,9 +1006,15 @@ impl Vm {
             class_ref: None,
             methods: HashMap::new(),
         });
+        let string_cls = self.heap.alloc(HeapObject::ClassObject {
+            name: "String".into(),
+            superclass: Some(object),
+            class_ref: None,
+            methods: HashMap::new(),
+        });
 
         // Two-phase fixup: set class_ref now that class_cls is known.
-        for r in [object, class_cls, set_cls, nil_cls, int_cls, float_cls] {
+        for r in [object, class_cls, set_cls, nil_cls, int_cls, float_cls, string_cls] {
             if let HeapObject::ClassObject { class_ref, .. } = self.heap.get_mut(r) {
                 *class_ref = Some(class_cls);
             }
@@ -997,11 +1027,13 @@ impl Vm {
             nil_cls: Some(nil_cls),
             int_cls: Some(int_cls),
             float_cls: Some(float_cls),
+            string_cls: Some(string_cls),
         };
         crate::native_set::register_methods(&mut self.heap, set_cls);
         crate::native_nil::register_methods(&mut self.heap, nil_cls);
         crate::native_int::register_methods(&mut self.heap, int_cls);
         crate::native_float::register_methods(&mut self.heap, float_cls);
+        crate::native_string::register_methods(&mut self.heap, string_cls);
     }
 
     /// Bootstrapped `ClassObject` for this primitive receiver, if any.
@@ -1011,6 +1043,7 @@ impl Vm {
             VmValue::Int(_) => self.core_classes.int_cls,
             VmValue::Nil => self.core_classes.nil_cls,
             VmValue::Set(_) => self.core_classes.set_cls,
+            VmValue::Str(_) => self.core_classes.string_cls,
             _ => None,
         }
     }
@@ -1042,6 +1075,7 @@ impl Vm {
             "Nil"    => self.core_classes.nil_cls,
             "Int"    => self.core_classes.int_cls,
             "Float"  => self.core_classes.float_cls,
+            "String" => self.core_classes.string_cls,
             _ => None,
         }
     }
@@ -1113,6 +1147,9 @@ impl Vm {
         if let Some(r) = cc.nil_cls   { self.globals.insert("Nil".into(),    VmValue::ClassObj(r)); }
         if let Some(r) = cc.int_cls  { self.globals.insert("Int".into(),    VmValue::ClassObj(r)); }
         if let Some(r) = cc.float_cls { self.globals.insert("Float".into(), VmValue::ClassObj(r)); }
+        if let Some(r) = cc.string_cls {
+            self.globals.insert("String".into(), VmValue::ClassObj(r));
+        }
         Ok(())
     }
 
@@ -1872,6 +1909,7 @@ impl Vm {
                             VmValue::Int(_) => self.core_classes.int_cls.map(VmValue::ClassObj),
                             VmValue::Nil => self.core_classes.nil_cls.map(VmValue::ClassObj),
                             VmValue::Set(_) => self.core_classes.set_cls.map(VmValue::ClassObj),
+                            VmValue::Str(_) => self.core_classes.string_cls.map(VmValue::ClassObj),
                             VmValue::ClassObj(r) => {
                                 let r = *r;
                                 if let HeapObject::ClassObject { class_ref: Some(cr), .. } =
@@ -2212,12 +2250,21 @@ impl Vm {
                                 self.lookup_class_object_method(start, &method_name)
                         {
                             match m {
-                                SapphireMethod::Native { arity, func } => {
-                                    if arity != arg_count {
+                                SapphireMethod::Native {
+                                    min_arity,
+                                    max_arity,
+                                    func,
+                                } => {
+                                    if arg_count < min_arity || arg_count > max_arity {
+                                        let expected = if min_arity == max_arity {
+                                            format!("{}", min_arity)
+                                        } else {
+                                            format!("{} to {}", min_arity, max_arity)
+                                        };
                                         return Err(VmError::TypeError {
                                             message: format!(
                                                 "method '{}' expects {} arg(s), got {}",
-                                                method_name, arity, arg_count
+                                                method_name, expected, arg_count
                                             ),
                                             line,
                                         });

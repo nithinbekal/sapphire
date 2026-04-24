@@ -1,5 +1,5 @@
-use crate::gc::GcHeap;
-use crate::vm::{HeapObject, VmError, VmValue};
+use crate::gc::{GcHeap, GcRef};
+use crate::vm::{define_native_method, HeapObject, NativeArity, VmError, VmValue};
 
 const METHOD_ARITIES: &[(&str, usize)] = &[
     ("bytes", 0),
@@ -16,6 +16,7 @@ const METHOD_ARITIES: &[(&str, usize)] = &[
     ("size", 0),
     ("slice", 2),
     ("starts_with?", 1),
+    ("split", 1),
     ("to_f", 0),
     ("to_i", 0),
     ("to_s", 0),
@@ -30,6 +31,13 @@ fn arg_error(name: &str, argc: usize, line: u32) -> VmError {
         .map(|(_, arity)| format!("String.{name} expects {arity} argument(s), got {argc}"))
         .unwrap_or_else(|| format!("String has no method '{name}'"));
     VmError::TypeError { message: msg, line }
+}
+
+fn str_recv(recv: &VmValue) -> &str {
+    match recv {
+        VmValue::Str(s) => s.as_str(),
+        _ => unreachable!("String native on non-Str"),
+    }
 }
 
 pub fn dispatch_str_method(
@@ -119,4 +127,75 @@ pub fn dispatch_str_method(
         }),
         _ => Err(arg_error(name, args.len(), line)),
     }
+}
+
+macro_rules! str_native {
+    ($fn:ident, $name:literal) => {
+        pub fn $fn(
+            heap: &mut GcHeap<HeapObject>,
+            recv: &VmValue,
+            args: &[VmValue],
+            line: u32,
+        ) -> Result<VmValue, VmError> {
+            dispatch_str_method(heap, str_recv(recv), $name, args, line)
+        }
+    };
+}
+
+str_native!(string_bytes, "bytes");
+str_native!(string_chars, "chars");
+str_native!(string_chomp, "chomp");
+str_native!(string_downcase, "downcase");
+str_native!(string_empty_q, "empty?");
+str_native!(string_ends_with_q, "ends_with?");
+str_native!(string_include_q, "include?");
+str_native!(string_lines, "lines");
+str_native!(string_replace, "replace");
+str_native!(string_replace_all, "replace_all");
+str_native!(string_reverse, "reverse");
+str_native!(string_size, "size");
+str_native!(string_slice, "slice");
+str_native!(string_starts_with_q, "starts_with?");
+str_native!(string_to_f, "to_f");
+str_native!(string_to_i, "to_i");
+str_native!(string_to_s, "to_s");
+str_native!(string_trim, "trim");
+str_native!(string_upcase, "upcase");
+
+pub fn string_split(
+    heap: &mut GcHeap<HeapObject>,
+    recv: &VmValue,
+    args: &[VmValue],
+    line: u32,
+) -> Result<VmValue, VmError> {
+    dispatch_str_method(heap, str_recv(recv), "split", args, line)
+}
+
+pub fn register_methods(heap: &mut GcHeap<HeapObject>, class_ref: GcRef) {
+    define_native_method(heap, class_ref, "bytes", 0, string_bytes);
+    define_native_method(heap, class_ref, "chars", 0, string_chars);
+    define_native_method(heap, class_ref, "chomp", 0, string_chomp);
+    define_native_method(heap, class_ref, "downcase", 0, string_downcase);
+    define_native_method(heap, class_ref, "empty?", 0, string_empty_q);
+    define_native_method(heap, class_ref, "ends_with?", 1, string_ends_with_q);
+    define_native_method(heap, class_ref, "include?", 1, string_include_q);
+    define_native_method(heap, class_ref, "lines", 0, string_lines);
+    define_native_method(heap, class_ref, "replace", 2, string_replace);
+    define_native_method(heap, class_ref, "replace_all", 2, string_replace_all);
+    define_native_method(heap, class_ref, "reverse", 0, string_reverse);
+    define_native_method(heap, class_ref, "size", 0, string_size);
+    define_native_method(heap, class_ref, "slice", 2, string_slice);
+    define_native_method(heap, class_ref, "starts_with?", 1, string_starts_with_q);
+    define_native_method(
+        heap,
+        class_ref,
+        "split",
+        NativeArity { min: 0, max: 1 },
+        string_split,
+    );
+    define_native_method(heap, class_ref, "to_f", 0, string_to_f);
+    define_native_method(heap, class_ref, "to_i", 0, string_to_i);
+    define_native_method(heap, class_ref, "to_s", 0, string_to_s);
+    define_native_method(heap, class_ref, "trim", 0, string_trim);
+    define_native_method(heap, class_ref, "upcase", 0, string_upcase);
 }
