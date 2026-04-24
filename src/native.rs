@@ -109,19 +109,16 @@ fn to_float(v: &VmValue) -> Option<f64> {
 
 /// Dispatch a native (non-block) method call on a built-in type.
 pub fn dispatch_native_method(
-    heap: &mut GcHeap<HeapObject>,
+    _heap: &mut GcHeap<HeapObject>,
     recv: &VmValue,
     name: &str,
-    args: &[VmValue],
+    _args: &[VmValue],
     line: u32,
 ) -> Result<VmValue, VmError> {
-    match recv {
-        VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
-        other => Err(VmError::TypeError {
-            message: format!("'{}' has no method '{}'", other, name),
-            line,
-        }),
-    }
+    Err(VmError::TypeError {
+        message: format!("'{}' has no method '{}'", recv, name),
+        line,
+    })
 }
 
 /// Like `dispatch_native_method` but returns `None` when no native handler
