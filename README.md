@@ -1,35 +1,52 @@
 # Sapphire
 
-Sapphire is an object-oriented programming language built as a learning project to explore interpreter and compiler design.
+A Ruby-inspired, gradually typed, object-oriented scripting language — everything is an object, types are optional, and the syntax stays out of your way.
 
-It follows Ruby's object model — everything is an object — but adds gradual typing and simplifies the syntax where possible.
+**[Website](https://sapphire-lang.dev/)** · **[Try it online](https://sapphire-lang.dev/try/)** · **[Tutorial](https://sapphire-lang.dev/tutorial/)**
 
-## Goals
+## Features
 
-- Explore Ruby's object model in a typed setting
-- Experiment with OOP features: classes, inheritance, and closures
-- Follow the [Crafting Interpreters](https://craftinginterpreters.com) path — tree-walk interpreter first, bytecode VM later
-- Keep the language small and the implementation readable
+- **Gradual typing** — annotate as much or as little as you like; types are checked at runtime when present
+- **Everything is an object** — `Int`, `Bool`, `String`, and other primitives have methods
+- **Classes with inheritance** — single inheritance, `attr` fields, private methods via `defp`, class methods
+- **Closures and blocks** — first-class functions, `yield`, and block-accepting methods
+- **Rich standard library** — `List`, `Map`, `Set`, `String`, `Regex`, `Math`, `Date`, `File`, and more
+- **Imports** — split code across files with `import`
+- **Mark-and-sweep GC** — handles cycles; no manual memory management
 
-## Design Principles
+## Quick look
 
-- **Everything is an object** — primitives like `Int` and `Bool` are objects with methods
-- **No magic** — no global variables, no class variables, no metaprogramming
+```ruby
+class Shape {
+  attr color = "red"
 
-## Running
+  def area() { 0 }
 
-```
-sapphire run file.spr   # run a file
-sapphire                # start the REPL
+  def describe() {
+    "A #{self.color} shape with area #{self.area()}"
+  }
+}
+
+class Circle < Shape {
+  attr radius: Float
+
+  def area() {
+    Math::PI * self.radius * self.radius
+  }
+}
+
+c = Circle.new(color: "blue", radius: 3.0)
+print c.describe()
+print c.is_a?(Shape)   # true
 ```
 
 ## Syntax
 
-### Variables
+### Variables and types
 
 ```ruby
 x = 10
-name = "alice"
+name: String = "alice"
 flag = true
 ```
 
@@ -63,52 +80,101 @@ while x < 10 {
 ### Functions
 
 ```ruby
-def add(a, b) {
+def add(a: Int, b: Int) -> Int {
   a + b
 }
 
-def abs(n) {
-  if n < 0 { return -n }
-  n
+def clamp(value: Int, min: Int, max: Int) -> Int {
+  return min if value < min
+  return max if value > max
+  value
+}
+```
+
+Blocks and `yield`:
+
+```ruby
+def repeat(n: Int) {
+  i = 0
+  while i < n {
+    yield(i)
+    i = i + 1
+  }
 }
 
-add(1, 2)
+repeat(3) { |i| print "step #{i}" }
 ```
 
 ### Classes
 
 ```ruby
-class Point {
-  attr x
-  attr y
-  attr label = "origin"
-}
-
-p = Point.new(x: 1, y: 2)
-p.x      # => 1
-p.label  # => "origin"
-```
-
-Use `defp` for private methods:
-
-```ruby
 class BankAccount {
-  attr balance
+  attr balance: Int = 0
 
-  def deposit(amount) { self.balance = balance + validate(amount) }
+  def deposit(amount: Int) {
+    self.balance = self.balance + validate(amount)
+  }
 
-  defp validate(amount) {
-    raise "must be positive" if amount <= 0
+  def withdraw(amount: Int) {
+    self.balance = self.balance - validate(amount)
+  }
+
+  defp validate(amount: Int) -> Int {
+    raise "amount must be positive" if amount <= 0
     amount
   }
 }
+
+account = BankAccount.new()
+account.deposit(100)
+account.withdraw(30)
+print account.balance   # 70
 ```
 
-All objects inherit from `Object` and respond to `is_a?`:
+Class methods use `self { }`:
 
 ```ruby
-p.is_a?(Point)    # true
-p.is_a?(Object)   # true
+class Color {
+  attr r: Int
+  attr g: Int
+  attr b: Int
+
+  self {
+    def red()   { Color.new(r: 255, g: 0, b: 0) }
+    def green() { Color.new(r: 0, g: 255, b: 0) }
+    def blue()  { Color.new(r: 0, g: 0, b: 255) }
+  }
+}
+
+c = Color.red()
+```
+
+### Collections
+
+```ruby
+numbers = [3, 1, 4, 1, 5, 9]
+
+doubled = numbers.map { |n| n * 2 }
+evens   = numbers.select { |n| n % 2 == 0 }
+total   = numbers.reduce(0) { |acc, n| acc + n }
+
+print numbers.any? { |n| n > 8 }   # true
+print numbers.all? { |n| n > 0 }   # true
+```
+
+```ruby
+scores = { alice: 95, bob: 82, carol: 91 }
+scores.each { |name, score| print "#{name}: #{score}" }
+passing = scores.select { |_, score| score >= 90 }
+```
+
+### Imports
+
+```ruby
+import "./geometry/point"
+import "./geometry/shapes"
+
+p = Point.new(x: 1.0, y: 2.0)
 ```
 
 ### Error handling
@@ -123,21 +189,21 @@ else
 end
 ```
 
-Inline rescue inside a `def`:
+Inline rescue inside a function:
 
 ```ruby
-def safe_div(a, b) {
+def safe_div(a: Int, b: Int) -> Int {
   a / b
 rescue e
   0
 }
 ```
 
-## Current Limitations
+## Running
 
-This is an early preview. Known gaps:
-
-- **No imports** — all code must live in a single file
-- **No class methods** — only instance methods are supported
-- **No garbage collection** — reference-counted memory; cycles will leak
-- **REPL** — no command history or multiline input
+```
+sapphire run file.spr      # run a file
+sapphire test              # run *_test.spr files
+sapphire typecheck file.spr
+sapphire console           # start the REPL
+```
