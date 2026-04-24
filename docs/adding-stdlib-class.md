@@ -1,8 +1,14 @@
 # Adding a new stdlib class
 
-Native-backed stdlib work: a Sapphire stub, a `native_*` module, `pub mod` in `lib.rs`, wiring in `vm.rs` (and `native.rs` for value types). References: `Process` / `Env` (normal class), `Socket` (side-table + `&mut self` on `Vm`), `Set` (heap value type).
+There are two shapes of native-backed stdlib work:
 
-**Checklist:** stub → `dispatch_*` → `lib.rs` mod → `vm.rs` (`load_stdlib`, class dispatch, instance dispatch if needed) → tests → `./scripts/ci`.
+1. **Normal class** — Instances are `VmValue::Instance` (or class methods only). Pattern: Sapphire stub, `native_*` class (and optional instance) dispatch, `pub mod` in `lib.rs`, `vm.rs` branches for class/instance. References: `Process` / `Env`, `Socket` (side-table + `&mut self` on `Vm`).
+
+2. **Heap primitive + `ClassObject`** — Values are `VmValue::Foo(GcRef)` on the GC heap, but the **global** for `Foo` is `VmValue::ClassObj` so `receiver.class`, `.name`, and a **single method table** (native + Sapphire bytecode) work like Ruby. Reference: **`Set`**. Native instance methods use `define_native_method` / `register_methods`; they are **not** wired through `dispatch_native_method`.
+
+**Checklist (normal):** stub → `dispatch_*` → `lib.rs` mod → `vm.rs` (`load_stdlib`, class dispatch, instance dispatch if needed) → tests → `./scripts/ci`.
+
+**Checklist (heap + ClassObject):** stub → heap `VmValue` / `HeapObject` → `CoreClasses` + `bootstrap_core_classes` + `find_core_class_obj` + `gc_roots` → `native_*::register_methods` (`define_native_method`) → `OpCode::Invoke` / `InvokeWithBlock` / `.class` (copy `Set`) → `load_stdlib` global overwrite → optional `NewInstance` / class-method branch → `primitive_class_name` only (no `dispatch_native_method` arm) → tests → `./scripts/ci`.
 
 ---
 
@@ -51,6 +57,8 @@ class Foo {
 ---
 
 ## 2. Native dispatch (`src/native_foo.rs`)
+
+For **class** methods (and normal classes’ instance dispatchers), use free functions or small enums. For **heap primitives on a `ClassObject`**, put **instance** natives in the same module as **`register_methods`** (see [Heap-backed primitives](#heap-backed-primitives-classobject-model)); skip this section’s `dispatch_foo_class_method` unless `Foo` also has class methods handled in `vm.rs`.
 
 For returns that are plain `VmValue` scalars only, mirror `dispatch_file_class_method`:
 
@@ -169,7 +177,9 @@ Add a peer of the `} else if name == "File" {` branch:
 
 ### 4c. Instance methods (optional)
 
-If instances expose methods, add a block before `if dt_handled` in the native instance path (search for the `Instant` / datetime comment). Pattern: copy args from the stack, call `dispatch_foo_instance_method`, handle `VmError::Raised`, set a `*_handled` flag, join `foo_handled || dt_handled`. The dispatcher receives `GcRef` to fields — use `heap.get_fields(fields_ref)`.
+**`VmValue::Instance`:** add a block before `if dt_handled` in the native instance path (search for the `Instant` / datetime comment). Pattern: copy args from the stack, call `dispatch_foo_instance_method`, handle `VmError::Raised`, set a `*_handled` flag, join `foo_handled || dt_handled`. The dispatcher receives `GcRef` to fields — use `heap.get_fields(fields_ref)`.
+
+**Heap primitive on a `ClassObject`:** instance methods are resolved in `OpCode::Invoke` via `lookup_class_object_method` (see [Heap-backed primitives](#heap-backed-primitives-classobject-model)); do not add a datetime-style `Vm` branch unless you still use the legacy path.
 
 ---
 
@@ -257,11 +267,15 @@ fn dispatch_foo_instance(&mut self, fields_ref: GcRef, method: &str, args: &[VmV
 
 ---
 
-## Heap-backed value types (`List` / `Map` / `Set` style)
+## Heap-backed primitives (ClassObject model)
 
-For a first-class type backed by `GcRef` (not `Instance`), `Set` is the reference. Mirror how `List` / `Map` are threaded through the VM; the snippets below use `Set` as the running example.
+Use this when the value is a **`GcRef` into `HeapObject`** (like `List` / `Map` / `Set`), and you want **`value.class` → `VmValue::ClassObj`**, **`Foo` global → `ClassObj`**, and **native + `.spr` bytecode in one method table** on `HeapObject::ClassObject`.
 
-### `HeapObject`, `VmValue`, tracing, formatting
+`List` and `Map` today still use the older path (`dispatch_native_method` + `ClassEntry` only). **`Set`** is the reference for the ClassObject model.
+
+### 1. `HeapObject`, `VmValue`, trace roots, display
+
+Add the payload variant, trace it in `Trace for HeapObject`, push the ref from `collect_refs` / `PartialEq` / `Display`, and extend `format_value_with_heap` (copy `Set`).
 
 ```rust
 // HeapObject — add next to List/Map
@@ -282,7 +296,7 @@ Set(GcRef),
 // fmt::Display
 VmValue::Set(_) => write!(f, "<set>"),
 
-// format_value_with_heap — follow List formatting; join elements with ", "
+// format_value_with_heap
 VmValue::Set(r) => {
     let parts: Vec<String> = heap
         .get_set(*r)
@@ -293,21 +307,11 @@ VmValue::Set(r) => {
 }
 ```
 
-### `GcHeap` accessors and `alloc_set`
+### 2. `GcHeap` accessors and `alloc_*`
 
 ```rust
-pub fn get_set(&self, r: GcRef) -> &Vec<VmValue> {
-    match self.get(r) {
-        HeapObject::Set(v) => v,
-        _ => panic!("GcRef is not a Set"),
-    }
-}
-pub fn get_set_mut(&mut self, r: GcRef) -> &mut Vec<VmValue> {
-    match self.get_mut(r) {
-        HeapObject::Set(v) => v,
-        _ => panic!("GcRef is not a Set"),
-    }
-}
+pub fn get_set(&self, r: GcRef) -> &Vec<VmValue> { /* match HeapObject::Set */ }
+pub fn get_set_mut(&mut self, r: GcRef) -> &mut Vec<VmValue> { /* … */ }
 
 fn alloc_set(&mut self, v: Vec<VmValue>) -> VmValue {
     self.maybe_gc();
@@ -315,71 +319,60 @@ fn alloc_set(&mut self, v: Vec<VmValue>) -> VmValue {
 }
 ```
 
-### Native module (`src/native_set.rs`)
+### 3. `CoreClasses`, `gc_roots`, `bootstrap_core_classes`
 
-```rust
-use crate::gc::{GcHeap, GcRef};
-use crate::vm::{format_value_with_heap, HeapObject, VmError, VmValue};
+- Add **`set_cls: Option<GcRef>`** (or `foo_cls`) on **`CoreClasses`** in `vm.rs`.
+- **`gc_roots`:** include the new `Option` in the root list so the `ClassObject` is never collected.
+- **`bootstrap_core_classes`** (runs at the start of `load_stdlib`):
+  1. Allocate **`HeapObject::ClassObject`** for your type: `name: "Set".into()`, **`superclass: Some(object)`** (the bootstrapped Object ref), **`class_ref: None`**, empty **`methods`**.
+  2. Extend the **`class_ref` fixup** loop so every bootstrapped `ClassObject` (including yours) gets **`class_ref = Some(class_cls)`**.
+  3. Store **`Some(set_cls)`** on **`self.core_classes`**.
+  4. Call **`crate::native_set::register_methods(&mut self.heap, set_cls)`** so natives land in **`methods`** before `.spr` runs.
 
-pub fn dispatch_set_method(
-    heap: &mut GcHeap<HeapObject>,
-    r: GcRef,
-    recv: &VmValue,
-    name: &str,
-    args: &[VmValue],
-    line: u32,
-) -> Result<VmValue, VmError> {
-    match name {
-        "size" | "length" if args.is_empty() => Ok(VmValue::Int(heap.get_set(r).len() as i64)),
-        _ => Err(VmError::TypeError {
-            message: format!("Set has no method '{}'", name),
-            line,
-        }),
-    }
-}
-```
+### 4. `find_core_class_obj` and `load_stdlib` globals
 
-Register with `pub mod native_set;` in `lib.rs` (§3).
+- **`find_core_class_obj`:** return **`Some(set_cls)`** for **`"Set"`** so `OpCode::DefClass` can mirror bytecode into the same `ClassObject` after each stdlib file runs.
+- **`load_stdlib`:** after the loop that fills **`globals`** with **`VmValue::Class`**, **overwrite** **`"Set"`** with **`VmValue::ClassObj(set_cls)`** so user code and **`Set.new`** see the heap class object.
 
-### `native.rs`
+**DefClass mirroring:** merged instance methods from `.spr` are inserted into the `ClassObject`. If a name is already **`SapphireMethod::Native`** and the merged method is **only inherited** (`vm_method.defined_in != class_name`), the mirror **skips** the insert so natives like **`Set#to_s`** are not replaced by **`Object#to_s`**.
 
-```rust
-VmValue::Set(_) => Some("Set"),           // primitive_class_name
-VmValue::Set(_) => "Set",                // value_type_name
-VmValue::Set(r) => crate::native_set::dispatch_set_method(heap, *r, recv, name, args, line),
-```
+### 5. Native module — `define_native_method` + `register_methods`
 
-### Block methods
+In **`src/native_set.rs`** (or `native_foo.rs`):
 
-Add an arm in `dispatch_native_block_method` before the catch-all (copy the shape of `Set` / `each` in `vm.rs`).
+- Each method is a **`pub fn`** with type **`NativeFn`**:
 
-### `OpCode::NewInstance`
+  `fn(&mut GcHeap<HeapObject>, &VmValue, &[VmValue], u32) -> Result<VmValue, VmError>`
 
-`Foo.new(args)` hits `NewInstance`, not class-method dispatch. Guard at the **top** of that handler before normal construction. See `Foo.new` in `AGENT.md`.
+  Unpack **`VmValue::Set(r)`** (or your variant) from **`recv`**, then implement the body.
 
-```rust
-if class_name == "Set" {
-    let list_val = if n_pairs == 0 { None } else { Some(self.stack[base + 2].clone()) };
-    let elements = match list_val {
-        None => Vec::new(),
-        Some(VmValue::List(lr)) => crate::native_set::dedup_list(self.heap.get_list(lr).clone()),
-        _ => return Err(VmError::TypeError {
-            message: "Set.new expects a List argument".to_string(),
-            line,
-        }),
-    };
-    self.stack.drain(base..);
-    let result = self.alloc_set(elements);
-    self.stack.push(result);
-    continue;
-}
-```
+- **`register_methods(heap, class_ref)`** calls **`crate::vm::define_native_method(heap, class_ref, "add", 1, set_add)`** for each name/arity/function.
 
-`dedup_list` can live in `native_set.rs` (`VmValue: PartialEq` but not `Hash`).
+- **`pub mod native_set;`** in **`lib.rs`**.
 
-### Stub and `load_stdlib`
+- **`primitive_class_name`** / **`value_type_name`** in **`native.rs`**: add **`Set`** (or **`Foo`**) so **`ClassEntry`** fallback and errors still know the type. **Do not** add a **`VmValue::Set`** arm to **`dispatch_native_method`** for types fully on the ClassObject path.
 
-Higher-order methods can live in Sapphire on top of a wired `each` block method:
+### 6. `OpCode::Invoke` and `InvokeWithBlock`
+
+Copy the **`Set`** blocks in **`vm.rs`**:
+
+- **Non-block:** `matches!(recv, VmValue::Set(_)) && let Some(set_cls) = self.core_classes.set_cls && let Some(m) = self.lookup_class_object_method(set_cls, &method_name)` — dispatch **`SapphireMethod::Native`** (arity check + call **`func`**) or **`Bytecode`** (private + arity + **`CallFrame`**), same as **`ClassEntry`** path.
+- **With block:** same **`&& let` chain** but match **`SapphireMethod::Bytecode(m)`** only; native **block** methods (e.g. **`each`**) stay in **`dispatch_native_block_method`** on **`Vm`**.
+
+Then **`try_native_method`** / **`ClassEntry`** remain fallbacks for anything the chain does not define.
+
+### 7. `.class` and class methods
+
+- **`Invoke`**, **`method_name == "class"`**: for **`VmValue::Set`**, push **`VmValue::ClassObj(self.core_classes.set_cls)`** (same idea as current **`Set`** handling).
+- **`Set.new`:** either a dedicated **`else if name == "Set"`** branch on **`VmValue::Class`** (legacy global during load) **or** rely on **`NewInstance`** once **`Set`** is **`ClassObj`** — **`NewInstance`** already resolves **`VmValue::ClassObj`** via **`ClassEntry`** and can special-case **`class_name == "Set"`** at the top (see existing code).
+
+### 8. Block-only natives
+
+Add an arm in **`dispatch_native_block_method`** on **`Vm`** (copy **`Set` / `each`**).
+
+### 9. Stub and `load_stdlib`
+
+Higher-order helpers in Sapphire call primitives you provide from Rust or from **`each`**:
 
 ```sapphire
 class Set {
@@ -391,8 +384,8 @@ class Set {
 }
 ```
 
-Register the file in `load_stdlib` (§4a).
+Register **`stdlib/src/set.spr`** in **`load_stdlib`** (§4a).
 
-### Tests
+### 10. Tests
 
-`stdlib/tests/set_test.spr`: construction, membership, mutation, set algebra, `to_a` / `to_s`, `each`, and higher-order helpers from the stub.
+`stdlib/tests/set_test.spr` (or your type): construction, core natives, `to_s` / `to_a`, **`each`**, helpers from the stub, and **`value.class.name`** if you expose **`ClassObj`**.
