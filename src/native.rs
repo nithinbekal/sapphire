@@ -116,7 +116,6 @@ pub fn dispatch_native_method(
     line: u32,
 ) -> Result<VmValue, VmError> {
     match recv {
-        VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
         other => Err(VmError::TypeError {
             message: format!("'{}' has no method '{}'", other, name),

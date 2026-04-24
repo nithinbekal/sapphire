@@ -33,6 +33,18 @@ impl From<usize> for NativeArity {
     }
 }
 
+impl NativeArity {
+    /// Sentinel `max` meaning “no upper bound” (arity is `min` or more).
+    pub const VARIADIC_MAX: usize = usize::MAX;
+
+    pub fn at_least(min: usize) -> Self {
+        Self {
+            min,
+            max: Self::VARIADIC_MAX,
+        }
+    }
+}
+
 /// A method that lives in a `ClassObject` method table.
 #[derive(Clone)]
 pub enum SapphireMethod {
@@ -451,6 +463,7 @@ pub struct CoreClasses {
     pub float_cls: Option<GcRef>,
     pub string_cls: Option<GcRef>,
     pub range_cls: Option<GcRef>,
+    pub list_cls: Option<GcRef>,
 }
 
 /// Per-class metadata stored by DefClass.
@@ -952,6 +965,7 @@ impl Vm {
             self.core_classes.float_cls,
             self.core_classes.string_cls,
             self.core_classes.range_cls,
+            self.core_classes.list_cls,
         ]
         .into_iter()
         .flatten()
@@ -1020,6 +1034,12 @@ impl Vm {
             class_ref: None,
             methods: HashMap::new(),
         });
+        let list_cls = self.heap.alloc(HeapObject::ClassObject {
+            name: "List".into(),
+            superclass: Some(object),
+            class_ref: None,
+            methods: HashMap::new(),
+        });
 
         // Two-phase fixup: set class_ref now that class_cls is known.
         for r in [
@@ -1031,6 +1051,7 @@ impl Vm {
             float_cls,
             string_cls,
             range_cls,
+            list_cls,
         ] {
             if let HeapObject::ClassObject { class_ref, .. } = self.heap.get_mut(r) {
                 *class_ref = Some(class_cls);
@@ -1046,6 +1067,7 @@ impl Vm {
             float_cls: Some(float_cls),
             string_cls: Some(string_cls),
             range_cls: Some(range_cls),
+            list_cls: Some(list_cls),
         };
         crate::native_set::register_methods(&mut self.heap, set_cls);
         crate::native_nil::register_methods(&mut self.heap, nil_cls);
@@ -1053,6 +1075,7 @@ impl Vm {
         crate::native_float::register_methods(&mut self.heap, float_cls);
         crate::native_string::register_methods(&mut self.heap, string_cls);
         crate::native_range::register_methods(&mut self.heap, range_cls);
+        crate::native_list::register_methods(&mut self.heap, list_cls);
     }
 
     /// Bootstrapped `ClassObject` for this primitive receiver, if any.
@@ -1064,6 +1087,7 @@ impl Vm {
             VmValue::Set(_) => self.core_classes.set_cls,
             VmValue::Str(_) => self.core_classes.string_cls,
             VmValue::Range { .. } => self.core_classes.range_cls,
+            VmValue::List(_) => self.core_classes.list_cls,
             _ => None,
         }
     }
@@ -1097,6 +1121,7 @@ impl Vm {
             "Float"  => self.core_classes.float_cls,
             "String" => self.core_classes.string_cls,
             "Range" => self.core_classes.range_cls,
+            "List" => self.core_classes.list_cls,
             _ => None,
         }
     }
@@ -1173,6 +1198,9 @@ impl Vm {
         }
         if let Some(r) = cc.range_cls {
             self.globals.insert("Range".into(), VmValue::ClassObj(r));
+        }
+        if let Some(r) = cc.list_cls {
+            self.globals.insert("List".into(), VmValue::ClassObj(r));
         }
         Ok(())
     }
@@ -1935,6 +1963,7 @@ impl Vm {
                             VmValue::Set(_) => self.core_classes.set_cls.map(VmValue::ClassObj),
                             VmValue::Str(_) => self.core_classes.string_cls.map(VmValue::ClassObj),
                             VmValue::Range { .. } => self.core_classes.range_cls.map(VmValue::ClassObj),
+                            VmValue::List(_) => self.core_classes.list_cls.map(VmValue::ClassObj),
                             VmValue::ClassObj(r) => {
                                 let r = *r;
                                 if let HeapObject::ClassObject { class_ref: Some(cr), .. } =
@@ -2280,9 +2309,14 @@ impl Vm {
                                     max_arity,
                                     func,
                                 } => {
-                                    if arg_count < min_arity || arg_count > max_arity {
+                                    if arg_count < min_arity
+                                        || (max_arity != NativeArity::VARIADIC_MAX
+                                            && arg_count > max_arity)
+                                    {
                                         let expected = if min_arity == max_arity {
                                             format!("{}", min_arity)
+                                        } else if max_arity == NativeArity::VARIADIC_MAX {
+                                            format!("at least {}", min_arity)
                                         } else {
                                             format!("{} to {}", min_arity, max_arity)
                                         };
@@ -2791,12 +2825,42 @@ impl Vm {
                         .checked_sub(arg_count + 1)
                         .ok_or(VmError::StackUnderflow)?;
 
-                    // Try native block dispatch for non-Instance types; fall back to
-                    // compiled stdlib methods in the class registry.
+                    // For non-Instance receivers: VM native block dispatch (each, map, …)
+                    // runs before ClassObject bytecode so bootstrapped primitives keep their
+                    // Rust block semantics even after stdlib mirrors methods onto the heap.
                     let is_instance = matches!(&self.stack[recv_slot], VmValue::Instance { .. });
                     if !is_instance {
                         let recv = self.stack[recv_slot].clone();
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                        let native_result = self.dispatch_native_block_method(
+                            &recv,
+                            &method_name,
+                            &args,
+                            block.clone(),
+                            line,
+                        );
+                        let is_native_miss = matches!(&native_result,
+                            Err(VmError::TypeError { message, .. })
+                            if message.contains("has no block method") || message.contains("requires a block")
+                        );
+                        if !is_native_miss {
+                            match native_result {
+                                Err(VmError::Return(val)) => {
+                                    let frame = self.frames.pop().unwrap();
+                                    self.close_upvalues_above(frame.base);
+                                    self.stack.truncate(frame.base);
+                                    if self.frames.len() <= min_depth {
+                                        return Ok(val);
+                                    }
+                                    self.stack.push(val.unwrap_or(VmValue::Nil));
+                                }
+                                other => {
+                                    self.stack.truncate(recv_slot);
+                                    self.stack.push(other?);
+                                }
+                            }
+                            continue;
+                        }
                         if let Some(start) = self.class_object_for_primitive(&recv)
                             && let Some(SapphireMethod::Bytecode(m)) = self
                                 .lookup_class_object_method(start, &method_name)
@@ -2838,36 +2902,6 @@ impl Vm {
                                 rescues: vec![],
                                 class_name,
                             });
-                            continue;
-                        }
-                        // Peek at whether native dispatch handles this method.
-                        let native_result = self.dispatch_native_block_method(
-                            &recv,
-                            &method_name,
-                            &args,
-                            block.clone(),
-                            line,
-                        );
-                        let is_native_miss = matches!(&native_result,
-                            Err(VmError::TypeError { message, .. })
-                            if message.contains("has no block method") || message.contains("requires a block")
-                        );
-                        if !is_native_miss {
-                            match native_result {
-                                Err(VmError::Return(val)) => {
-                                    let frame = self.frames.pop().unwrap();
-                                    self.close_upvalues_above(frame.base);
-                                    self.stack.truncate(frame.base);
-                                    if self.frames.len() <= min_depth {
-                                        return Ok(val);
-                                    }
-                                    self.stack.push(val.unwrap_or(VmValue::Nil));
-                                }
-                                other => {
-                                    self.stack.truncate(recv_slot);
-                                    self.stack.push(other?);
-                                }
-                            }
                             continue;
                         }
                         // Native didn't handle it — try the class registry.
