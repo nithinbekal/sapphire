@@ -1,5 +1,4 @@
-use crate::gc::GcHeap;
-use crate::vm::{HeapObject, VmError, VmValue};
+use crate::vm::{VmError, VmValue};
 use std::cmp::Ordering;
 
 // ── Public utilities used throughout the VM ───────────────────────────────────
@@ -102,48 +101,5 @@ fn to_float(v: &VmValue) -> Option<f64> {
         VmValue::Int(n) => Some(*n as f64),
         VmValue::Float(n) => Some(*n),
         _ => None,
-    }
-}
-
-// ── Native method dispatch ────────────────────────────────────────────────────
-
-/// Dispatch a native (non-block) method call on a built-in type.
-pub fn dispatch_native_method(
-    heap: &mut GcHeap<HeapObject>,
-    recv: &VmValue,
-    name: &str,
-    args: &[VmValue],
-    line: u32,
-) -> Result<VmValue, VmError> {
-    match recv {
-        VmValue::Int(n) => crate::native_int::dispatch_int_method(*n, name, args, line),
-        VmValue::Float(n) => crate::native_float::dispatch_float_method(*n, name, args, line),
-        VmValue::Str(s) => crate::native_string::dispatch_str_method(heap, s, name, args, line),
-        VmValue::Nil => crate::native_nil::dispatch_nil_method(name, args, line),
-        VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
-        VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
-        VmValue::Range { from, to } => crate::native_range::dispatch_range_method(
-            heap, *from, *to, recv, name, args, line,
-        ),
-        other => Err(VmError::TypeError {
-            message: format!("'{}' has no method '{}'", other, name),
-            line,
-        }),
-    }
-}
-
-/// Like `dispatch_native_method` but returns `None` when no native handler
-/// exists for this method, allowing callers to try the class registry next.
-/// Any real type error (wrong arg count, wrong type, etc.) is still `Some(Err)`.
-pub fn try_native_method(
-    heap: &mut GcHeap<HeapObject>,
-    recv: &VmValue,
-    name: &str,
-    args: &[VmValue],
-    line: u32,
-) -> Option<Result<VmValue, VmError>> {
-    match dispatch_native_method(heap, recv, name, args, line) {
-        Err(VmError::TypeError { ref message, .. }) if message.contains("has no method") => None,
-        result => Some(result),
     }
 }
