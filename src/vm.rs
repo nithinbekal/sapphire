@@ -1954,7 +1954,8 @@ impl Vm {
                     if method_name == "is_a?" && arg_count == 1 {
                         let recv = self.stack[recv_slot].clone();
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                        let result = invoke_is_a(&self.classes, &recv, &args, line)?;
+                        let result =
+                            invoke_is_a(&self.heap, &self.classes, &recv, &args, line)?;
                         self.stack.truncate(recv_slot);
                         self.stack.push(result);
                         continue;
@@ -4084,6 +4085,7 @@ fn vm_is_subclass(
 }
 
 fn invoke_is_a(
+    heap: &GcHeap<HeapObject>,
     classes: &HashMap<String, ClassEntry>,
     recv: &VmValue,
     args: &[VmValue],
@@ -4091,6 +4093,15 @@ fn invoke_is_a(
 ) -> Result<VmValue, VmError> {
     let target = match args.first() {
         Some(VmValue::Class { name, .. }) => name.clone(),
+        Some(VmValue::ClassObj(r)) => match heap.get(*r) {
+            HeapObject::ClassObject { name, .. } => name.clone(),
+            _ => {
+                return Err(VmError::TypeError {
+                    message: "is_a? requires a class argument".into(),
+                    line,
+                });
+            }
+        },
         _ => {
             return Err(VmError::TypeError {
                 message: "is_a? requires a class argument".into(),
