@@ -1,5 +1,4 @@
-use crate::gc::GcHeap;
-use crate::vm::{HeapObject, VmError, VmValue};
+use crate::vm::{VmError, VmValue};
 use std::cmp::Ordering;
 
 // ── Public utilities used throughout the VM ───────────────────────────────────
@@ -103,18 +102,4 @@ fn to_float(v: &VmValue) -> Option<f64> {
         VmValue::Float(n) => Some(*n),
         _ => None,
     }
-}
-
-// ── Native method dispatch ────────────────────────────────────────────────────
-
-/// Returns `None` so callers fall through to the class registry.
-/// Non-block primitives are handled via `ClassObject` / `define_native_method` first.
-pub fn try_native_method(
-    _heap: &mut GcHeap<HeapObject>,
-    _recv: &VmValue,
-    _name: &str,
-    _args: &[VmValue],
-    _line: u32,
-) -> Option<Result<VmValue, VmError>> {
-    None
 }

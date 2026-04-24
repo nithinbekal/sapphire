@@ -1,7 +1,7 @@
 use crate::chunk::{Constant, Function, OpCode};
 use crate::gc::{GcHeap, GcRef, Trace};
 use crate::native::{
-    is_falsy, numeric_binop, numeric_cmp, primitive_class_name, try_native_method,
+    is_falsy, numeric_binop, numeric_cmp, primitive_class_name,
     value_type_name, vm_value_partial_cmp,
 };
 use std::cell::RefCell;
@@ -1857,43 +1857,34 @@ impl Vm {
                         },
                         // For primitives, treat `obj.name` as a zero-arg method call.
                         ref other => {
-                            match try_native_method(&mut self.heap, other, &name, &[], line) {
-                                Some(Ok(result)) => {
-                                    self.stack.push(result);
+                            let method = primitive_class_name(other)
+                                .and_then(|cls| self.classes.get(cls))
+                                .and_then(|entry| entry.methods.get(&name).cloned());
+                            match method {
+                                Some(m) => {
+                                    let recv_slot = self.stack.len();
+                                    self.stack.push(other.clone());
+                                    let class_name = Some(m.defined_in.clone());
+                                    self.frames.push(CallFrame {
+                                        function: m.function,
+                                        upvalues: m.upvalues,
+                                        ip: 0,
+                                        base: recv_slot,
+                                        block: None,
+                                        is_block_caller: false,
+                                        is_native_block: false,
+                                        rescues: vec![],
+                                        class_name,
+                                    });
                                 }
-                                Some(Err(e)) => return Err(e),
                                 None => {
-                                    // Try compiled stdlib methods from class registry.
-                                    let method = primitive_class_name(other)
-                                        .and_then(|cls| self.classes.get(cls))
-                                        .and_then(|entry| entry.methods.get(&name).cloned());
-                                    match method {
-                                        Some(m) => {
-                                            let recv_slot = self.stack.len();
-                                            self.stack.push(other.clone());
-                                            let class_name = Some(m.defined_in.clone());
-                                            self.frames.push(CallFrame {
-                                                function: m.function,
-                                                upvalues: m.upvalues,
-                                                ip: 0,
-                                                base: recv_slot,
-                                                block: None,
-                                                is_block_caller: false,
-                                                is_native_block: false,
-                                                rescues: vec![],
-                                                class_name,
-                                            });
-                                        }
-                                        None => {
-                                            return Err(VmError::TypeError {
-                                                message: format!(
-                                                    "cannot get field '{}' on {}",
-                                                    name, other
-                                                ),
-                                                line,
-                                            });
-                                        }
-                                    }
+                                    return Err(VmError::TypeError {
+                                        message: format!(
+                                            "cannot get field '{}' on {}",
+                                            name, other
+                                        ),
+                                        line,
+                                    });
                                 }
                             }
                         }
@@ -2392,17 +2383,7 @@ impl Vm {
                                 }
                             }
                         }
-                        // Try Rust native method first; if not found try compiled stdlib.
-                        match try_native_method(&mut self.heap, &recv, &method_name, &args, line) {
-                            Some(Ok(result)) => {
-                                self.stack.truncate(recv_slot);
-                                self.stack.push(result);
-                                continue;
-                            }
-                            Some(Err(e)) => return Err(e),
-                            None => {}
-                        }
-                        // Native didn't handle it — look in the class registry.
+                        // Look in the class registry (stdlib bytecode on primitives).
                         let method = primitive_class_name(&recv)
                             .and_then(|cls| self.classes.get(cls))
                             .and_then(|entry| entry.methods.get(&method_name).cloned());
