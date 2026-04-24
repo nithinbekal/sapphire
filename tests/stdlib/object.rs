@@ -27,7 +27,7 @@ fn is_a_unrelated_class() {
 fn nil_methods() {
     assert_eq!(eval("nil.nil?()"), VmValue::Bool(true));
     assert_eq!(eval("false.nil?()"), VmValue::Bool(false));
-    assert_eq!(eval("nil.to_s()"), VmValue::Str("".into()));
+    assert_eq!(eval("nil.to_s()"), VmValue::Str("nil".into()));
 }
 
 #[test]
