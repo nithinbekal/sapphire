@@ -122,7 +122,6 @@ pub fn dispatch_native_method(
         VmValue::Nil => crate::native_nil::dispatch_nil_method(name, args, line),
         VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
-        VmValue::Set(r) => crate::native_set::dispatch_set_method(heap, *r, recv, name, args, line),
         VmValue::Range { from, to } => crate::native_range::dispatch_range_method(
             heap, *from, *to, recv, name, args, line,
         ),

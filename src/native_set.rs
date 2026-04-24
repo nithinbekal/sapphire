@@ -208,32 +208,6 @@ pub fn set_union(heap: &mut GcHeap<HeapObject>, recv: &VmValue, args: &[VmValue]
     }
 }
 
-pub fn dispatch_set_method(
-    heap: &mut GcHeap<HeapObject>,
-    _r: GcRef,
-    recv: &VmValue,
-    name: &str,
-    args: &[VmValue],
-    line: u32,
-) -> Result<VmValue, VmError> {
-    match name {
-        "add" => set_add(heap, recv, args, line),
-        "delete" => set_delete(heap, recv, args, line),
-        "difference" => set_difference(heap, recv, args, line),
-        "disjoint?" => set_disjoint(heap, recv, args, line),
-        "empty?" => set_empty(heap, recv, args, line),
-        "include?" => set_include(heap, recv, args, line),
-        "intersection" => set_intersection(heap, recv, args, line),
-        "size" => set_size(heap, recv, args, line),
-        "subset?" => set_subset(heap, recv, args, line),
-        "superset?" => set_superset(heap, recv, args, line),
-        "to_a" => set_to_a(heap, recv, args, line),
-        "to_s" => set_to_s(heap, recv, args, line),
-        "union" => set_union(heap, recv, args, line),
-        _ => Err(arg_error(name, args.len(), line)),
-    }
-}
-
 /// Register native Set instance methods on the bootstrapped Set `ClassObject`.
 pub fn register_methods(heap: &mut GcHeap<HeapObject>, class_ref: GcRef) {
     define_native_method(heap, class_ref, "add", 1, set_add);
