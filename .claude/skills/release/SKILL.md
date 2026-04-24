@@ -7,6 +7,8 @@ You are preparing a new release of the Sapphire programming language. The projec
 
 The version to release is provided as the argument to this skill (e.g. `0.3.0`). If no version was provided, ask the user for one before proceeding.
 
+**Important:** Releases must be made from the `main` branch. Before doing anything else, verify the current branch is `main` (`git branch --show-current`). If it is not, stop and tell the user to switch to `main` first.
+
 ## Steps
 
 1. **Determine the previous release tag** by running:
