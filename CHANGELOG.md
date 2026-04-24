@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.6.0
+
+**Language**
+
+- Regular expressions — `Regex.new` creates a regex from a pattern string; supports `match?`, `match`, `scan`, `replace`, and `replace_all`. Case-insensitive matching via `ignore_case: true`. Matches return a `Regex.Match` with `full`, `captures`, `start`, and `end_pos` fields:
+
+```ruby
+r = Regex.new("[0-9]+")
+r.match?("foo123")      # true
+m = r.match("foo123")
+m.full                  # "123"
+
+ci = Regex.new("hello", ignore_case: true)
+ci.match?("Hello World")  # true
+```
+
+- Constants defined in an outer class are now visible inside nested class bodies and their methods without qualification
+
+**Standard library**
+
+- `Object#class` — returns the class of any object
+- `Class#superclass` — returns the parent class of a class
+
+**Bug fixes**
+
+- `is_a?` now works correctly when passed a class object argument such as `List`
+- Fixed a bug where local variables declared inside a `while` loop body were incorrectly hoisted when nested control flow (`if`, inner `while`) was present
+
+---
+
 ## v0.5.2
 
 **CI**
