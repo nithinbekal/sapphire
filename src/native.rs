@@ -118,9 +118,6 @@ pub fn dispatch_native_method(
     match recv {
         VmValue::List(r) => crate::native_list::dispatch_list_method(heap, *r, recv, name, args, line),
         VmValue::Map(r) => crate::native_map::dispatch_map_method(heap, *r, recv, name, args, line),
-        VmValue::Range { from, to } => crate::native_range::dispatch_range_method(
-            heap, *from, *to, recv, name, args, line,
-        ),
         other => Err(VmError::TypeError {
             message: format!("'{}' has no method '{}'", other, name),
             line,

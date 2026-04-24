@@ -450,6 +450,7 @@ pub struct CoreClasses {
     pub int_cls: Option<GcRef>,
     pub float_cls: Option<GcRef>,
     pub string_cls: Option<GcRef>,
+    pub range_cls: Option<GcRef>,
 }
 
 /// Per-class metadata stored by DefClass.
@@ -950,6 +951,7 @@ impl Vm {
             self.core_classes.int_cls,
             self.core_classes.float_cls,
             self.core_classes.string_cls,
+            self.core_classes.range_cls,
         ]
         .into_iter()
         .flatten()
@@ -1012,9 +1014,24 @@ impl Vm {
             class_ref: None,
             methods: HashMap::new(),
         });
+        let range_cls = self.heap.alloc(HeapObject::ClassObject {
+            name: "Range".into(),
+            superclass: Some(object),
+            class_ref: None,
+            methods: HashMap::new(),
+        });
 
         // Two-phase fixup: set class_ref now that class_cls is known.
-        for r in [object, class_cls, set_cls, nil_cls, int_cls, float_cls, string_cls] {
+        for r in [
+            object,
+            class_cls,
+            set_cls,
+            nil_cls,
+            int_cls,
+            float_cls,
+            string_cls,
+            range_cls,
+        ] {
             if let HeapObject::ClassObject { class_ref, .. } = self.heap.get_mut(r) {
                 *class_ref = Some(class_cls);
             }
@@ -1028,12 +1045,14 @@ impl Vm {
             int_cls: Some(int_cls),
             float_cls: Some(float_cls),
             string_cls: Some(string_cls),
+            range_cls: Some(range_cls),
         };
         crate::native_set::register_methods(&mut self.heap, set_cls);
         crate::native_nil::register_methods(&mut self.heap, nil_cls);
         crate::native_int::register_methods(&mut self.heap, int_cls);
         crate::native_float::register_methods(&mut self.heap, float_cls);
         crate::native_string::register_methods(&mut self.heap, string_cls);
+        crate::native_range::register_methods(&mut self.heap, range_cls);
     }
 
     /// Bootstrapped `ClassObject` for this primitive receiver, if any.
@@ -1044,6 +1063,7 @@ impl Vm {
             VmValue::Nil => self.core_classes.nil_cls,
             VmValue::Set(_) => self.core_classes.set_cls,
             VmValue::Str(_) => self.core_classes.string_cls,
+            VmValue::Range { .. } => self.core_classes.range_cls,
             _ => None,
         }
     }
@@ -1076,6 +1096,7 @@ impl Vm {
             "Int"    => self.core_classes.int_cls,
             "Float"  => self.core_classes.float_cls,
             "String" => self.core_classes.string_cls,
+            "Range" => self.core_classes.range_cls,
             _ => None,
         }
     }
@@ -1149,6 +1170,9 @@ impl Vm {
         if let Some(r) = cc.float_cls { self.globals.insert("Float".into(), VmValue::ClassObj(r)); }
         if let Some(r) = cc.string_cls {
             self.globals.insert("String".into(), VmValue::ClassObj(r));
+        }
+        if let Some(r) = cc.range_cls {
+            self.globals.insert("Range".into(), VmValue::ClassObj(r));
         }
         Ok(())
     }
@@ -1910,6 +1934,7 @@ impl Vm {
                             VmValue::Nil => self.core_classes.nil_cls.map(VmValue::ClassObj),
                             VmValue::Set(_) => self.core_classes.set_cls.map(VmValue::ClassObj),
                             VmValue::Str(_) => self.core_classes.string_cls.map(VmValue::ClassObj),
+                            VmValue::Range { .. } => self.core_classes.range_cls.map(VmValue::ClassObj),
                             VmValue::ClassObj(r) => {
                                 let r = *r;
                                 if let HeapObject::ClassObject { class_ref: Some(cr), .. } =
