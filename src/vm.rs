@@ -12,12 +12,19 @@ use std::rc::Rc;
 
 // ── GC heap objects ───────────────────────────────────────────────────────────
 
+/// Rust function pointer for a native instance method on a `ClassObject`.
+pub type NativeFn = fn(
+    &mut GcHeap<HeapObject>,
+    &VmValue,
+    &[VmValue],
+    u32,
+) -> Result<VmValue, VmError>;
+
 /// A method that lives in a `ClassObject` method table.
-/// Only the `Bytecode` variant is used in the initial bootstrap increment;
-/// the enum is open for `Native` methods in future increments.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum SapphireMethod {
     Bytecode(VmMethod),
+    Native { arity: usize, func: NativeFn },
 }
 
 /// Objects managed by the GC heap — all types that can form reference cycles.
@@ -50,10 +57,11 @@ impl Trace for HeapObject {
                 if let Some(r) = superclass { out.push(*r); }
                 if let Some(r) = class_ref  { out.push(*r); }
                 for m in methods.values() {
-                    let SapphireMethod::Bytecode(vm_method) = m;
-                    for uv in &vm_method.upvalues {
-                        if let UpvalueState::Closed(v) = &*uv.0.borrow() {
-                            collect_refs(v, out);
+                    if let SapphireMethod::Bytecode(vm_method) = m {
+                        for uv in &vm_method.upvalues {
+                            if let UpvalueState::Closed(v) = &*uv.0.borrow() {
+                                collect_refs(v, out);
+                            }
                         }
                     }
                 }
@@ -121,6 +129,25 @@ impl GcHeap<HeapObject> {
             HeapObject::Fields(f) => f,
             _ => panic!("GcRef is not Fields"),
         }
+    }
+}
+
+/// Insert a native method into a `ClassObject`'s method table (like Ruby's `rb_define_method`).
+pub fn define_native_method(
+    heap: &mut GcHeap<HeapObject>,
+    class_ref: GcRef,
+    name: &str,
+    arity: usize,
+    func: NativeFn,
+) {
+    match heap.get_mut(class_ref) {
+        HeapObject::ClassObject { methods, .. } => {
+            methods.insert(
+                name.to_string(),
+                SapphireMethod::Native { arity, func },
+            );
+        }
+        _ => panic!("define_native_method: GcRef is not a ClassObject"),
     }
 }
 
@@ -940,6 +967,24 @@ impl Vm {
             class_cls: Some(class_cls),
             set_cls: Some(set_cls),
         };
+        crate::native_set::register_methods(&mut self.heap, set_cls);
+    }
+
+    /// Walk the `ClassObject` superclass chain from `start` and return the
+    /// first method named `name`, if any.
+    fn lookup_class_object_method(&self, mut start: GcRef, name: &str) -> Option<SapphireMethod> {
+        loop {
+            let superclass = match self.heap.get(start) {
+                HeapObject::ClassObject { methods, superclass, .. } => {
+                    if let Some(m) = methods.get(name) {
+                        return Some(m.clone());
+                    }
+                    *superclass
+                }
+                _ => return None,
+            };
+            start = superclass?;
+        }
     }
 
     /// Return the `GcRef` for the bootstrapped ClassObject with the given name,
@@ -1467,6 +1512,13 @@ impl Vm {
                             if let HeapObject::ClassObject { methods, .. } =
                                 self.heap.get_mut(class_obj_ref)
                             {
+                                // Bootstrapped natives (e.g. Set#to_s) win over inherited
+                                // bytecode from Object unless this class defines its own method.
+                                if matches!(methods.get(mname), Some(SapphireMethod::Native { .. }))
+                                    && vm_method.defined_in != class_name
+                                {
+                                    continue;
+                                }
                                 methods.insert(
                                     mname.clone(),
                                     SapphireMethod::Bytecode(vm_method.clone()),
@@ -2100,6 +2152,71 @@ impl Vm {
                     if !is_instance {
                         let recv = self.stack[recv_slot].clone();
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                        // Set: ClassObject method table (native + mirrored bytecode) before
+                        // the legacy native dispatch path.
+                        if matches!(&recv, VmValue::Set(_))
+                            && let Some(set_cls) = self.core_classes.set_cls
+                            && let Some(m) =
+                                self.lookup_class_object_method(set_cls, &method_name)
+                        {
+                            match m {
+                                SapphireMethod::Native { arity, func } => {
+                                    if arity != arg_count {
+                                        return Err(VmError::TypeError {
+                                            message: format!(
+                                                "method '{}' expects {} arg(s), got {}",
+                                                method_name, arity, arg_count
+                                            ),
+                                            line,
+                                        });
+                                    }
+                                    let result = func(&mut self.heap, &recv, &args, line)?;
+                                    self.stack.truncate(recv_slot);
+                                    self.stack.push(result);
+                                    continue;
+                                }
+                                SapphireMethod::Bytecode(m) => {
+                                    if m.private {
+                                        let caller_class = self
+                                            .frames
+                                            .last()
+                                            .and_then(|f| f.class_name.as_deref())
+                                            .unwrap_or("");
+                                        if caller_class != m.defined_in {
+                                            return Err(VmError::TypeError {
+                                                message: format!(
+                                                    "private method '{}' called from outside class",
+                                                    method_name
+                                                ),
+                                                line,
+                                            });
+                                        }
+                                    }
+                                    if m.function.arity != arg_count {
+                                        return Err(VmError::TypeError {
+                                            message: format!(
+                                                "method '{}' expects {} arg(s), got {}",
+                                                method_name, m.function.arity, arg_count
+                                            ),
+                                            line,
+                                        });
+                                    }
+                                    let class_name = Some(m.defined_in.clone());
+                                    self.frames.push(CallFrame {
+                                        function: m.function,
+                                        upvalues: m.upvalues,
+                                        ip: 0,
+                                        base: recv_slot,
+                                        block: None,
+                                        is_block_caller: false,
+                                        is_native_block: false,
+                                        rescues: vec![],
+                                        class_name,
+                                    });
+                                    continue;
+                                }
+                            }
+                        }
                         // Try Rust native method first; if not found try compiled stdlib.
                         match try_native_method(&mut self.heap, &recv, &method_name, &args, line) {
                             Some(Ok(result)) => {
@@ -2556,6 +2673,50 @@ impl Vm {
                     if !is_instance {
                         let recv = self.stack[recv_slot].clone();
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                        if matches!(&recv, VmValue::Set(_))
+                            && let Some(set_cls) = self.core_classes.set_cls
+                            && let Some(SapphireMethod::Bytecode(m)) = self
+                                .lookup_class_object_method(set_cls, &method_name)
+                        {
+                            if m.private {
+                                let caller_class = self
+                                    .frames
+                                    .last()
+                                    .and_then(|f| f.class_name.as_deref())
+                                    .unwrap_or("");
+                                if caller_class != m.defined_in {
+                                    return Err(VmError::TypeError {
+                                        message: format!(
+                                            "private method '{}' called from outside class",
+                                            method_name
+                                        ),
+                                        line,
+                                    });
+                                }
+                            }
+                            if m.function.arity != arg_count {
+                                return Err(VmError::TypeError {
+                                    message: format!(
+                                        "method '{}' expects {} arg(s), got {}",
+                                        method_name, m.function.arity, arg_count
+                                    ),
+                                    line,
+                                });
+                            }
+                            let class_name = Some(m.defined_in.clone());
+                            self.frames.push(CallFrame {
+                                function: m.function,
+                                upvalues: m.upvalues,
+                                ip: 0,
+                                base: recv_slot,
+                                block,
+                                is_block_caller: true,
+                                is_native_block: false,
+                                rescues: vec![],
+                                class_name,
+                            });
+                            continue;
+                        }
                         // Peek at whether native dispatch handles this method.
                         let native_result = self.dispatch_native_block_method(
                             &recv,
