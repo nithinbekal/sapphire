@@ -110,6 +110,12 @@ impl TypeChecker {
         self.var_scopes.pop();
     }
 
+    fn validate_type_ann(&mut self, te: &TypeExpr) {
+        if let Some(msg) = check_union_duplicates(te) {
+            self.errors.push(TypeCheckError { message: msg });
+        }
+    }
+
     fn set_var(&mut self, name: &str, ty: TypeExpr) {
         if let Some(scope) = self.var_scopes.last_mut() {
             scope.insert(name.to_string(), ty);
@@ -283,11 +289,15 @@ impl TypeChecker {
             Expr::Class { methods, .. } => {
                 for method in methods {
                     let saved = self.current_return_type.take();
+                    if let Some(rt) = &method.return_type {
+                        self.validate_type_ann(rt);
+                    }
                     self.current_return_type = method.return_type.clone();
                     self.push_scope();
 
                     for p in &method.params {
                         if let Some(te) = &p.type_ann {
+                            self.validate_type_ann(te);
                             self.set_var(&p.name, te.clone());
                         }
                     }
@@ -328,10 +338,14 @@ impl TypeChecker {
                     },
                 );
                 let saved = self.current_return_type.take();
+                if let Some(rt) = return_type {
+                    self.validate_type_ann(rt);
+                }
                 self.current_return_type = return_type.clone();
                 self.push_scope();
                 for p in params {
                     if let Some(te) = &p.type_ann {
+                        self.validate_type_ann(te);
                         self.set_var(&p.name, te.clone());
                     }
                 }
@@ -521,15 +535,34 @@ impl TypeChecker {
 fn types_compatible(actual: &TypeExpr, expected: &TypeExpr) -> bool {
     match (actual, expected) {
         (_, TypeExpr::Any) | (TypeExpr::Any, _) => true,
+        // actual is a union: ALL arms must be compatible with expected
+        (TypeExpr::Union(arms), _) => arms.iter().all(|a| types_compatible(a, expected)),
+        // expected is a union: actual must be compatible with AT LEAST ONE arm
+        (_, TypeExpr::Union(arms)) => arms.iter().any(|e| types_compatible(actual, e)),
         (TypeExpr::Named(a), TypeExpr::Named(e)) => {
             a == e || (e == "Num" && (a == "Int" || a == "Float"))
         }
     }
 }
 
-fn te_name(te: &TypeExpr) -> &str {
+fn te_name(te: &TypeExpr) -> String {
     match te {
-        TypeExpr::Named(n) => n.as_str(),
-        TypeExpr::Any => "Any",
+        TypeExpr::Named(n) => n.clone(),
+        TypeExpr::Any => "Any".to_string(),
+        TypeExpr::Union(arms) => arms.iter().map(te_name).collect::<Vec<_>>().join(" | "),
     }
+}
+
+fn check_union_duplicates(te: &TypeExpr) -> Option<String> {
+    if let TypeExpr::Union(arms) = te {
+        let mut seen = std::collections::HashSet::new();
+        for arm in arms {
+            if let TypeExpr::Named(n) = arm
+                && !seen.insert(n.as_str())
+            {
+                return Some(format!("duplicate type '{}' in union", n));
+            }
+        }
+    }
+    None
 }

@@ -5,6 +5,8 @@ use crate::value::Value;
 pub enum TypeExpr {
     /// A bare type name: `Int`, `String`, `Bool`, `Float`, `Nil`, or a class name.
     Named(String),
+    /// A union of two or more types: `Int | String`. Always has >= 2 arms.
+    Union(Vec<TypeExpr>),
     /// Escape hatch for future use (e.g. unannotated generics, explicit `Any` type).
     #[allow(dead_code)]
     Any,
