@@ -29,6 +29,7 @@ struct ClassInfo {
 pub struct TypeChecker {
     functions: HashMap<String, FnSig>,
     classes: HashMap<String, ClassInfo>,
+    type_aliases: HashMap<String, TypeExpr>,
     errors: Vec<TypeCheckError>,
     current_return_type: Option<TypeExpr>,
     var_scopes: Vec<HashMap<String, TypeExpr>>,
@@ -39,6 +40,7 @@ impl TypeChecker {
         Self {
             functions: HashMap::new(),
             classes: HashMap::new(),
+            type_aliases: HashMap::new(),
             errors: Vec::new(),
             current_return_type: None,
             var_scopes: vec![HashMap::new()],
@@ -56,9 +58,48 @@ impl TypeChecker {
         tc.errors
     }
 
+    /// Resolve a type expression by expanding any named aliases.
+    fn resolve_type(&self, te: TypeExpr) -> TypeExpr {
+        match te {
+            TypeExpr::Named(ref n) => {
+                if let Some(expanded) = self.type_aliases.get(n) {
+                    self.resolve_type(expanded.clone())
+                } else {
+                    te
+                }
+            }
+            TypeExpr::Union(arms) => {
+                let resolved: Vec<TypeExpr> = arms.into_iter().map(|a| self.resolve_type(a)).collect();
+                // Flatten nested unions that arose from alias expansion
+                let mut flat = Vec::new();
+                for arm in resolved {
+                    match arm {
+                        TypeExpr::Union(inner) => flat.extend(inner),
+                        other => flat.push(other),
+                    }
+                }
+                if flat.len() == 1 {
+                    flat.remove(0)
+                } else {
+                    TypeExpr::Union(flat)
+                }
+            }
+            TypeExpr::Any => TypeExpr::Any,
+        }
+    }
+
+    fn types_compat(&self, actual: &TypeExpr, expected: &TypeExpr) -> bool {
+        let a = self.resolve_type(actual.clone());
+        let e = self.resolve_type(expected.clone());
+        types_compatible(&a, &e)
+    }
+
     // First pass: record function and class signatures without checking bodies.
     fn collect_def(&mut self, expr: &Expr) {
         match expr {
+            Expr::TypeAlias { name, type_expr } => {
+                self.type_aliases.insert(name.clone(), type_expr.clone());
+            }
             Expr::Function {
                 name,
                 params,
@@ -111,7 +152,8 @@ impl TypeChecker {
     }
 
     fn validate_type_ann(&mut self, te: &TypeExpr) {
-        if let Some(msg) = check_union_duplicates(te) {
+        let resolved = self.resolve_type(te.clone());
+        if let Some(msg) = check_union_duplicates(&resolved) {
             self.errors.push(TypeCheckError { message: msg });
         }
     }
@@ -136,7 +178,7 @@ impl TypeChecker {
             Expr::Return(inner) => {
                 if let Some(rt) = self.current_return_type.clone()
                     && let Some(actual) = self.infer_type(inner)
-                    && !types_compatible(&actual, &rt)
+                    && !self.types_compat(&actual, &rt)
                 {
                     self.errors.push(TypeCheckError {
                         message: format!(
@@ -208,7 +250,7 @@ impl TypeChecker {
                     && let Some(fd) = cls.fields.iter().find(|f| &f.name == name)
                     && let Some(te) = &fd.type_ann
                     && let Some(actual) = self.infer_type(value)
-                    && !types_compatible(&actual, te)
+                    && !self.types_compat(&actual, te)
                 {
                     self.errors.push(TypeCheckError {
                         message: format!(
@@ -309,7 +351,7 @@ impl TypeChecker {
                     if let Some(rt) = &method.return_type.clone()
                         && let Some(last_expr) = method.body.last()
                         && let Some(actual) = self.infer_type(last_expr)
-                        && !types_compatible(&actual, rt)
+                        && !self.types_compat(&actual, rt)
                     {
                         self.errors.push(TypeCheckError {
                             message: format!(
@@ -355,7 +397,7 @@ impl TypeChecker {
                 if let Some(rt) = return_type
                     && let Some(last_expr) = body.last()
                     && let Some(actual) = self.infer_type(last_expr)
-                    && !types_compatible(&actual, rt)
+                    && !self.types_compat(&actual, rt)
                 {
                     self.errors.push(TypeCheckError {
                         message: format!(
@@ -369,6 +411,7 @@ impl TypeChecker {
                 self.pop_scope();
                 self.current_return_type = saved;
             }
+            Expr::TypeAlias { .. } => {}
             _ => {}
         }
     }
@@ -398,7 +441,7 @@ impl TypeChecker {
                                 && let Some(fd) = cls.fields.iter().find(|f| &f.name == fname)
                                 && let Some(te) = &fd.type_ann
                                 && let Some(actual) = self.infer_type(&arg.value)
-                                && !types_compatible(&actual, te)
+                                && !self.types_compat(&actual, te)
                             {
                                 self.errors.push(TypeCheckError {
                                     message: format!(
@@ -426,7 +469,7 @@ impl TypeChecker {
         for (param, arg) in params.iter().zip(args.iter()) {
             if let Some(te) = &param.type_ann
                 && let Some(actual) = self.infer_type(&arg.value)
-                && !types_compatible(&actual, te)
+                && !self.types_compat(&actual, te)
             {
                 self.errors.push(TypeCheckError {
                     message: format!(

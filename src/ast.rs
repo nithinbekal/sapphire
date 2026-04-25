@@ -170,4 +170,9 @@ pub enum Expr {
     Import {
         path: String,
     },
+    /// `type Name = TypeExpr` — declares a type alias.
+    TypeAlias {
+        name: String,
+        type_expr: TypeExpr,
+    },
 }

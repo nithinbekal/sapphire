@@ -2,6 +2,7 @@ use crate::ast::{Block, Expr, MethodDef, StringPart, TypeExpr};
 use crate::chunk::{Chunk, Constant, Function, OpCode, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -83,6 +84,8 @@ struct Compiler {
     /// Class names from outermost to innermost while compiling nested `class` bodies.
     /// Used to resolve bare uppercase names as class constants before globals.
     enclosing_class_stack: Vec<String>,
+    /// Type alias map collected in a pre-pass; used when encoding type annotations.
+    type_aliases: HashMap<String, TypeExpr>,
 }
 
 impl Compiler {
@@ -92,6 +95,7 @@ impl Compiler {
             global_mode: false,
             has_imports: false,
             enclosing_class_stack: Vec::new(),
+            type_aliases: HashMap::new(),
         }
     }
 
@@ -101,6 +105,7 @@ impl Compiler {
             global_mode: false,
             has_imports: true,
             enclosing_class_stack: Vec::new(),
+            type_aliases: HashMap::new(),
         }
     }
 
@@ -110,6 +115,7 @@ impl Compiler {
             global_mode: true,
             has_imports: false,
             enclosing_class_stack: Vec::new(),
+            type_aliases: HashMap::new(),
         }
     }
 
@@ -123,6 +129,7 @@ impl Compiler {
         } else {
             Compiler::new()
         };
+        c.collect_type_aliases(exprs);
         c.push_fn("", 0, 0);
         c.compile_body(exprs)?;
         Ok(c.pop_fn())
@@ -132,9 +139,43 @@ impl Compiler {
     /// stack slots, so they persist across successive `eval()` calls.
     pub fn compile_repl(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
         let mut c = Compiler::new_repl();
+        c.collect_type_aliases(exprs);
         c.push_fn("", 0, 0);
         c.compile_body(exprs)?;
         Ok(c.pop_fn())
+    }
+
+    fn collect_type_aliases(&mut self, exprs: &[Expr]) {
+        for e in exprs {
+            if let Expr::TypeAlias { name, type_expr } = e {
+                self.type_aliases.insert(name.clone(), type_expr.clone());
+            }
+        }
+    }
+
+    /// Resolve a TypeExpr by expanding any named aliases.
+    fn resolve_type_expr(&self, te: &TypeExpr) -> TypeExpr {
+        match te {
+            TypeExpr::Named(n) => {
+                if let Some(expanded) = self.type_aliases.get(n) {
+                    self.resolve_type_expr(expanded)
+                } else {
+                    te.clone()
+                }
+            }
+            TypeExpr::Union(arms) => {
+                let resolved: Vec<TypeExpr> = arms.iter().map(|a| self.resolve_type_expr(a)).collect();
+                let mut flat = Vec::new();
+                for arm in resolved {
+                    match arm {
+                        TypeExpr::Union(inner) => flat.extend(inner),
+                        other => flat.push(other),
+                    }
+                }
+                if flat.len() == 1 { flat.remove(0) } else { TypeExpr::Union(flat) }
+            }
+            TypeExpr::Any => TypeExpr::Any,
+        }
     }
 
     // ── Function stack ────────────────────────────────────────────────────────
@@ -237,6 +278,7 @@ impl Compiler {
                 | Expr::Raise(_)
                 | Expr::MultiAssign { .. }
                 | Expr::Import { .. }
+                | Expr::TypeAlias { .. }
         )
     }
 
@@ -364,6 +406,10 @@ impl Compiler {
                 self.emit(OpCode::Import(idx));
             }
 
+            Expr::TypeAlias { .. } => {
+                // Type aliases are compile-time only; no bytecode emitted.
+            }
+
             e => {
                 let is_new_local = self.is_new_local_assign(e);
                 // In global mode, function/class defs emit SetGlobal (peek) instead of
@@ -386,6 +432,12 @@ impl Compiler {
             Expr::Return(_) | Expr::Break(_) | Expr::Next(_) | Expr::Raise(_) => self.stmt(expr),
 
             Expr::While { .. } | Expr::MultiAssign { .. } | Expr::Import { .. } => {
+                self.stmt(expr)?;
+                self.emit(OpCode::Nil);
+                Ok(())
+            }
+
+            Expr::TypeAlias { .. } => {
                 self.stmt(expr)?;
                 self.emit(OpCode::Nil);
                 Ok(())
@@ -751,7 +803,9 @@ impl Compiler {
                 let arity = params.len();
 
                 self.push_fn(name, arity, line);
-                self.state_mut().return_type = type_expr_name(return_type.as_ref());
+                self.state_mut().return_type = return_type.as_ref().and_then(|te| {
+                    type_expr_name(Some(&self.resolve_type_expr(te)))
+                });
                 // Slot 0 = the function itself — enables direct recursion by name.
                 self.state_mut().locals.push(LocalInfo {
                     name: name.clone(),
@@ -1259,7 +1313,9 @@ impl Compiler {
         for method in &class_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
-            self.state_mut().return_type = type_expr_name(method.return_type.as_ref());
+            self.state_mut().return_type = method.return_type.as_ref().and_then(|te| {
+                type_expr_name(Some(&self.resolve_type_expr(te)))
+            });
             self.state_mut().locals.push(LocalInfo {
                 name: "self".into(),
                 captured: false,
@@ -1283,7 +1339,9 @@ impl Compiler {
         for method in &instance_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
-            self.state_mut().return_type = type_expr_name(method.return_type.as_ref());
+            self.state_mut().return_type = method.return_type.as_ref().and_then(|te| {
+                type_expr_name(Some(&self.resolve_type_expr(te)))
+            });
             self.state_mut().locals.push(LocalInfo {
                 name: "self".into(),
                 captured: false,

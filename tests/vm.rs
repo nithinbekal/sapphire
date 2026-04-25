@@ -2173,3 +2173,45 @@ fn leading_pipe_multiline_union() {
     let result = eval("def f() -> | Int | String { 1 }\nf()");
     assert_eq!(result, VmValue::Int(1));
 }
+
+// ── Type aliases ─────────────────────────────────��────────────────────────────
+
+#[test]
+fn type_alias_inline() {
+    // Basic inline alias: type T = Int | String
+    let result = eval("type T = Int | String\ndef f() -> T { 1 }\nf()");
+    assert_eq!(result, VmValue::Int(1));
+}
+
+#[test]
+fn type_alias_multiline() {
+    // Multiline union alias with leading pipe
+    let src = "type Shape =\n  | Int\n  | Float\ndef f() -> Shape { 1 }\nf()";
+    let result = eval(src);
+    assert_eq!(result, VmValue::Int(1));
+}
+
+#[test]
+fn type_alias_param() {
+    // Alias used as a param type annotation
+    let src = "type Number = Int | Float\ndef double(n: Number) -> Number { n }\ndouble(42)";
+    let result = eval(src);
+    assert_eq!(result, VmValue::Int(42));
+}
+
+#[test]
+fn type_alias_runtime_return_type_checked() {
+    // Return type is enforced at runtime via the alias
+    let err = eval_err("type MyInt = Int\ndef f() -> MyInt { \"oops\" }\nf()");
+    assert!(err.to_string().contains("return type error"), "unexpected error: {}", err);
+}
+
+#[test]
+fn type_alias_typechecker_resolves() {
+    // Typechecker should accept Int where alias = Int | Float
+    let src = "type Number = Int | Float\ndef f(n: Number) { n }\nf(1)";
+    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
+    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
+    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
+    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
+}
