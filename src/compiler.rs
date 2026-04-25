@@ -163,6 +163,9 @@ impl Compiler {
                     te.clone()
                 }
             }
+            TypeExpr::Apply(name, args) => {
+                TypeExpr::Apply(name.clone(), args.iter().map(|a| self.resolve_type_expr(a)).collect())
+            }
             TypeExpr::Union(arms) => {
                 let resolved: Vec<TypeExpr> = arms.iter().map(|a| self.resolve_type_expr(a)).collect();
                 let mut flat = Vec::new();
@@ -776,6 +779,7 @@ impl Compiler {
 
             Expr::Class {
                 name,
+                type_params,
                 superclass,
                 fields,
                 methods,
@@ -784,6 +788,7 @@ impl Compiler {
             } => {
                 self.compile_class(
                     name,
+                    type_params,
                     superclass.as_deref(),
                     fields,
                     methods,
@@ -796,16 +801,20 @@ impl Compiler {
 
             Expr::Function {
                 name,
+                type_params,
                 params,
                 return_type,
                 body,
             } => {
                 let line = self.state().current_line;
                 let arity = params.len();
+                let fn_tvars: std::collections::HashSet<String> =
+                    type_params.iter().cloned().collect();
 
                 self.push_fn(name, arity, line);
                 self.state_mut().return_type = return_type.as_ref().and_then(|te| {
-                    type_expr_runtime(Some(&self.resolve_type_expr(te)))
+                    let erased = erase_type_vars(&self.resolve_type_expr(te), &fn_tvars);
+                    type_expr_runtime(Some(&erased))
                 });
                 // Slot 0 = the function itself — enables direct recursion by name.
                 self.state_mut().locals.push(LocalInfo {
@@ -1272,6 +1281,7 @@ impl Compiler {
     fn compile_class(
         &mut self,
         name: &str,
+        class_type_params: &[String],
         superclass: Option<&Expr>,
         fields: &[crate::ast::FieldDef],
         methods: &[MethodDef],
@@ -1282,6 +1292,7 @@ impl Compiler {
         self.enclosing_class_stack.push(name.to_string());
         let result = self.compile_class_body(
             name,
+            class_type_params,
             superclass,
             fields,
             methods,
@@ -1297,6 +1308,7 @@ impl Compiler {
     fn compile_class_body(
         &mut self,
         name: &str,
+        class_type_params: &[String],
         superclass: Option<&Expr>,
         fields: &[crate::ast::FieldDef],
         methods: &[MethodDef],
@@ -1309,13 +1321,23 @@ impl Compiler {
         let (instance_methods, class_methods): (Vec<&MethodDef>, Vec<&MethodDef>) =
             methods.iter().partition(|m| !m.class_method);
 
+        // Build the set of all type variables in scope for this class.
+        let class_tvars: std::collections::HashSet<String> =
+            class_type_params.iter().cloned().collect();
+
         // Emit class method closures first (DefClass pops them in order).
         // Slot 0 = `self` (the class object), not counted in arity.
         for method in &class_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
+            let all_tvars: std::collections::HashSet<String> = class_tvars
+                .iter()
+                .chain(method.type_params.iter())
+                .cloned()
+                .collect();
             self.state_mut().return_type = method.return_type.as_ref().and_then(|te| {
-                type_expr_runtime(Some(&self.resolve_type_expr(te)))
+                let erased = erase_type_vars(&self.resolve_type_expr(te), &all_tvars);
+                type_expr_runtime(Some(&erased))
             });
             self.state_mut().locals.push(LocalInfo {
                 name: "self".into(),
@@ -1340,8 +1362,14 @@ impl Compiler {
         for method in &instance_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
+            let all_tvars: std::collections::HashSet<String> = class_tvars
+                .iter()
+                .chain(method.type_params.iter())
+                .cloned()
+                .collect();
             self.state_mut().return_type = method.return_type.as_ref().and_then(|te| {
-                type_expr_runtime(Some(&self.resolve_type_expr(te)))
+                let erased = erase_type_vars(&self.resolve_type_expr(te), &all_tvars);
+                type_expr_runtime(Some(&erased))
             });
             self.state_mut().locals.push(LocalInfo {
                 name: "self".into(),
@@ -1368,6 +1396,7 @@ impl Compiler {
             match nested_expr {
                 Expr::Class {
                     name: nname,
+                    type_params: ntparams,
                     superclass: nsuper,
                     fields: nfields,
                     methods: nmethods,
@@ -1377,6 +1406,7 @@ impl Compiler {
                     nested_class_names.push(nname.clone());
                     self.compile_class(
                         nname,
+                        ntparams,
                         nsuper.as_deref(),
                         nfields,
                         nmethods,
@@ -1482,11 +1512,27 @@ pub fn compile_repl(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
     Compiler::compile_repl(exprs)
 }
 
+/// Replace any Named type that is a type variable with `Any` so the compiler
+/// emits no runtime check for it.  Call before `type_expr_runtime`.
+fn erase_type_vars(te: &TypeExpr, type_vars: &std::collections::HashSet<String>) -> TypeExpr {
+    match te {
+        TypeExpr::Named(n) if type_vars.contains(n.as_str()) => TypeExpr::Any,
+        TypeExpr::Apply(n, args) => {
+            TypeExpr::Apply(n.clone(), args.iter().map(|a| erase_type_vars(a, type_vars)).collect())
+        }
+        TypeExpr::Union(arms) => {
+            TypeExpr::Union(arms.iter().map(|a| erase_type_vars(a, type_vars)).collect())
+        }
+        other => other.clone(),
+    }
+}
+
 /// Convert an optional `TypeExpr` to a runtime-checkable representation.
 /// Returns `None` for absent annotations and `TypeExpr::Any`.
 fn type_expr_runtime(te: Option<&TypeExpr>) -> Option<RuntimeType> {
     match te {
         Some(TypeExpr::Named(n)) => Some(RuntimeType::Named(n.clone())),
+        Some(TypeExpr::Apply(n, _)) => Some(RuntimeType::Named(n.clone())),
         Some(TypeExpr::Literal(v)) => Some(RuntimeType::Literal(v.clone())),
         Some(TypeExpr::Any) | None => None,
         Some(TypeExpr::Union(arms)) => {

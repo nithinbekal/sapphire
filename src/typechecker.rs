@@ -1,7 +1,7 @@
 use crate::ast::{CallArg, Expr, FieldDef, ParamDef, TypeExpr};
 use crate::token::TokenKind;
 use crate::value::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct TypeCheckError {
@@ -16,12 +16,16 @@ impl std::fmt::Display for TypeCheckError {
 
 #[derive(Clone)]
 struct FnSig {
+    #[allow(dead_code)]
+    type_params: Vec<String>,
     params: Vec<ParamDef>,
     return_type: Option<TypeExpr>,
 }
 
 #[derive(Clone)]
 struct ClassInfo {
+    #[allow(dead_code)]
+    type_params: Vec<String>,
     fields: Vec<FieldDef>,
     methods: HashMap<String, FnSig>,
 }
@@ -33,6 +37,8 @@ pub struct TypeChecker {
     errors: Vec<TypeCheckError>,
     current_return_type: Option<TypeExpr>,
     var_scopes: Vec<HashMap<String, TypeExpr>>,
+    /// Stacked scopes of in-scope type variable names (from generic class/function params).
+    type_vars: Vec<HashSet<String>>,
 }
 
 impl TypeChecker {
@@ -44,6 +50,7 @@ impl TypeChecker {
             errors: Vec::new(),
             current_return_type: None,
             var_scopes: vec![HashMap::new()],
+            type_vars: Vec::new(),
         }
     }
 
@@ -68,6 +75,9 @@ impl TypeChecker {
                     te
                 }
             }
+            TypeExpr::Apply(name, args) => {
+                TypeExpr::Apply(name, args.into_iter().map(|a| self.resolve_type(a)).collect())
+            }
             TypeExpr::Union(arms) => {
                 let resolved: Vec<TypeExpr> = arms.into_iter().map(|a| self.resolve_type(a)).collect();
                 // Flatten nested unions that arose from alias expansion
@@ -89,7 +99,30 @@ impl TypeChecker {
         }
     }
 
+    fn push_type_vars(&mut self, params: &[String]) {
+        self.type_vars.push(params.iter().cloned().collect());
+    }
+
+    fn pop_type_vars(&mut self) {
+        self.type_vars.pop();
+    }
+
+    fn is_type_var(&self, name: &str) -> bool {
+        self.type_vars.iter().rev().any(|scope| scope.contains(name))
+    }
+
     fn types_compat(&self, actual: &TypeExpr, expected: &TypeExpr) -> bool {
+        // A type variable is compatible with anything (acts like Any within its scope).
+        if let TypeExpr::Named(n) = expected
+            && self.is_type_var(n)
+        {
+            return true;
+        }
+        if let TypeExpr::Named(n) = actual
+            && self.is_type_var(n)
+        {
+            return true;
+        }
         let a = self.resolve_type(actual.clone());
         let e = self.resolve_type(expected.clone());
         types_compatible(&a, &e)
@@ -103,6 +136,7 @@ impl TypeChecker {
             }
             Expr::Function {
                 name,
+                type_params,
                 params,
                 return_type,
                 ..
@@ -110,6 +144,7 @@ impl TypeChecker {
                 self.functions.insert(
                     name.clone(),
                     FnSig {
+                        type_params: type_params.clone(),
                         params: params.clone(),
                         return_type: return_type.clone(),
                     },
@@ -117,6 +152,7 @@ impl TypeChecker {
             }
             Expr::Class {
                 name,
+                type_params,
                 fields,
                 methods,
                 ..
@@ -127,6 +163,7 @@ impl TypeChecker {
                         (
                             m.name.clone(),
                             FnSig {
+                                type_params: m.type_params.clone(),
                                 params: m.params.clone(),
                                 return_type: m.return_type.clone(),
                             },
@@ -136,6 +173,7 @@ impl TypeChecker {
                 self.classes.insert(
                     name.clone(),
                     ClassInfo {
+                        type_params: type_params.clone(),
                         fields: fields.clone(),
                         methods: method_sigs,
                     },
@@ -153,9 +191,18 @@ impl TypeChecker {
     }
 
     fn validate_type_ann(&mut self, te: &TypeExpr) {
-        let resolved = self.resolve_type(te.clone());
-        if let Some(msg) = check_union_duplicates(&resolved) {
-            self.errors.push(TypeCheckError { message: msg });
+        match te {
+            TypeExpr::Apply(_, args) => {
+                for arg in args {
+                    self.validate_type_ann(arg);
+                }
+            }
+            _ => {
+                let resolved = self.resolve_type(te.clone());
+                if let Some(msg) = check_union_duplicates(&resolved) {
+                    self.errors.push(TypeCheckError { message: msg });
+                }
+            }
         }
     }
 
@@ -329,7 +376,8 @@ impl TypeChecker {
                 }
             }
             Expr::Print(inner) => self.check_expr(inner),
-            Expr::Class { methods, .. } => {
+            Expr::Class { type_params, methods, .. } => {
+                self.push_type_vars(type_params);
                 for method in methods {
                     let saved = self.current_return_type.take();
                     if let Some(rt) = &method.return_type {
@@ -337,6 +385,7 @@ impl TypeChecker {
                     }
                     self.current_return_type = method.return_type.clone();
                     self.push_scope();
+                    self.push_type_vars(&method.type_params);
 
                     for p in &method.params {
                         if let Some(te) = &p.type_ann {
@@ -363,12 +412,15 @@ impl TypeChecker {
                         });
                     }
 
+                    self.pop_type_vars();
                     self.pop_scope();
                     self.current_return_type = saved;
                 }
+                self.pop_type_vars();
             }
             Expr::Function {
                 name,
+                type_params,
                 params,
                 return_type,
                 body,
@@ -376,6 +428,7 @@ impl TypeChecker {
                 self.functions.insert(
                     name.clone(),
                     FnSig {
+                        type_params: type_params.clone(),
                         params: params.clone(),
                         return_type: return_type.clone(),
                     },
@@ -386,6 +439,7 @@ impl TypeChecker {
                 }
                 self.current_return_type = return_type.clone();
                 self.push_scope();
+                self.push_type_vars(type_params);
                 for p in params {
                     if let Some(te) = &p.type_ann {
                         self.validate_type_ann(te);
@@ -409,6 +463,7 @@ impl TypeChecker {
                     });
                 }
 
+                self.pop_type_vars();
                 self.pop_scope();
                 self.current_return_type = saved;
             }
@@ -425,7 +480,10 @@ impl TypeChecker {
         match callee {
             Expr::Variable(name) => {
                 if let Some(sig) = self.functions.get(name).cloned() {
+                    // Push the function's type params so they are treated as Any at call sites.
+                    self.push_type_vars(&sig.type_params.clone());
                     self.check_args(&sig.params, args, name);
+                    self.pop_type_vars();
                 }
             }
             Expr::Get {
@@ -437,6 +495,8 @@ impl TypeChecker {
                     if let Expr::Variable(class_name) = object.as_ref()
                         && let Some(cls) = self.classes.get(class_name).cloned()
                     {
+                        // Push the class's type params so fields typed as T accept any value.
+                        self.push_type_vars(&cls.type_params.clone());
                         for arg in args {
                             if let Some(fname) = &arg.name
                                 && let Some(fd) = cls.fields.iter().find(|f| &f.name == fname)
@@ -454,12 +514,20 @@ impl TypeChecker {
                                 });
                             }
                         }
+                        self.pop_type_vars();
                     }
                 } else if let Some(TypeExpr::Named(class_name)) = self.infer_type(object)
                     && let Some(cls) = self.classes.get(&class_name).cloned()
                     && let Some(sig) = cls.methods.get(method_name).cloned()
                 {
+                    // Push class + method type params so T params accept any argument.
+                    let combined: Vec<String> = cls.type_params.iter()
+                        .chain(sig.type_params.iter())
+                        .cloned()
+                        .collect();
+                    self.push_type_vars(&combined);
                     self.check_args(&sig.params, args, method_name);
+                    self.pop_type_vars();
                 }
             }
             _ => self.check_expr(callee),
@@ -587,6 +655,14 @@ fn types_compatible(actual: &TypeExpr, expected: &TypeExpr) -> bool {
 
     match (actual, expected) {
         (_, TypeExpr::Any) | (TypeExpr::Any, _) => true,
+        // Structural Apply matching: name and all type args must match.
+        (TypeExpr::Apply(an, a_args), TypeExpr::Apply(en, e_args)) => {
+            an == en
+                && a_args.len() == e_args.len()
+                && a_args.iter().zip(e_args.iter()).all(|(a, e)| types_compatible(a, e))
+        }
+        // Gradual: bare Named is compatible with Apply of the same name (unannotated = unknown params).
+        (TypeExpr::Named(a), TypeExpr::Apply(e, _)) | (TypeExpr::Apply(a, _), TypeExpr::Named(e)) => a == e,
         // actual is a union: ALL arms must be compatible with expected
         (TypeExpr::Union(arms), _) => arms.iter().all(|a| types_compatible(a, expected)),
         // expected is a union: actual must be compatible with AT LEAST ONE arm
@@ -599,13 +675,18 @@ fn types_compatible(actual: &TypeExpr, expected: &TypeExpr) -> bool {
         (TypeExpr::Named(a), TypeExpr::Named(e)) => {
             a == e || (e == "Num" && (a == "Int" || a == "Float"))
         }
-        (TypeExpr::Named(_), TypeExpr::Literal(_)) => false,
+        (TypeExpr::Named(_), TypeExpr::Literal(_))
+        | (TypeExpr::Apply(_, _), TypeExpr::Literal(_))
+        | (TypeExpr::Literal(_), TypeExpr::Apply(_, _)) => false,
     }
 }
 
 fn te_name(te: &TypeExpr) -> String {
     match te {
         TypeExpr::Named(n) => n.clone(),
+        TypeExpr::Apply(n, args) => {
+            format!("{}[{}]", n, args.iter().map(te_name).collect::<Vec<_>>().join(", "))
+        }
         TypeExpr::Literal(Value::Int(n)) => n.to_string(),
         TypeExpr::Literal(Value::Float(n)) => n.to_string(),
         TypeExpr::Literal(Value::Str(s)) => format!("{:?}", s),

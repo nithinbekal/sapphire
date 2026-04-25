@@ -8,6 +8,11 @@ use crate::value::Value;
 fn type_expr_display_name(te: &TypeExpr) -> String {
     match te {
         TypeExpr::Named(n) => n.clone(),
+        TypeExpr::Apply(n, args) => format!(
+            "{}[{}]",
+            n,
+            args.iter().map(type_expr_display_name).collect::<Vec<_>>().join(", ")
+        ),
         TypeExpr::Literal(Value::Int(n)) => n.to_string(),
         TypeExpr::Literal(Value::Float(n)) => n.to_string(),
         TypeExpr::Literal(Value::Str(s)) => format!("{:?}", s),
@@ -174,6 +179,11 @@ impl Parser {
                         TypeExpr::Named("Nil".to_string()),
                     ]));
                 }
+                // Generic type args: List[Int], Map[String, Bool], Box[T]
+                if self.check(&TokenKind::LeftBracket) {
+                    let args = self.parse_type_args()?;
+                    return Ok(TypeExpr::Apply(t, args));
+                }
                 Ok(TypeExpr::Named(t))
             }
             TokenKind::Number(n) => {
@@ -205,6 +215,64 @@ impl Parser {
                 line: self.peek().line,
             }),
         }
+    }
+
+    /// Parse `[TypeExpr, ...]` — the argument list of a parameterized type.
+    /// Assumes the opening `[` has NOT yet been consumed.
+    fn parse_type_args(&mut self) -> Result<Vec<TypeExpr>, SapphireError> {
+        self.advance(); // consume '['
+        let mut args = Vec::new();
+        self.skip_terminators();
+        args.push(self.parse_type_expr()?);
+        while self.check(&TokenKind::Comma) {
+            self.advance();
+            self.skip_terminators();
+            args.push(self.parse_type_expr()?);
+        }
+        if !self.check(&TokenKind::RightBracket) {
+            return Err(SapphireError::ParseError {
+                message: "expected ']' after type arguments".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume ']'
+        Ok(args)
+    }
+
+    /// Parse `[T, U, ...]` — the type parameter list of a generic class or function.
+    /// Returns an empty vec if no `[` is present (not a generic definition).
+    fn parse_type_param_names(&mut self) -> Result<Vec<String>, SapphireError> {
+        if !self.check(&TokenKind::LeftBracket) {
+            return Ok(vec![]);
+        }
+        self.advance(); // consume '['
+        let mut params = Vec::new();
+        loop {
+            match self.peek().kind.clone() {
+                TokenKind::Identifier(n) => {
+                    self.advance();
+                    params.push(n);
+                }
+                _ => {
+                    return Err(SapphireError::ParseError {
+                        message: "expected type parameter name".into(),
+                        line: self.peek().line,
+                    });
+                }
+            }
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance();
+        }
+        if !self.check(&TokenKind::RightBracket) {
+            return Err(SapphireError::ParseError {
+                message: "expected ']' after type parameters".into(),
+                line: self.peek().line,
+            });
+        }
+        self.advance(); // consume ']'
+        Ok(params)
     }
 
     fn is_at_end(&self) -> bool {
@@ -401,6 +469,7 @@ impl Parser {
                 });
             }
         };
+        let type_params = self.parse_type_param_names()?;
         let superclass = if self.check(&TokenKind::Less) {
             self.advance(); // consume '<'
             let first = match self.peek().kind.clone() {
@@ -558,6 +627,7 @@ impl Parser {
         self.advance(); // consume '}'
         Ok(Expr::Class {
             name,
+            type_params,
             superclass,
             fields,
             methods,
@@ -628,6 +698,7 @@ impl Parser {
                 });
             }
         };
+        let type_params = self.parse_type_param_names()?;
         let mut params = Vec::new();
         if self.check(&TokenKind::LeftParen) {
             self.advance(); // consume '('
@@ -664,6 +735,7 @@ impl Parser {
         let body = self.block_with_rescue()?;
         Ok(Expr::Function {
             name,
+            type_params,
             params,
             return_type,
             body,
@@ -719,6 +791,7 @@ impl Parser {
                 });
             }
         };
+        let type_params = self.parse_type_param_names()?;
         let mut params = Vec::new();
         if self.check(&TokenKind::LeftParen) {
             self.advance(); // consume '('
@@ -755,6 +828,7 @@ impl Parser {
         let body = self.block_with_rescue()?;
         Ok(MethodDef {
             name,
+            type_params,
             params,
             return_type,
             body,
@@ -1304,7 +1378,7 @@ impl Parser {
     }
 
     fn parse_block(&mut self) -> Result<Option<Block>, SapphireError> {
-        if !self.check(&TokenKind::LeftBrace) {
+        if !self.allow_trailing_block || !self.check(&TokenKind::LeftBrace) {
             return Ok(None);
         }
         self.advance(); // consume '{'
@@ -1693,6 +1767,78 @@ mod tests {
     fn test_named_arg_call() {
         let expr = parse_expr("Point.new(x: 1, y: 2)");
         assert!(matches!(expr, Expr::Call { .. }));
+    }
+
+    #[test]
+    fn test_generic_class_def() {
+        let tokens = Lexer::new("class Box[T] { attr value: T }").scan_tokens();
+        let mut exprs = Parser::new(tokens).parse().unwrap();
+        match exprs.remove(0) {
+            Expr::Class { name, type_params, .. } => {
+                assert_eq!(name, "Box");
+                assert_eq!(type_params, vec!["T"]);
+            }
+            _ => panic!("expected class"),
+        }
+    }
+
+    #[test]
+    fn test_generic_multi_param_class() {
+        let tokens = Lexer::new("class Pair[A, B] { attr first: A\nattr second: B }").scan_tokens();
+        let mut exprs = Parser::new(tokens).parse().unwrap();
+        match exprs.remove(0) {
+            Expr::Class { name, type_params, .. } => {
+                assert_eq!(name, "Pair");
+                assert_eq!(type_params, vec!["A", "B"]);
+            }
+            _ => panic!("expected class"),
+        }
+    }
+
+    #[test]
+    fn test_parameterized_type_annotation() {
+        let tokens = Lexer::new("def foo(x: List[Int]) {}").scan_tokens();
+        let mut exprs = Parser::new(tokens).parse().unwrap();
+        match exprs.remove(0) {
+            Expr::Function { params, .. } => {
+                assert_eq!(
+                    params[0].type_ann,
+                    Some(TypeExpr::Apply("List".into(), vec![TypeExpr::Named("Int".into())]))
+                );
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn test_generic_function_def() {
+        let tokens = Lexer::new("def identity[T](x: T) -> T { x }").scan_tokens();
+        let mut exprs = Parser::new(tokens).parse().unwrap();
+        match exprs.remove(0) {
+            Expr::Function { name, type_params, .. } => {
+                assert_eq!(name, "identity");
+                assert_eq!(type_params, vec!["T"]);
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn test_map_type_annotation() {
+        let tokens = Lexer::new("def foo(m: Map[String, Int]) {}").scan_tokens();
+        let mut exprs = Parser::new(tokens).parse().unwrap();
+        match exprs.remove(0) {
+            Expr::Function { params, .. } => {
+                assert_eq!(
+                    params[0].type_ann,
+                    Some(TypeExpr::Apply(
+                        "Map".into(),
+                        vec![TypeExpr::Named("String".into()), TypeExpr::Named("Int".into())]
+                    ))
+                );
+            }
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]
