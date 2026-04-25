@@ -7,6 +7,8 @@ pub enum TypeExpr {
     Named(String),
     /// A parameterized type: `List[Int]`, `Map[String, Bool]`, `Box[T]`.
     Apply(String, Vec<TypeExpr>),
+    /// A literal type: `42`, `"ok"`, `true`, `false`.
+    Literal(Value),
     /// A union of two or more types: `Int | String`. Always has >= 2 arms.
     Union(Vec<TypeExpr>),
     /// Escape hatch for future use (e.g. unannotated generics, explicit `Any` type).

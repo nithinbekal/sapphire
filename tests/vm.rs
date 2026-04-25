@@ -2106,6 +2106,40 @@ fn union_return_type_wrong_type_error() {
 }
 
 #[test]
+fn literal_return_type_string_exact_match() {
+    let result = eval("def f() -> \"ok\" { \"ok\" }\nf()");
+    assert_eq!(result, VmValue::Str("ok".into()));
+}
+
+#[test]
+fn literal_return_type_string_mismatch_errors() {
+    let err = eval_err("def f() -> \"ok\" { \"nope\" }\nf()");
+    match err {
+        VmError::TypeError { message, .. } => {
+            assert!(message.contains("expected \"ok\""), "msg: {}", message);
+            assert!(message.contains("got String"), "msg: {}", message);
+        }
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+#[test]
+fn literal_union_param_typechecks() {
+    let src = "def pick(mode: \"dev\" | \"prod\") { mode }\npick(\"dev\")";
+    assert_eq!(eval(src), VmValue::Str("dev".into()));
+}
+
+#[test]
+fn literal_union_param_rejects_wrong_literal() {
+    let msg = typecheck_err_msg("def pick(mode: \"dev\" | \"prod\") { mode }\npick(\"test\")");
+    assert!(
+        msg.contains("expected \"dev\" | \"prod\", got String"),
+        "msg: {}",
+        msg
+    );
+}
+
+#[test]
 fn question_sugar_param_accepts_nil() {
     // Int? means Int | Nil — nil should be passable
     let result = eval("def f(x: Int?) { x }\nf(nil)");

@@ -1,5 +1,12 @@
 use std::rc::Rc;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum RuntimeType {
+    Named(String),
+    Literal(crate::value::Value),
+    Union(Vec<RuntimeType>),
+}
+
 /// Describes how a closure captures a variable from an enclosing scope.
 #[derive(Debug, Clone)]
 pub struct UpvalueDef {
@@ -20,7 +27,7 @@ pub struct Function {
     pub upvalue_defs: Vec<UpvalueDef>,
     /// Return type annotation, if one was present in the source (`-> TypeName`).
     /// When `Some`, the VM checks the actual return value at runtime.
-    pub return_type: Option<String>,
+    pub return_type: Option<RuntimeType>,
 }
 
 /// Two `Function` values are equal only if they are the exact same allocation.
