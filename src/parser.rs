@@ -8,6 +8,11 @@ use crate::value::Value;
 fn type_expr_display_name(te: &TypeExpr) -> String {
     match te {
         TypeExpr::Named(n) => n.clone(),
+        TypeExpr::Literal(Value::Int(n)) => n.to_string(),
+        TypeExpr::Literal(Value::Float(n)) => n.to_string(),
+        TypeExpr::Literal(Value::Str(s)) => format!("{:?}", s),
+        TypeExpr::Literal(Value::Bool(b)) => b.to_string(),
+        TypeExpr::Literal(Value::Nil) => "Nil".to_string(),
         TypeExpr::Union(arms) => arms.iter().map(type_expr_display_name).collect::<Vec<_>>().join(" | "),
         TypeExpr::Any => "Any".to_string(),
     }
@@ -171,12 +176,32 @@ impl Parser {
                 }
                 Ok(TypeExpr::Named(t))
             }
+            TokenKind::Number(n) => {
+                self.advance();
+                Ok(TypeExpr::Literal(Value::Int(n)))
+            }
+            TokenKind::Float(n) => {
+                self.advance();
+                Ok(TypeExpr::Literal(Value::Float(n)))
+            }
+            TokenKind::StringLit(s) => {
+                self.advance();
+                Ok(TypeExpr::Literal(Value::Str(s)))
+            }
+            TokenKind::True => {
+                self.advance();
+                Ok(TypeExpr::Literal(Value::Bool(true)))
+            }
+            TokenKind::False => {
+                self.advance();
+                Ok(TypeExpr::Literal(Value::Bool(false)))
+            }
             TokenKind::Nil => {
                 self.advance();
                 Ok(TypeExpr::Named("Nil".to_string()))
             }
             _ => Err(SapphireError::ParseError {
-                message: "expected type name".into(),
+                message: "expected type".into(),
                 line: self.peek().line,
             }),
         }
@@ -1577,7 +1602,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Expr;
+    use crate::ast::{Expr, TypeExpr};
     use crate::lexer::Lexer;
 
     fn parse_expr(source: &str) -> Expr {
@@ -1668,5 +1693,21 @@ mod tests {
     fn test_named_arg_call() {
         let expr = parse_expr("Point.new(x: 1, y: 2)");
         assert!(matches!(expr, Expr::Call { .. }));
+    }
+
+    #[test]
+    fn test_type_alias_string_literal_type() {
+        let tokens = Lexer::new("type Mode = \"dev\" | \"prod\"").scan_tokens();
+        let mut exprs = Parser::new(tokens).parse().unwrap();
+        match exprs.remove(0) {
+            Expr::TypeAlias { type_expr, .. } => match type_expr {
+                TypeExpr::Union(arms) => {
+                    assert!(matches!(arms[0], TypeExpr::Literal(Value::Str(_))));
+                    assert!(matches!(arms[1], TypeExpr::Literal(Value::Str(_))));
+                }
+                other => panic!("expected union type, got {:?}", other),
+            },
+            other => panic!("expected type alias, got {:?}", other),
+        }
     }
 }

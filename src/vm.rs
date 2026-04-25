@@ -1,21 +1,51 @@
-use crate::chunk::{Constant, Function, OpCode};
+use crate::chunk::{Constant, Function, OpCode, RuntimeType};
 use crate::gc::{GcHeap, GcRef, Trace};
 use crate::native::{
     is_falsy, numeric_binop, numeric_cmp, primitive_class_name,
     value_type_name, vm_value_partial_cmp,
 };
+use crate::value::Value;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-fn return_type_matches(actual: &str, expected: &str) -> bool {
-    let single = |a: &str, e: &str| a == e || (e == "Num" && (a == "Int" || a == "Float"));
-    if expected.contains('|') {
-        expected.split('|').any(|arm| single(actual, arm.trim()))
-    } else {
-        single(actual, expected)
+fn runtime_type_display(rt: &RuntimeType) -> String {
+    match rt {
+        RuntimeType::Named(n) => n.clone(),
+        RuntimeType::Literal(Value::Int(n)) => n.to_string(),
+        RuntimeType::Literal(Value::Float(n)) => n.to_string(),
+        RuntimeType::Literal(Value::Str(s)) => format!("{:?}", s),
+        RuntimeType::Literal(Value::Bool(b)) => b.to_string(),
+        RuntimeType::Literal(Value::Nil) => "Nil".to_string(),
+        RuntimeType::Union(arms) => arms
+            .iter()
+            .map(runtime_type_display)
+            .collect::<Vec<_>>()
+            .join(" | "),
+    }
+}
+
+fn vm_value_matches_literal(value: &VmValue, literal: &Value) -> bool {
+    match (value, literal) {
+        (VmValue::Int(a), Value::Int(b)) => a == b,
+        (VmValue::Float(a), Value::Float(b)) => a == b,
+        (VmValue::Str(a), Value::Str(b)) => a == b,
+        (VmValue::Bool(a), Value::Bool(b)) => a == b,
+        (VmValue::Nil, Value::Nil) => true,
+        _ => false,
+    }
+}
+
+fn runtime_type_matches(value: &VmValue, expected: &RuntimeType) -> bool {
+    match expected {
+        RuntimeType::Named(e) => {
+            let actual = value_type_name(value);
+            actual == e || (e == "Num" && (actual == "Int" || actual == "Float"))
+        }
+        RuntimeType::Literal(v) => vm_value_matches_literal(value, v),
+        RuntimeType::Union(arms) => arms.iter().any(|arm| runtime_type_matches(value, arm)),
     }
 }
 
@@ -3261,12 +3291,12 @@ impl Vm {
                     if let Some(expected_type) = &frame.function.return_type {
                         let val = return_val.as_ref().unwrap_or(&VmValue::Nil);
                         let actual_type = value_type_name(val);
-                        if !return_type_matches(actual_type, expected_type) {
+                        if !runtime_type_matches(val, expected_type) {
                             return Err(VmError::TypeError {
                                 message: format!(
                                     "return type error in '{}': expected {}, got {}",
                                     frame.function.name,
-                                    expected_type.replace('|', " | "),
+                                    runtime_type_display(expected_type),
                                     actual_type
                                 ),
                                 line,
@@ -3292,12 +3322,12 @@ impl Vm {
                     if let Some(expected_type) = &frame.function.return_type {
                         let val = return_val.as_ref().unwrap_or(&VmValue::Nil);
                         let actual_type = value_type_name(val);
-                        if !return_type_matches(actual_type, expected_type) {
+                        if !runtime_type_matches(val, expected_type) {
                             return Err(VmError::TypeError {
                                 message: format!(
                                     "return type error in '{}': expected {}, got {}",
                                     frame.function.name,
-                                    expected_type.replace('|', " | "),
+                                    runtime_type_display(expected_type),
                                     actual_type
                                 ),
                                 line,

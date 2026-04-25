@@ -1,5 +1,5 @@
 use crate::ast::{Block, Expr, MethodDef, StringPart, TypeExpr};
-use crate::chunk::{Chunk, Constant, Function, OpCode, UpvalueDef};
+use crate::chunk::{Chunk, Constant, Function, OpCode, RuntimeType, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
 use std::collections::HashMap;
@@ -50,7 +50,7 @@ struct FunctionState {
     arity: usize,
     /// Stack of active while-loop contexts, innermost last.
     loop_stack: Vec<LoopCtx>,
-    return_type: Option<String>,
+    return_type: Option<RuntimeType>,
 }
 
 impl FunctionState {
@@ -174,6 +174,7 @@ impl Compiler {
                 }
                 if flat.len() == 1 { flat.remove(0) } else { TypeExpr::Union(flat) }
             }
+            TypeExpr::Literal(_) => te.clone(),
             TypeExpr::Any => TypeExpr::Any,
         }
     }
@@ -804,7 +805,7 @@ impl Compiler {
 
                 self.push_fn(name, arity, line);
                 self.state_mut().return_type = return_type.as_ref().and_then(|te| {
-                    type_expr_name(Some(&self.resolve_type_expr(te)))
+                    type_expr_runtime(Some(&self.resolve_type_expr(te)))
                 });
                 // Slot 0 = the function itself — enables direct recursion by name.
                 self.state_mut().locals.push(LocalInfo {
@@ -1314,7 +1315,7 @@ impl Compiler {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
             self.state_mut().return_type = method.return_type.as_ref().and_then(|te| {
-                type_expr_name(Some(&self.resolve_type_expr(te)))
+                type_expr_runtime(Some(&self.resolve_type_expr(te)))
             });
             self.state_mut().locals.push(LocalInfo {
                 name: "self".into(),
@@ -1340,7 +1341,7 @@ impl Compiler {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
             self.state_mut().return_type = method.return_type.as_ref().and_then(|te| {
-                type_expr_name(Some(&self.resolve_type_expr(te)))
+                type_expr_runtime(Some(&self.resolve_type_expr(te)))
             });
             self.state_mut().locals.push(LocalInfo {
                 name: "self".into(),
@@ -1481,17 +1482,23 @@ pub fn compile_repl(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
     Compiler::compile_repl(exprs)
 }
 
-/// Extract a plain type name string from an optional TypeExpr.
+/// Convert an optional `TypeExpr` to a runtime-checkable representation.
 /// Returns `None` for absent annotations and `TypeExpr::Any`.
-fn type_expr_name(te: Option<&TypeExpr>) -> Option<String> {
+fn type_expr_runtime(te: Option<&TypeExpr>) -> Option<RuntimeType> {
     match te {
-        Some(TypeExpr::Named(n)) => Some(n.clone()),
+        Some(TypeExpr::Named(n)) => Some(RuntimeType::Named(n.clone())),
+        Some(TypeExpr::Literal(v)) => Some(RuntimeType::Literal(v.clone())),
         Some(TypeExpr::Any) | None => None,
         Some(TypeExpr::Union(arms)) => {
-            let parts: Vec<String> = arms.iter()
-                .filter_map(|a| type_expr_name(Some(a)))
+            let parts: Vec<RuntimeType> = arms
+                .iter()
+                .filter_map(|a| type_expr_runtime(Some(a)))
                 .collect();
-            if parts.is_empty() { None } else { Some(parts.join("|")) }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(RuntimeType::Union(parts))
+            }
         }
     }
 }
