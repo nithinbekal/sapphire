@@ -10,6 +10,15 @@ use std::fmt;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+fn return_type_matches(actual: &str, expected: &str) -> bool {
+    let single = |a: &str, e: &str| a == e || (e == "Num" && (a == "Int" || a == "Float"));
+    if expected.contains('|') {
+        expected.split('|').any(|arm| single(actual, arm.trim()))
+    } else {
+        single(actual, expected)
+    }
+}
+
 // ── GC heap objects ───────────────────────────────────────────────────────────
 
 /// Rust function pointer for a native instance method on a `ClassObject`.
@@ -3252,14 +3261,13 @@ impl Vm {
                     if let Some(expected_type) = &frame.function.return_type {
                         let val = return_val.as_ref().unwrap_or(&VmValue::Nil);
                         let actual_type = value_type_name(val);
-                        let types_match = actual_type == expected_type.as_str()
-                            || (expected_type == "Num"
-                                && (actual_type == "Int" || actual_type == "Float"));
-                        if !types_match {
+                        if !return_type_matches(actual_type, expected_type) {
                             return Err(VmError::TypeError {
                                 message: format!(
                                     "return type error in '{}': expected {}, got {}",
-                                    frame.function.name, expected_type, actual_type
+                                    frame.function.name,
+                                    expected_type.replace('|', " | "),
+                                    actual_type
                                 ),
                                 line,
                             });
@@ -3284,14 +3292,13 @@ impl Vm {
                     if let Some(expected_type) = &frame.function.return_type {
                         let val = return_val.as_ref().unwrap_or(&VmValue::Nil);
                         let actual_type = value_type_name(val);
-                        let types_match = actual_type == expected_type.as_str()
-                            || (expected_type == "Num"
-                                && (actual_type == "Int" || actual_type == "Float"));
-                        if !types_match {
+                        if !return_type_matches(actual_type, expected_type) {
                             return Err(VmError::TypeError {
                                 message: format!(
                                     "return type error in '{}': expected {}, got {}",
-                                    frame.function.name, expected_type, actual_type
+                                    frame.function.name,
+                                    expected_type.replace('|', " | "),
+                                    actual_type
                                 ),
                                 line,
                             });

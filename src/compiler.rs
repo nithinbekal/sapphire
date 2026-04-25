@@ -1428,6 +1428,12 @@ pub fn compile_repl(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
 fn type_expr_name(te: Option<&TypeExpr>) -> Option<String> {
     match te {
         Some(TypeExpr::Named(n)) => Some(n.clone()),
-        _ => None,
+        Some(TypeExpr::Any) | None => None,
+        Some(TypeExpr::Union(arms)) => {
+            let parts: Vec<String> = arms.iter()
+                .filter_map(|a| type_expr_name(Some(a)))
+                .collect();
+            if parts.is_empty() { None } else { Some(parts.join("|")) }
+        }
     }
 }

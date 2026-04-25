@@ -157,6 +157,7 @@ impl Lexer {
                 }
                 c if c.is_ascii_digit() => self.number(c),
                 c if c.is_ascii_alphabetic() || c == '_' => self.identifier(c),
+                '?' => TokenKind::Question,
                 _ => continue,
             };
 

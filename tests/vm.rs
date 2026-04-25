@@ -2059,3 +2059,117 @@ fn def_with_parens_still_works() {
 Box.new().size()"#;
     assert_eq!(eval(src), VmValue::Int(5));
 }
+
+// ── Union type syntax ─────────────────────────────────────────────────────────
+
+fn parse_err_msg(src: &str) -> String {
+    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
+    let err = sapphire::parser::Parser::new(tokens)
+        .parse()
+        .expect_err("expected parse error");
+    format!("{}", err)
+}
+
+fn typecheck_err_msg(src: &str) -> String {
+    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
+    let stmts = sapphire::parser::Parser::new(tokens)
+        .parse()
+        .expect("parse error");
+    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
+    assert!(!errors.is_empty(), "expected type errors");
+    errors[0].message.clone()
+}
+
+#[test]
+fn union_return_type_accepts_either_arm() {
+    // Int | String return type: both arms should be accepted at runtime
+    let result = eval("def f(x: Int) -> Int | String { x }\nf(42)");
+    assert_eq!(result, VmValue::Int(42));
+}
+
+#[test]
+fn union_return_type_string_arm() {
+    let result = eval("def f(x: Int) -> Int | String { \"hello\" }\nf(0)");
+    assert_eq!(result, VmValue::Str("hello".into()));
+}
+
+#[test]
+fn union_return_type_wrong_type_error() {
+    let err = eval_err("def f() -> Int | String { 3.14 }\nf()");
+    match err {
+        VmError::TypeError { message, .. } => {
+            assert!(message.contains("expected Int | String"), "msg: {}", message);
+            assert!(message.contains("got Float"), "msg: {}", message);
+        }
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+#[test]
+fn question_sugar_param_accepts_nil() {
+    // Int? means Int | Nil — nil should be passable
+    let result = eval("def f(x: Int?) { x }\nf(nil)");
+    assert_eq!(result, VmValue::Nil);
+}
+
+#[test]
+fn question_sugar_return_type_nil_ok() {
+    let result = eval("def f() -> Int? { nil }\nf()");
+    assert_eq!(result, VmValue::Nil);
+}
+
+#[test]
+fn question_sugar_return_type_int_ok() {
+    let result = eval("def f() -> Int? { 42 }\nf()");
+    assert_eq!(result, VmValue::Int(42));
+}
+
+#[test]
+fn question_sugar_return_type_wrong_type() {
+    let err = eval_err("def f() -> Int? { \"oops\" }\nf()");
+    match err {
+        VmError::TypeError { message, .. } => {
+            assert!(message.contains("expected Int | Nil"), "msg: {}", message);
+        }
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+#[test]
+fn grouped_nullable_union_return_type() {
+    // (Int | String)? == Int | String | Nil
+    let result = eval("def f() -> (Int | String)? { nil }\nf()");
+    assert_eq!(result, VmValue::Nil);
+}
+
+#[test]
+fn nil_explicit_union_arm_parse_error() {
+    // `Int | Nil` is a parse error — must use `Int?`
+    let msg = parse_err_msg("def f() -> Int | Nil { nil }\nf()");
+    assert!(msg.contains("use Int? instead"), "msg: {}", msg);
+}
+
+#[test]
+fn nil_multi_arm_parse_error_suggests_grouped() {
+    let msg = parse_err_msg("def f() -> Int | String | Nil { nil }\nf()");
+    assert!(msg.contains("use (Int | String)? instead"), "msg: {}", msg);
+}
+
+#[test]
+fn union_duplicate_arm_type_error() {
+    let msg = typecheck_err_msg("def f() -> Int | Int { 1 }\nf()");
+    assert!(msg.contains("duplicate type 'Int' in union"), "msg: {}", msg);
+}
+
+#[test]
+fn union_duplicate_param_arm_type_error() {
+    let msg = typecheck_err_msg("def f(x: String | String) { x }\nf(\"hi\")");
+    assert!(msg.contains("duplicate type 'String' in union"), "msg: {}", msg);
+}
+
+#[test]
+fn leading_pipe_multiline_union() {
+    // Optional leading | for alignment (multiline style)
+    let result = eval("def f() -> | Int | String { 1 }\nf()");
+    assert_eq!(result, VmValue::Int(1));
+}

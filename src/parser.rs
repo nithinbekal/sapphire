@@ -4,6 +4,15 @@ use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
 use crate::value::Value;
 
+/// Return the display name for a type expression (used in error messages).
+fn type_expr_display_name(te: &TypeExpr) -> String {
+    match te {
+        TypeExpr::Named(n) => n.clone(),
+        TypeExpr::Union(arms) => arms.iter().map(type_expr_display_name).collect::<Vec<_>>().join(" | "),
+        TypeExpr::Any => "Any".to_string(),
+    }
+}
+
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
@@ -48,20 +57,7 @@ impl Parser {
             return Ok(None);
         }
         self.advance(); // consume ':'
-        match self.peek().kind.clone() {
-            TokenKind::Identifier(t) => {
-                self.advance();
-                Ok(Some(TypeExpr::Named(t)))
-            }
-            TokenKind::Nil => {
-                self.advance();
-                Ok(Some(TypeExpr::Named("Nil".to_string())))
-            }
-            _ => Err(SapphireError::ParseError {
-                message: "expected type name after ':'".into(),
-                line: self.peek().line,
-            }),
-        }
+        Ok(Some(self.parse_type_expr()?))
     }
 
     fn parse_return_type(&mut self) -> Result<Option<TypeExpr>, SapphireError> {
@@ -69,17 +65,118 @@ impl Parser {
             return Ok(None);
         }
         self.advance(); // consume '->'
+        Ok(Some(self.parse_type_expr()?))
+    }
+
+    /// Parse a type expression, including unions (`Int | String`) and multiline forms.
+    /// Optional leading `|` is allowed for alignment style.
+    fn parse_type_expr(&mut self) -> Result<TypeExpr, SapphireError> {
+        self.skip_terminators(); // allow newline before first arm
+        // Optional leading '|' for multiline alignment style: `| Int | String`
+        if self.check(&TokenKind::Pipe) {
+            self.advance();
+            self.skip_terminators();
+        }
+
+        let first = self.parse_single_type()?;
+
+        // Check for additional union arms (may span newlines)
+        self.skip_terminators();
+        if !self.check(&TokenKind::Pipe) {
+            return Ok(first);
+        }
+
+        let mut arms = vec![first];
+        while self.check(&TokenKind::Pipe) {
+            self.advance();
+            self.skip_terminators();
+            arms.push(self.parse_single_type()?);
+            self.skip_terminators();
+        }
+
+        // Flatten nested unions from T? arms (T? desugars to Union([T, Nil]))
+        let mut flat: Vec<TypeExpr> = Vec::new();
+        for arm in arms {
+            match arm {
+                TypeExpr::Union(inner) => flat.extend(inner),
+                other => flat.push(other),
+            }
+        }
+
+        // Any absorbs everything
+        if flat.iter().any(|t| matches!(t, TypeExpr::Any)) {
+            return Ok(TypeExpr::Any);
+        }
+
+        // Nil is not allowed as an explicit union arm — force ? syntax
+        if flat.iter().any(|t| matches!(t, TypeExpr::Named(n) if n == "Nil")) {
+            let non_nil_names: Vec<String> = flat
+                .iter()
+                .filter(|t| !matches!(t, TypeExpr::Named(n) if n == "Nil"))
+                .map(type_expr_display_name)
+                .collect();
+            let suggestion = if non_nil_names.len() == 1 {
+                format!("{}?", non_nil_names[0])
+            } else {
+                format!("({})?", non_nil_names.join(" | "))
+            };
+            return Err(SapphireError::ParseError {
+                message: format!(
+                    "Nil is not allowed as a union arm; use {} instead",
+                    suggestion
+                ),
+                line: self.peek().line,
+            });
+        }
+
+        Ok(TypeExpr::Union(flat))
+    }
+
+    /// Parse a single type: a named type (with optional `?` suffix), or a parenthesized group.
+    fn parse_single_type(&mut self) -> Result<TypeExpr, SapphireError> {
+        // Parenthesized group: (Int | String)?
+        if self.check(&TokenKind::LeftParen) {
+            self.advance();
+            let inner = self.parse_type_expr()?;
+            if !self.check(&TokenKind::RightParen) {
+                return Err(SapphireError::ParseError {
+                    message: "expected ')' after type group".into(),
+                    line: self.peek().line,
+                });
+            }
+            self.advance(); // consume ')'
+            if self.check(&TokenKind::Question) {
+                self.advance(); // consume '?'
+                return Ok(match inner {
+                    TypeExpr::Union(mut arms) => {
+                        arms.push(TypeExpr::Named("Nil".to_string()));
+                        TypeExpr::Union(arms)
+                    }
+                    other => TypeExpr::Union(vec![other, TypeExpr::Named("Nil".to_string())]),
+                });
+            }
+            return Ok(inner);
+        }
+
         match self.peek().kind.clone() {
             TokenKind::Identifier(t) => {
                 self.advance();
-                Ok(Some(TypeExpr::Named(t)))
+                // T? is sugar for T | Nil
+                if t.ends_with('?') {
+                    let base = t[..t.len() - 1].to_string();
+                    return Ok(TypeExpr::Union(vec![
+                        TypeExpr::Named(base),
+                        TypeExpr::Named("Nil".to_string()),
+                    ]));
+                }
+                Ok(TypeExpr::Named(t))
             }
             TokenKind::Nil => {
                 self.advance();
-                Ok(Some(TypeExpr::Named("Nil".to_string())))
+                Ok(TypeExpr::Named("Nil".to_string()))
             }
             _ => Err(SapphireError::ParseError {
-                message: "expected return type after '->'".into(),
+                message: "expected type name".into(),
                 line: self.peek().line,
             }),
         }
