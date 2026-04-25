@@ -84,6 +84,7 @@ impl TypeChecker {
                     TypeExpr::Union(flat)
                 }
             }
+            TypeExpr::Literal(_) => te,
             TypeExpr::Any => TypeExpr::Any,
         }
     }
@@ -576,21 +577,40 @@ impl TypeChecker {
 }
 
 fn types_compatible(actual: &TypeExpr, expected: &TypeExpr) -> bool {
+    let literal_base_named = |v: &Value| match v {
+        Value::Int(_) => TypeExpr::Named("Int".to_string()),
+        Value::Float(_) => TypeExpr::Named("Float".to_string()),
+        Value::Str(_) => TypeExpr::Named("String".to_string()),
+        Value::Bool(_) => TypeExpr::Named("Bool".to_string()),
+        Value::Nil => TypeExpr::Named("Nil".to_string()),
+    };
+
     match (actual, expected) {
         (_, TypeExpr::Any) | (TypeExpr::Any, _) => true,
         // actual is a union: ALL arms must be compatible with expected
         (TypeExpr::Union(arms), _) => arms.iter().all(|a| types_compatible(a, expected)),
         // expected is a union: actual must be compatible with AT LEAST ONE arm
         (_, TypeExpr::Union(arms)) => arms.iter().any(|e| types_compatible(actual, e)),
+        (TypeExpr::Literal(a), TypeExpr::Literal(e)) => a == e,
+        (TypeExpr::Literal(a), TypeExpr::Named(e)) => {
+            let base = literal_base_named(a);
+            types_compatible(&base, &TypeExpr::Named(e.clone()))
+        }
         (TypeExpr::Named(a), TypeExpr::Named(e)) => {
             a == e || (e == "Num" && (a == "Int" || a == "Float"))
         }
+        (TypeExpr::Named(_), TypeExpr::Literal(_)) => false,
     }
 }
 
 fn te_name(te: &TypeExpr) -> String {
     match te {
         TypeExpr::Named(n) => n.clone(),
+        TypeExpr::Literal(Value::Int(n)) => n.to_string(),
+        TypeExpr::Literal(Value::Float(n)) => n.to_string(),
+        TypeExpr::Literal(Value::Str(s)) => format!("{:?}", s),
+        TypeExpr::Literal(Value::Bool(b)) => b.to_string(),
+        TypeExpr::Literal(Value::Nil) => "Nil".to_string(),
         TypeExpr::Any => "Any".to_string(),
         TypeExpr::Union(arms) => arms.iter().map(te_name).collect::<Vec<_>>().join(" | "),
     }
@@ -600,10 +620,9 @@ fn check_union_duplicates(te: &TypeExpr) -> Option<String> {
     if let TypeExpr::Union(arms) = te {
         let mut seen = std::collections::HashSet::new();
         for arm in arms {
-            if let TypeExpr::Named(n) = arm
-                && !seen.insert(n.as_str())
-            {
-                return Some(format!("duplicate type '{}' in union", n));
+            let key = te_name(arm);
+            if !seen.insert(key.clone()) {
+                return Some(format!("duplicate type '{}' in union", key));
             }
         }
     }
