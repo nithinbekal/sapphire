@@ -1,0 +1,46 @@
+class Box[T] {
+  attr value: T
+
+  def get() -> T {
+    self.value
+  }
+
+  def to_s() -> String {
+    "Box(#{self.value})"
+  }
+}
+
+class Pair[A, B] {
+  attr first: A
+  attr second: B
+
+  def swap() -> Pair {
+    Pair.new(first: self.second, second: self.first)
+  }
+}
+
+def identity[T](x: T) -> T {
+  x
+}
+
+def first_or_default[T](items: List[T], default: T) -> T {
+  if items.empty?() { default }
+  else { items.first() }
+}
+
+b = Box.new(value: 42)
+print(b.get())
+print(b.to_s())
+
+s = Box.new(value: "hello")
+print(s.get())
+
+p = Pair.new(first: 1, second: "one")
+print(p.first)
+print(p.second)
+
+print(identity(99))
+print(identity("sapphire"))
+
+print(first_or_default([], 0))
+print(first_or_default([10, 20, 30], 0))

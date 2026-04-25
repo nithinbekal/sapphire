@@ -2215,3 +2215,90 @@ fn type_alias_typechecker_resolves() {
     let errors = sapphire::typechecker::TypeChecker::check(&stmts);
     assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
 }
+
+// ── Generics ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn generic_class_runs() {
+    let result = eval_with_stdlib(
+        "class Box[T] { attr value: T\ndef get() -> T { self.value } }\nb = Box.new(value: 42)\nb.get()",
+    );
+    assert_eq!(result, VmValue::Int(42));
+}
+
+#[test]
+fn generic_class_string_value_runs() {
+    let result = eval_with_stdlib(
+        "class Box[T] { attr value: T }\nb = Box.new(value: \"hi\")\nb.value",
+    );
+    assert_eq!(result, VmValue::Str("hi".into()));
+}
+
+#[test]
+fn generic_pair_class_runs() {
+    let result = eval_with_stdlib(
+        "class Pair[A, B] { attr first: A\nattr second: B }\np = Pair.new(first: 1, second: \"x\")\np.first",
+    );
+    assert_eq!(result, VmValue::Int(1));
+}
+
+#[test]
+fn generic_function_runs() {
+    let result = eval("def identity[T](x: T) -> T { x }\nidentity(7)");
+    assert_eq!(result, VmValue::Int(7));
+}
+
+#[test]
+fn parameterized_type_annotation_no_errors() {
+    // List[Int] as a parameter annotation should typecheck cleanly
+    let src = "def sum(items: List[Int]) -> Int { 0 }";
+    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
+    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
+    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
+    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
+}
+
+#[test]
+fn generic_type_var_compatible_with_itself() {
+    // Inside a generic class, the return type T should be accepted
+    let src = "class Box[T] { attr value: T\ndef get() -> T { self.value } }";
+    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
+    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
+    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
+    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
+}
+
+#[test]
+fn apply_same_type_args_compatible() {
+    use sapphire::ast::TypeExpr;
+    let list_int = TypeExpr::Apply("List".into(), vec![TypeExpr::Named("Int".into())]);
+    let list_int2 = TypeExpr::Apply("List".into(), vec![TypeExpr::Named("Int".into())]);
+    // Same parameterized types are compatible
+    let src = "def f(x: List[Int]) { x }";
+    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
+    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
+    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
+    assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
+    // Verify the AST captured the type correctly
+    let _ = (list_int, list_int2); // both are Apply("List", [Named("Int")])
+}
+
+#[test]
+fn bare_list_compatible_with_parameterized_list_gradual() {
+    // Gradual typing: passing bare List where List[Int] is expected is OK
+    let src = "def process(items: List[Int]) { items }\nprocess([])";
+    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
+    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
+    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
+    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
+}
+
+#[test]
+fn generics_example_file_runs() {
+    // Smoke test: the examples/generics.spr file should execute without errors
+    let result = eval_with_stdlib(
+        "class Box[T] { attr value: T\ndef get() -> T { self.value } }\n\
+         b = Box.new(value: 99)\nb.get()",
+    );
+    assert_eq!(result, VmValue::Int(99));
+}

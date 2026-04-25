@@ -5,6 +5,8 @@ use crate::value::Value;
 pub enum TypeExpr {
     /// A bare type name: `Int`, `String`, `Bool`, `Float`, `Nil`, or a class name.
     Named(String),
+    /// A parameterized type: `List[Int]`, `Map[String, Bool]`, `Box[T]`.
+    Apply(String, Vec<TypeExpr>),
     /// A union of two or more types: `Int | String`. Always has >= 2 arms.
     Union(Vec<TypeExpr>),
     /// Escape hatch for future use (e.g. unannotated generics, explicit `Any` type).
@@ -40,6 +42,7 @@ pub struct FieldDef {
 #[derive(Debug, Clone)]
 pub struct MethodDef {
     pub name: String,
+    pub type_params: Vec<String>,
     pub params: Vec<ParamDef>,
     pub return_type: Option<TypeExpr>,
     pub body: Vec<Expr>,
@@ -125,6 +128,8 @@ pub enum Expr {
     /// `class Name ...` — defines a class; value is the class object.
     Class {
         name: String,
+        /// Generic type parameters: `[T, U]` in `class Foo[T, U]`.
+        type_params: Vec<String>,
         /// Superclass expression: `Name` or `Outer.Inner`.  `None` means inherit from Object.
         superclass: Option<Box<Expr>>,
         fields: Vec<FieldDef>,
@@ -137,6 +142,8 @@ pub enum Expr {
     /// Top-level `def name(...)` on `Object`; value is the method name string.
     Function {
         name: String,
+        /// Generic type parameters: `[T]` in `def identity[T](x: T) -> T`.
+        type_params: Vec<String>,
         params: Vec<ParamDef>,
         return_type: Option<TypeExpr>,
         body: Vec<Expr>,
