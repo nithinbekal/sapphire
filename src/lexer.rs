@@ -486,6 +486,7 @@ impl Lexer {
             "rescue" => TokenKind::Rescue,
             "end" => TokenKind::End,
             "import" => TokenKind::Import,
+            "type" => TokenKind::Type,
             _ => TokenKind::Identifier(s),
         }
     }

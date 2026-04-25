@@ -65,6 +65,7 @@ pub enum TokenKind {
     Rescue,
     End,
     Import,
+    Type,
     Question,
 
     Newline,

@@ -309,6 +309,31 @@ impl Parser {
             self.advance();
             return Ok(Expr::Print(Box::new(self.logical()?)));
         }
+        if self.check(&TokenKind::Type) {
+            let line = self.peek().line;
+            self.advance(); // consume 'type'
+            let name = match self.peek().kind.clone() {
+                TokenKind::Identifier(n) => {
+                    self.advance();
+                    n
+                }
+                _ => {
+                    return Err(SapphireError::ParseError {
+                        message: "expected type alias name after 'type'".into(),
+                        line,
+                    });
+                }
+            };
+            if !self.check(&TokenKind::Eq) {
+                return Err(SapphireError::ParseError {
+                    message: "expected '=' after type alias name".into(),
+                    line,
+                });
+            }
+            self.advance(); // consume '='
+            let type_expr = self.parse_type_expr()?;
+            return Ok(Expr::TypeAlias { name, type_expr });
+        }
         if self.check(&TokenKind::Import) {
             let line = self.peek().line;
             self.advance();
