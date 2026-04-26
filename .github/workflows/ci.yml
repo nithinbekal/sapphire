@@ -24,7 +24,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build
-      - run: target/debug/sapphire test stdlib/tests
+      - run: target/debug/sapphire-lang test stdlib/tests
 
   clippy:
     name: Clippy

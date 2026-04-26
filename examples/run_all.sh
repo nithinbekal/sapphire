@@ -10,7 +10,7 @@
 set -uo pipefail
 
 EXAMPLES_DIR="$(dirname "$0")"
-BINARY="./target/debug/sapphire"
+BINARY="./target/debug/sapphire-lang"
 
 run_interpreter=false
 run_vm=false
