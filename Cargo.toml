@@ -8,12 +8,7 @@ default = ["cli"]
 cli = ["rustyline"]
 wasm = ["wasm-bindgen", "console_error_panic_hook"]
 
-[[bin]]
-name = "sapphire"
-path = "src/main.rs"
-
 [lib]
-name = "sapphire"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
