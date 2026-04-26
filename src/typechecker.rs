@@ -623,8 +623,14 @@ impl TypeChecker {
                 let else_type = else_stmts.last().and_then(|e| self.infer_type(e))?;
                 if then_type == else_type { Some(then_type) } else { None }
             }
-            Expr::Begin { .. }
-            | Expr::While { .. }
+            Expr::Begin { body, rescue_body, .. } => {
+                if rescue_body.is_empty() {
+                    body.last().and_then(|e| self.infer_type(e))
+                } else {
+                    None
+                }
+            }
+            Expr::While { .. }
             | Expr::MultiAssign { .. }
             | Expr::Return(_)
             | Expr::Break(_)

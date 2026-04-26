@@ -2446,3 +2446,35 @@ fn infer_if_type_string_branches() {
         VmValue::Str("pos".into()),
     );
 }
+
+// ── Infer `begin` expression types ───────────────────────────────────────────
+
+#[test]
+fn infer_begin_type_no_rescue() {
+    // begin with no rescue: infer from last body expression.
+    typecheck_ok(
+        "def f() { begin\n42\nend }\n\
+         def caller() -> Int { f() }",
+    );
+}
+
+#[test]
+fn infer_begin_type_catches_caller_mismatch() {
+    let msg = typecheck_err_msg(
+        "def f() { begin\n42\nend }\n\
+         def caller() -> String { f() }",
+    );
+    assert!(msg.contains("expected String"), "msg: {}", msg);
+    assert!(msg.contains("got Int"), "msg: {}", msg);
+}
+
+#[test]
+fn infer_begin_type_with_rescue_no_inference() {
+    // rescue introduces a second execution path — no inference for now, no crash.
+    typecheck_ok("def f() { begin\n42\nrescue e\n0\nend }\nf()");
+}
+
+#[test]
+fn infer_begin_runtime() {
+    assert_eq!(eval("def f() { begin\n99\nend }\nf()"), VmValue::Int(99));
+}
