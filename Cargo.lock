@@ -567,7 +567,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sapphire"
+name = "sapphire-lang"
 version = "0.6.0"
 dependencies = [
  "console_error_panic_hook",
