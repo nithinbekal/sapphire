@@ -1810,6 +1810,32 @@ fn return_type_annotation_num_accepts_float() {
     assert_eq!(result, VmValue::Float(3.14));
 }
 
+// ── unary operator return-type inference ──────────────────────────────────────
+
+#[test]
+fn unary_bang_infers_bool_return() {
+    let result = eval("def f() -> Bool { !true }\nf()");
+    assert_eq!(result, VmValue::Bool(false));
+}
+
+#[test]
+fn unary_minus_int_infers_int_return() {
+    let result = eval("def f() -> Int { -42 }\nf()");
+    assert_eq!(result, VmValue::Int(-42));
+}
+
+#[test]
+fn unary_minus_float_infers_float_return() {
+    let result = eval("def f() -> Float { -3.14 }\nf()");
+    assert_eq!(result, VmValue::Float(-3.14));
+}
+
+#[test]
+fn unary_tilde_infers_int_return() {
+    let result = eval("def f() -> Int { ~0 }\nf()");
+    assert_eq!(result, VmValue::Int(-1));
+}
+
 // ── break / next inside blocks passed to native methods ───────────────────────
 
 #[test]
