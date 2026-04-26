@@ -21,4 +21,7 @@ git tag "v$VERSION"
 # Push
 git push && git push --tags
 
+# Publish to crates.io
+cargo publish
+
 echo "Released v$VERSION"
