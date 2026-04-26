@@ -11,6 +11,7 @@ set -uo pipefail
 
 EXAMPLES_DIR="$(dirname "$0")"
 BINARY="./target/debug/sapphire"
+USE_CARGO_RUN=false
 
 run_interpreter=false
 run_vm=false
@@ -35,8 +36,8 @@ fi
 
 if [[ ! -x "$BINARY" ]]; then
   echo "Binary not found: $BINARY"
-  echo "Run 'cargo build' first, or pass the binary path as an argument."
-  exit 1
+  echo "Falling back to: cargo run --features cli -- <command> <file>"
+  USE_CARGO_RUN=true
 fi
 
 interp_pass=0; interp_fail=0
@@ -49,7 +50,15 @@ run_example() {
   local label
   label="$(basename "$file") [$backend]"
 
-  if "$BINARY" "$backend" "$file" > /dev/null 2>&1; then
+  if [[ "$USE_CARGO_RUN" == true ]]; then
+    if cargo run --features cli -- "$backend" "$file" > /dev/null 2>&1; then
+      echo "  PASS  $label"
+      return 0
+    else
+      echo "  FAIL  $label"
+      return 1
+    fi
+  elif "$BINARY" "$backend" "$file" > /dev/null 2>&1; then
     echo "  PASS  $label"
     return 0
   else

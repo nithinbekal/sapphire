@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use wasm_bindgen::prelude::*;
 
-use crate::{compiler, lexer, parser, vm};
+use crate::{compiler, lexer, parser, typechecker, vm};
 
 #[wasm_bindgen]
 pub struct RunResult {
@@ -36,16 +36,29 @@ pub fn run_sapphire(source: &str) -> RunResult {
             return RunResult {
                 output: String::new(),
                 error: Some(e.to_string()),
-            }
+            };
         }
     };
+    let type_errors = typechecker::TypeChecker::check(&stmts);
+    if !type_errors.is_empty() {
+        return RunResult {
+            output: String::new(),
+            error: Some(
+                type_errors
+                    .into_iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+        };
+    }
     let func = match compiler::compile(&stmts) {
         Ok(f) => f,
         Err(e) => {
             return RunResult {
                 output: String::new(),
                 error: Some(e.to_string()),
-            }
+            };
         }
     };
 

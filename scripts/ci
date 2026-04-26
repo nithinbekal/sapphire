@@ -16,12 +16,12 @@ run_check() {
 echo "Running CI checks..."
 echo
 
-cargo build > /dev/null 2>&1
+cargo build --features cli > /dev/null 2>&1
 
 run_check "cargo test" "cargo test"
 run_check "cargo clippy" "cargo clippy -- -D warnings"
-run_check "sapphire test" "target/debug/sapphire test stdlib/tests"
-run_check "examples" "examples/run_all.sh --interpreter && examples/run_all.sh --typecheck"
+run_check "sapphire test" "cargo run --features cli -- test stdlib/tests"
+run_check "examples" "examples/run_all.sh --interpreter --typecheck"
 
 echo
 echo "All checks passed!"
