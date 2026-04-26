@@ -41,6 +41,9 @@ fn run_file(path: &str) {
             std::process::exit(1);
         }
     };
+    if !report_type_errors(&exprs) {
+        std::process::exit(1);
+    }
     let func = match compiler::compile(&exprs) {
         Ok(f) => f,
         Err(e) => {
@@ -80,16 +83,24 @@ fn typecheck_file(path: &str) {
             std::process::exit(1);
         }
         Ok(exprs) => {
-            let errors = typechecker::TypeChecker::check(&exprs);
-            if errors.is_empty() {
+            if report_type_errors(&exprs) {
                 println!("No type errors found.");
             } else {
-                for e in &errors {
-                    eprintln!("{}", e);
-                }
                 std::process::exit(1);
             }
         }
+    }
+}
+
+fn report_type_errors(exprs: &[sapphire::ast::Expr]) -> bool {
+    let errors = typechecker::TypeChecker::check(exprs);
+    if errors.is_empty() {
+        true
+    } else {
+        for e in &errors {
+            eprintln!("{}", e);
+        }
+        false
     }
 }
 
@@ -151,6 +162,9 @@ fn run_tests(path: &str) {
                 std::process::exit(1);
             }
         };
+        if !report_type_errors(&exprs) {
+            std::process::exit(1);
+        }
         let func = match compiler::compile(&exprs) {
             Ok(f) => f,
             Err(e) => {
@@ -293,6 +307,9 @@ fn run_repl() {
             }
             Ok(e) => e,
         };
+        if !report_type_errors(&exprs) {
+            continue;
+        }
         let func = match compiler::compile_repl(&exprs) {
             Err(e) => {
                 eprintln!("{}", e);
