@@ -16,6 +16,7 @@ cli = ["rustyline"]
 wasm = ["wasm-bindgen", "console_error_panic_hook"]
 
 [lib]
+name = "sapphire"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
