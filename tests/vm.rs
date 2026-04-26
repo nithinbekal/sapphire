@@ -2401,3 +2401,48 @@ fn infer_return_type_empty_body_no_crash() {
     // A function with an empty body should not panic — inference simply finds nothing.
     assert_eq!(eval("def noop() { }\nnoop()"), VmValue::Nil);
 }
+
+// ── Infer `if` expression types ───────────────────────────────────────────────
+
+#[test]
+fn infer_if_type_matching_branches() {
+    // Both branches return Int → if expression infers Int → function infers Int.
+    typecheck_ok(
+        "def clamp(x: Int) { if x > 0 { x } else { 0 } }\n\
+         def caller() -> Int { clamp(5) }",
+    );
+}
+
+#[test]
+fn infer_if_type_catches_caller_mismatch() {
+    // Both branches return Int → caller expecting String gets a type error.
+    let msg = typecheck_err_msg(
+        "def sign(x: Int) { if x > 0 { 1 } else { 0 } }\n\
+         def caller() -> String { sign(1) }",
+    );
+    assert!(msg.contains("expected String"), "msg: {}", msg);
+    assert!(msg.contains("got Int"), "msg: {}", msg);
+}
+
+#[test]
+fn infer_if_no_else_no_inference() {
+    // No else branch → can't infer; the unannotated function stays uninferred (no error).
+    typecheck_ok("def maybe(x: Int) { if x > 0 { x } }\nmaybe(1)");
+}
+
+#[test]
+fn infer_if_mismatched_branches_no_inference() {
+    // Branches disagree (Int vs String) → no type inferred; annotated caller should still error
+    // at the runtime level, not the typechecker.  Typechecker itself stays clean.
+    typecheck_ok(
+        "def mixed(x: Int) { if x > 0 { 1 } else { \"neg\" } }\nmixed(1)",
+    );
+}
+
+#[test]
+fn infer_if_type_string_branches() {
+    assert_eq!(
+        eval("def label(x: Int) { if x > 0 { \"pos\" } else { \"non-pos\" } }\nlabel(1)"),
+        VmValue::Str("pos".into()),
+    );
+}

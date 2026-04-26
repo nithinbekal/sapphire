@@ -617,8 +617,13 @@ impl TypeChecker {
                 _ => None,
             },
             Expr::Print(inner) => self.infer_type(inner),
-            Expr::If { .. }
-            | Expr::Begin { .. }
+            Expr::If { then_branch, else_branch, .. } => {
+                let then_type = then_branch.last().and_then(|e| self.infer_type(e))?;
+                let else_stmts = else_branch.as_ref()?;
+                let else_type = else_stmts.last().and_then(|e| self.infer_type(e))?;
+                if then_type == else_type { Some(then_type) } else { None }
+            }
+            Expr::Begin { .. }
             | Expr::While { .. }
             | Expr::MultiAssign { .. }
             | Expr::Return(_)
