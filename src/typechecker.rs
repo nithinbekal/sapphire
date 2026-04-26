@@ -376,7 +376,7 @@ impl TypeChecker {
                 }
             }
             Expr::Print(inner) => self.check_expr(inner),
-            Expr::Class { type_params, methods, .. } => {
+            Expr::Class { name, type_params, methods, .. } => {
                 self.push_type_vars(type_params);
                 for method in methods {
                     let saved = self.current_return_type.take();
@@ -410,6 +410,15 @@ impl TypeChecker {
                                 te_name(&actual)
                             ),
                         });
+                    }
+
+                    if method.return_type.is_none()
+                        && let Some(last) = method.body.last()
+                        && let Some(inferred) = self.infer_type(last)
+                        && let Some(cls) = self.classes.get_mut(name)
+                        && let Some(sig) = cls.methods.get_mut(&method.name)
+                    {
+                        sig.return_type = Some(inferred);
                     }
 
                     self.pop_type_vars();
@@ -461,6 +470,14 @@ impl TypeChecker {
                             te_name(&actual)
                         ),
                     });
+                }
+
+                if return_type.is_none()
+                    && let Some(last) = body.last()
+                    && let Some(inferred) = self.infer_type(last)
+                    && let Some(sig) = self.functions.get_mut(name)
+                {
+                    sig.return_type = Some(inferred);
                 }
 
                 self.pop_type_vars();

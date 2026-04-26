@@ -2336,3 +2336,68 @@ fn generics_example_file_runs() {
     );
     assert_eq!(result, VmValue::Int(99));
 }
+
+// ── Implicit return type inference ────────────────────────────────────────────
+
+fn typecheck_ok(src: &str) {
+    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
+    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
+    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
+    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
+}
+
+#[test]
+fn infer_return_type_from_literal_int() {
+    // Unannotated function returning a literal: should run fine
+    assert_eq!(eval("def f() { 42 }\nf()"), VmValue::Int(42));
+}
+
+#[test]
+fn infer_return_type_from_literal_string() {
+    assert_eq!(eval("def greet() { \"hello\" }\ngreet()"), VmValue::Str("hello".into()));
+}
+
+#[test]
+fn infer_return_type_propagates_to_annotated_caller() {
+    // double has no annotation but its body `n * 2` infers Int.
+    // wrapper declares -> Int and calls double — typechecker should accept.
+    typecheck_ok(
+        "def double(n: Int) { n * 2 }\n\
+         def wrapper() -> Int { double(3) }",
+    );
+}
+
+#[test]
+fn infer_return_type_catches_caller_mismatch() {
+    // greet() infers String; main() declares -> Int — typechecker should flag the mismatch.
+    let msg = typecheck_err_msg(
+        "def greet() { \"hello\" }\n\
+         def main() -> Int { greet() }",
+    );
+    assert!(msg.contains("expected Int"), "unexpected message: {}", msg);
+    assert!(msg.contains("got String"), "unexpected message: {}", msg);
+}
+
+#[test]
+fn infer_return_type_class_method_propagates() {
+    // Unannotated class method infers its return type; annotated caller passes typecheck.
+    typecheck_ok(
+        "class Counter {\n\
+           def value() { 0 }\n\
+           def doubled() -> Int { self.value() }\n\
+         }",
+    );
+}
+
+#[test]
+fn annotated_return_type_unaffected_by_inference() {
+    // Existing explicitly annotated functions still work correctly.
+    let result = eval("def add(a: Int, b: Int) -> Int { a + b }\nadd(3, 4)");
+    assert_eq!(result, VmValue::Int(7));
+}
+
+#[test]
+fn infer_return_type_empty_body_no_crash() {
+    // A function with an empty body should not panic — inference simply finds nothing.
+    assert_eq!(eval("def noop() { }\nnoop()"), VmValue::Nil);
+}
