@@ -680,6 +680,7 @@ impl TypeChecker {
                 }
                 _ => None,
             },
+            Expr::Assign { value, .. } => self.infer_type(value),
             _ => None,
         }
     }
