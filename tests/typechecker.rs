@@ -333,3 +333,40 @@ fn infer_early_return_method() {
     );
     assert_method_returns!(types, "C", "f", Int);
 }
+
+#[test]
+fn infer_set_propagates_int() {
+    let types = check_types_ok(
+        "class P { attr x: Int\n def f() { self.x = 42 } }\n\
+         def caller() -> Int { P.new().f() }",
+    );
+    assert_method_returns!(types, "P", "f", Int);
+}
+
+#[test]
+fn infer_set_propagates_string() {
+    let types = check_types_ok(
+        "class P { attr label: String\n def f() { self.label = \"hi\" } }\n\
+         def caller() -> String { P.new().f() }",
+    );
+    assert_method_returns!(types, "P", "f", String);
+}
+
+#[test]
+fn infer_set_catches_caller_mismatch() {
+    assert_typecheck_error!(
+        "class P { attr x: Int\n def f() { self.x = 1 } }\n\
+         def caller() -> String { P.new().f() }",
+        "expected String",
+        "got Int"
+    );
+}
+
+#[test]
+fn infer_set_chained_through_typed_param() {
+    let types = check_types_ok(
+        "class P { attr x: Int\n def f(n: Int) { self.x = n } }\n\
+         def caller() -> Int { P.new().f(7) }",
+    );
+    assert_method_returns!(types, "P", "f", Int);
+}
