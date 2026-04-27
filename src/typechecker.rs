@@ -68,6 +68,8 @@ pub struct TypeChecker {
     type_aliases: HashMap<String, TypeExpr>,
     errors: Vec<TypeCheckError>,
     current_return_type: Option<TypeExpr>,
+    /// Name of the class whose methods are currently being checked, enabling `SelfExpr` inference.
+    current_class: Option<String>,
     var_scopes: Vec<HashMap<String, TypeExpr>>,
     /// Stacked scopes of in-scope type variable names (from generic class/function params).
     type_vars: Vec<HashSet<String>>,
@@ -81,6 +83,7 @@ impl TypeChecker {
             type_aliases: HashMap::new(),
             errors: Vec::new(),
             current_return_type: None,
+            current_class: None,
             var_scopes: vec![HashMap::new()],
             type_vars: Vec::new(),
         }
@@ -98,6 +101,12 @@ impl TypeChecker {
         }
         for e in exprs {
             tc.check_expr(e);
+        }
+        loop {
+            let progress = exprs.iter().any(|e| tc.propagate_return_type(e));
+            if !progress {
+                break;
+            }
         }
         let errors = std::mem::take(&mut tc.errors);
         let types = tc.into_checked_types();
@@ -440,6 +449,7 @@ impl TypeChecker {
             }
             Expr::Print(inner) => self.check_expr(inner),
             Expr::Class { name, type_params, methods, .. } => {
+                let saved_class = self.current_class.replace(name.clone());
                 self.push_type_vars(type_params);
                 for method in methods {
                     let saved = self.current_return_type.take();
@@ -489,6 +499,7 @@ impl TypeChecker {
                     self.current_return_type = saved;
                 }
                 self.pop_type_vars();
+                self.current_class = saved_class;
             }
             Expr::Function {
                 name,
@@ -549,6 +560,79 @@ impl TypeChecker {
             }
             Expr::TypeAlias { .. } => {}
             _ => {}
+        }
+    }
+
+    /// Re-infer the return type for any unannotated function/method that still has `None` because
+    /// its callee was defined later in the source and not yet inferred during `check_expr`.
+    /// Returns `true` if at least one type was newly stored.
+    fn propagate_return_type(&mut self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Function { name, type_params, params, return_type, body } => {
+                if return_type.is_some() {
+                    return false;
+                }
+                if self.functions.get(name).and_then(|s| s.return_type.as_ref()).is_some() {
+                    return false;
+                }
+                self.push_type_vars(type_params);
+                self.push_scope();
+                for p in params {
+                    if let Some(te) = &p.type_ann {
+                        self.set_var(&p.name, te.clone());
+                    }
+                }
+                let inferred = body.last().and_then(|e| self.infer_type(e));
+                self.pop_scope();
+                self.pop_type_vars();
+                if let Some(ty) = inferred
+                    && let Some(sig) = self.functions.get_mut(name)
+                {
+                    sig.return_type = Some(ty);
+                    return true;
+                }
+                false
+            }
+            Expr::Class { name, type_params, methods, .. } => {
+                let mut progress = false;
+                let saved_class = self.current_class.replace(name.clone());
+                self.push_type_vars(type_params);
+                for method in methods {
+                    if method.return_type.is_some() {
+                        continue;
+                    }
+                    let already_known = self
+                        .classes
+                        .get(name)
+                        .and_then(|c| c.methods.get(&method.name))
+                        .and_then(|s| s.return_type.as_ref())
+                        .is_some();
+                    if already_known {
+                        continue;
+                    }
+                    self.push_type_vars(&method.type_params);
+                    self.push_scope();
+                    for p in &method.params {
+                        if let Some(te) = &p.type_ann {
+                            self.set_var(&p.name, te.clone());
+                        }
+                    }
+                    let inferred = method.body.last().and_then(|e| self.infer_type(e));
+                    self.pop_scope();
+                    self.pop_type_vars();
+                    if let Some(ty) = inferred
+                        && let Some(cls) = self.classes.get_mut(name)
+                        && let Some(sig) = cls.methods.get_mut(&method.name)
+                    {
+                        sig.return_type = Some(ty);
+                        progress = true;
+                    }
+                }
+                self.pop_type_vars();
+                self.current_class = saved_class;
+                progress
+            }
+            _ => false,
         }
     }
 
@@ -635,6 +719,7 @@ impl TypeChecker {
 
     fn infer_type(&self, expr: &Expr) -> Option<TypeExpr> {
         match expr {
+            Expr::SelfExpr => self.current_class.as_ref().map(|cn| TypeExpr::Named(cn.clone())),
             Expr::Literal(v) => match v {
                 Value::Int(_) => Some(TypeExpr::Named("Int".into())),
                 Value::Float(_) => Some(TypeExpr::Named("Float".into())),
