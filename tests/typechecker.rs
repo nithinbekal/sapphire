@@ -398,3 +398,49 @@ fn string_plus_int_does_not_infer() {
     );
     assert_eq!(types.function_return_type("f"), Some(None));
 }
+
+#[test]
+fn infer_callee_defined_after_caller() {
+    let types = check_types_ok(
+        "def caller() { callee() }\n\
+         def callee() { 42 }",
+    );
+    assert_function_returns!(types, "caller", Int);
+    assert_function_returns!(types, "callee", Int);
+}
+
+#[test]
+fn infer_chained_forward_references() {
+    let types = check_types_ok(
+        "def a() { b() }\n\
+         def b() { c() }\n\
+         def c() { 42 }",
+    );
+    assert_function_returns!(types, "a", Int);
+    assert_function_returns!(types, "b", Int);
+    assert_function_returns!(types, "c", Int);
+}
+
+#[test]
+fn infer_method_calling_forward_declared_method_in_same_class() {
+    let types = check_types_ok(
+        "class C {\n\
+           def caller() { self.callee() }\n\
+           def callee() { 42 }\n\
+         }",
+    );
+    assert_method_returns!(types, "C", "caller", Int);
+    assert_method_returns!(types, "C", "callee", Int);
+}
+
+#[test]
+fn infer_function_calling_method_on_later_declared_class() {
+    let types = check_types_ok(
+        "def caller() { B.new().helper() }\n\
+         class B {\n\
+           def helper() { 42 }\n\
+         }",
+    );
+    assert_function_returns!(types, "caller", Int);
+    assert_method_returns!(types, "B", "helper", Int);
+}
