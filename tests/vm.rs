@@ -2504,3 +2504,49 @@ fn infer_begin_type_with_rescue_no_inference() {
 fn infer_begin_runtime() {
     assert_eq!(eval("def f() { begin\n99\nend }\nf()"), VmValue::Int(99));
 }
+
+// ── Infer `assign` expression types ──────────────────────────────────────────
+
+#[test]
+fn infer_assign_propagates_int() {
+    // Assignment evaluates to the RHS; the function body's last expression is
+    // the assign, so the function infers Int and the annotated caller accepts it.
+    typecheck_ok(
+        "def f() { x = 42 }\n\
+         def caller() -> Int { f() }",
+    );
+}
+
+#[test]
+fn infer_assign_propagates_string() {
+    typecheck_ok(
+        "def f() { s = \"hello\" }\n\
+         def caller() -> String { f() }",
+    );
+}
+
+#[test]
+fn infer_assign_catches_caller_mismatch() {
+    // Assignment infers Int; caller expecting String must get a type error.
+    let msg = typecheck_err_msg(
+        "def f() { x = 1 }\n\
+         def caller() -> String { f() }",
+    );
+    assert!(msg.contains("expected String"), "msg: {}", msg);
+    assert!(msg.contains("got Int"), "msg: {}", msg);
+}
+
+#[test]
+fn infer_assign_chained_through_variable() {
+    // The assigned value is itself a variable with a known type.
+    typecheck_ok(
+        "def f(n: Int) { x = n }\n\
+         def caller() -> Int { f(7) }",
+    );
+}
+
+#[test]
+fn infer_assign_runtime() {
+    // Sanity-check that assignment still evaluates to the RHS at runtime.
+    assert_eq!(eval("def f() { x = 99 }\nf()"), VmValue::Int(99));
+}
