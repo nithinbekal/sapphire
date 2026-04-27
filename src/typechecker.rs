@@ -616,6 +616,19 @@ impl TypeChecker {
                 | TokenKind::PipePipe => Some(TypeExpr::Named("Bool".into())),
                 _ => None,
             },
+            Expr::Unary { op, right } => match &op.kind {
+                TokenKind::Bang => Some(TypeExpr::Named("Bool".into())),
+                TokenKind::Tilde => Some(TypeExpr::Named("Int".into())),
+                TokenKind::Minus => {
+                    if let Some(TypeExpr::Named(n)) = self.infer_type(right)
+                        && (n == "Int" || n == "Float")
+                    {
+                        return Some(TypeExpr::Named(n));
+                    }
+                    None
+                }
+                _ => None,
+            },
             Expr::Print(inner) => self.infer_type(inner),
             Expr::If { then_branch, else_branch, .. } => {
                 let then_type = then_branch.last().and_then(|e| self.infer_type(e))?;
