@@ -649,8 +649,25 @@ impl TypeChecker {
             Expr::MapLit(_) => Some(TypeExpr::Named("Map".into())),
             Expr::Range { .. } => Some(TypeExpr::Named("Range".into())),
             Expr::Binary { left, op, right } => match &op.kind {
-                TokenKind::Plus
-                | TokenKind::Minus
+                TokenKind::Plus => {
+                    let l = self.infer_type(left);
+                    let r = self.infer_type(right);
+                    match (&l, &r) {
+                        (Some(TypeExpr::Named(a)), Some(TypeExpr::Named(b))) => {
+                            if a == "String" && b == "String" {
+                                Some(TypeExpr::Named("String".into()))
+                            } else if a == "Float" || b == "Float" {
+                                Some(TypeExpr::Named("Float".into()))
+                            } else if a == "Int" && b == "Int" {
+                                Some(TypeExpr::Named("Int".into()))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    }
+                }
+                TokenKind::Minus
                 | TokenKind::Star
                 | TokenKind::Slash
                 | TokenKind::Percent => {

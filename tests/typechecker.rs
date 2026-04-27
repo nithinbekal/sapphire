@@ -370,3 +370,31 @@ fn infer_set_chained_through_typed_param() {
     );
     assert_method_returns!(types, "P", "f", Int);
 }
+
+#[test]
+fn infer_string_concat_plus() {
+    let types = check_types_ok(
+        "def greet(a: String, b: String) { a + b }\n\
+         def caller() -> String { greet(\"hello\", \" world\") }",
+    );
+    assert_function_returns!(types, "greet", String);
+}
+
+#[test]
+fn infer_string_concat_return_type_mismatch() {
+    assert_typecheck_error!(
+        "def f(a: String, b: String) { a + b }\n\
+         def caller() -> Int { f(\"x\", \"y\") }",
+        "expected Int",
+        "got String"
+    );
+}
+
+#[test]
+fn string_plus_int_does_not_infer() {
+    let types = check_types_ok(
+        "def f(a: String, b: Int) { a + b }\n\
+         def caller() -> String { \"ok\" }",
+    );
+    assert_eq!(types.function_return_type("f"), Some(None));
+}
