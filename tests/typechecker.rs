@@ -294,3 +294,42 @@ fn safe_get_call_accepts_nullable_return() {
          def f(x: Foo) -> Int? { x&.bar() }",
     );
 }
+
+#[test]
+fn infer_return_expr_int() {
+    let types = check_types_ok(
+        "def f() { return 42 }\n\
+         def caller() -> Int { f() }",
+    );
+    assert_function_returns!(types, "f", Int);
+}
+
+#[test]
+fn infer_return_expr_string() {
+    let types = check_types_ok(
+        "def f() { return \"hi\" }\n\
+         def caller() -> String { f() }",
+    );
+    assert_function_returns!(types, "f", String);
+}
+
+#[test]
+fn infer_return_expr_catches_caller_mismatch() {
+    assert_typecheck_error!(
+        "def f() { return 42 }\n\
+         def caller() -> String { f() }",
+        "expected String",
+        "got Int"
+    );
+}
+
+#[test]
+fn infer_early_return_method() {
+    let types = check_types_ok(
+        "class C {\n\
+           def f(x: Int) { return x }\n\
+         }\n\
+         def caller() -> Int { C.new().f(1) }",
+    );
+    assert_method_returns!(types, "C", "f", Int);
+}

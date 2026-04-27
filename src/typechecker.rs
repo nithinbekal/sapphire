@@ -706,9 +706,9 @@ impl TypeChecker {
                     None
                 }
             }
+            Expr::Return(inner) => self.infer_type(inner),
             Expr::While { .. }
             | Expr::MultiAssign { .. }
-            | Expr::Return(_)
             | Expr::Break(_)
             | Expr::Next(_)
             | Expr::Raise(_) => None,
