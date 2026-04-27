@@ -1,11 +1,29 @@
+/// First type error message from `src`, or panics if the program is accepted.
 fn typecheck_err_msg(src: &str) -> String {
     let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
     let stmts = sapphire::parser::Parser::new(tokens)
         .parse()
         .expect("parse error");
     let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(!errors.is_empty(), "expected type errors");
+    assert!(!errors.is_empty(), "expected type errors for:\n{src}");
     errors[0].message.clone()
+}
+
+/// Asserts typecheck fails; the first error message must contain every `substring` (e.g. expected and got for mismatches).
+macro_rules! assert_typecheck_error {
+    ($src:expr, $($substring:expr),+ $(,)?) => {
+        {
+            let msg = typecheck_err_msg($src);
+            $(
+            assert!(
+                msg.contains($substring),
+                "expected first type error to contain:\n{}\n\nmessage:\n{}",
+                $substring,
+                msg
+            );
+            )*
+        }
+    };
 }
 
 fn typecheck_ok(src: &str) {
@@ -15,121 +33,153 @@ fn typecheck_ok(src: &str) {
     assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
 }
 
+fn check_types_ok(src: &str) -> sapphire::typechecker::CheckedTypes {
+    use sapphire::typechecker::TypeChecker;
+    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
+    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
+    let info = TypeChecker::check_info(&stmts);
+    assert!(info.errors.is_empty(), "unexpected type errors: {:?}", info.errors);
+    info.types
+}
+
+/// Asserts a top-level function's resolved return type; `$ty` is a bare name (`Int`, `String`, `MyClass`, …).
+macro_rules! assert_function_returns {
+    ($types:expr, $name:expr, $ty:ident) => {
+        assert_eq!(
+            $types.function_return_type($name),
+            Some(Some(sapphire::ast::TypeExpr::Named(stringify!($ty).to_string())))
+        );
+    };
+}
+
+/// Asserts a class method's resolved return type; same `$ty` convention as [`assert_function_returns!`].
+macro_rules! assert_method_returns {
+    ($types:expr, $class:expr, $method:expr, $ty:ident) => {
+        assert_eq!(
+            $types.method_return_type($class, $method),
+            Some(Some(sapphire::ast::TypeExpr::Named(stringify!($ty).to_string())))
+        );
+    };
+}
+
 #[test]
 fn literal_union_param_rejects_wrong_literal() {
-    let msg = typecheck_err_msg("def pick(mode: \"dev\" | \"prod\") { mode }\npick(\"test\")");
-    assert!(
-        msg.contains("expected \"dev\" | \"prod\", got String"),
-        "msg: {}",
-        msg
+    assert_typecheck_error!(
+        "def pick(mode: \"dev\" | \"prod\") { mode }\npick(\"test\")",
+        "expected \"dev\" | \"prod\", got String"
     );
 }
 
 #[test]
 fn union_duplicate_arm_type_error() {
-    let msg = typecheck_err_msg("def f() -> Int | Int { 1 }\nf()");
-    assert!(msg.contains("duplicate type 'Int' in union"), "msg: {}", msg);
+    assert_typecheck_error!("def f() -> Int | Int { 1 }\nf()", "duplicate type 'Int' in union");
 }
 
 #[test]
 fn union_duplicate_param_arm_type_error() {
-    let msg = typecheck_err_msg("def f(x: String | String) { x }\nf(\"hi\")");
-    assert!(msg.contains("duplicate type 'String' in union"), "msg: {}", msg);
+    assert_typecheck_error!(
+        "def f(x: String | String) { x }\nf(\"hi\")",
+        "duplicate type 'String' in union"
+    );
 }
 
 #[test]
 fn type_alias_typechecker_resolves() {
-    let src = "type Number = Int | Float\ndef f(n: Number) { n }\nf(1)";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
+    typecheck_ok("type Number = Int | Float\ndef f(n: Number) { n }\nf(1)");
 }
 
 #[test]
 fn parameterized_type_annotation_no_errors() {
-    let src = "def sum(items: List[Int]) -> Int { 0 }";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
+    let types = check_types_ok("def sum(items: List[Int]) -> Int { 0 }");
+    assert_function_returns!(types, "sum", Int);
 }
 
 #[test]
 fn generic_type_var_compatible_with_itself() {
-    let src = "class Box[T] { attr value: T\ndef get() -> T { self.value } }";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
+    let types = check_types_ok(
+        "class Box[T] { attr value: T\ndef get() -> T { self.value } }",
+    );
+    assert_method_returns!(types, "Box", "get", T);
 }
 
 #[test]
 fn apply_same_type_args_compatible() {
-    use sapphire::ast::TypeExpr;
-    let list_int = TypeExpr::Apply("List".into(), vec![TypeExpr::Named("Int".into())]);
-    let list_int2 = TypeExpr::Apply("List".into(), vec![TypeExpr::Named("Int".into())]);
-    let src = "def f(x: List[Int]) { x }";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
-    let _ = (list_int, list_int2);
+    // Param and return use the same `List[Int]`; both arms structurally match.
+    typecheck_ok("def f(x: List[Int]) { x }");
 }
 
 #[test]
 fn bare_list_compatible_with_parameterized_list_gradual() {
-    let src = "def process(items: List[Int]) { items }\nprocess([])";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
+    typecheck_ok("def process(items: List[Int]) { items }\nprocess([])");
 }
 
 #[test]
 fn infer_return_type_propagates_to_annotated_caller() {
-    typecheck_ok(
+    let types = check_types_ok(
         "def double(n: Int) { n * 2 }\n\
          def wrapper() -> Int { double(3) }",
     );
+    assert_function_returns!(types, "double", Int);
+}
+
+#[test]
+fn inferred_top_level_function_return_type_exposed() {
+    let types = check_types_ok(
+        "def double(n: Int) { n * 2 }\n\
+         def wrapper { double(3) }",
+    );
+    assert_function_returns!(types, "double", Int);
+}
+
+#[test]
+fn inferred_class_method_return_type_exposed() {
+    let types = check_types_ok(
+        "class C {\n\
+          def m(n: Int) { n * 2 }\n\
+        }",
+    );
+    assert_method_returns!(types, "C", "m", Int);
 }
 
 #[test]
 fn infer_return_type_catches_caller_mismatch() {
-    let msg = typecheck_err_msg(
+    assert_typecheck_error!(
         "def greet() { \"hello\" }\n\
          def main() -> Int { greet() }",
+        "expected Int",
+        "got String"
     );
-    assert!(msg.contains("expected Int"), "unexpected message: {}", msg);
-    assert!(msg.contains("got String"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn infer_return_type_class_method_propagates() {
-    typecheck_ok(
+    let types = check_types_ok(
         "class Counter {\n\
            def value() { 0 }\n\
            def doubled() -> Int { self.value() }\n\
          }",
     );
+    assert_method_returns!(types, "Counter", "value", Int);
+    assert_method_returns!(types, "Counter", "doubled", Int);
 }
 
 #[test]
 fn infer_if_type_matching_branches() {
-    typecheck_ok(
+    let types = check_types_ok(
         "def clamp(x: Int) { if x > 0 { x } else { 0 } }\n\
          def caller() -> Int { clamp(5) }",
     );
+    assert_function_returns!(types, "clamp", Int);
 }
 
 #[test]
 fn infer_if_type_catches_caller_mismatch() {
-    let msg = typecheck_err_msg(
+    assert_typecheck_error!(
         "def sign(x: Int) { if x > 0 { 1 } else { 0 } }\n\
          def caller() -> String { sign(1) }",
+        "expected String",
+        "got Int"
     );
-    assert!(msg.contains("expected String"), "msg: {}", msg);
-    assert!(msg.contains("got Int"), "msg: {}", msg);
 }
 
 #[test]
@@ -146,20 +196,21 @@ fn infer_if_mismatched_branches_no_inference() {
 
 #[test]
 fn infer_begin_type_no_rescue() {
-    typecheck_ok(
+    let types = check_types_ok(
         "def f() { begin\n42\nend }\n\
          def caller() -> Int { f() }",
     );
+    assert_function_returns!(types, "f", Int);
 }
 
 #[test]
 fn infer_begin_type_catches_caller_mismatch() {
-    let msg = typecheck_err_msg(
+    assert_typecheck_error!(
         "def f() { begin\n42\nend }\n\
          def caller() -> String { f() }",
+        "expected String",
+        "got Int"
     );
-    assert!(msg.contains("expected String"), "msg: {}", msg);
-    assert!(msg.contains("got Int"), "msg: {}", msg);
 }
 
 #[test]
@@ -169,34 +220,37 @@ fn infer_begin_type_with_rescue_no_inference() {
 
 #[test]
 fn infer_assign_propagates_int() {
-    typecheck_ok(
+    let types = check_types_ok(
         "def f() { x = 42 }\n\
          def caller() -> Int { f() }",
     );
+    assert_function_returns!(types, "f", Int);
 }
 
 #[test]
 fn infer_assign_propagates_string() {
-    typecheck_ok(
+    let types = check_types_ok(
         "def f() { s = \"hello\" }\n\
          def caller() -> String { f() }",
     );
+    assert_function_returns!(types, "f", String);
 }
 
 #[test]
 fn infer_assign_catches_caller_mismatch() {
-    let msg = typecheck_err_msg(
+    assert_typecheck_error!(
         "def f() { x = 1 }\n\
          def caller() -> String { f() }",
+        "expected String",
+        "got Int"
     );
-    assert!(msg.contains("expected String"), "msg: {}", msg);
-    assert!(msg.contains("got Int"), "msg: {}", msg);
 }
 
 #[test]
 fn infer_assign_chained_through_variable() {
-    typecheck_ok(
+    let types = check_types_ok(
         "def f(n: Int) { x = n }\n\
          def caller() -> Int { f(7) }",
     );
+    assert_function_returns!(types, "f", Int);
 }
