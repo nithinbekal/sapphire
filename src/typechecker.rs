@@ -741,6 +741,24 @@ impl TypeChecker {
 
                     None
                 }
+                Expr::SafeGet {
+                    object,
+                    name: method_name,
+                } => {
+                    if let Some(TypeExpr::Named(cn)) = self.infer_type(object)
+                        && let Some(cls) = self.classes.get(&cn)
+                        && let Some(ret) = cls
+                            .methods
+                            .get(method_name)
+                            .and_then(|s| s.return_type.clone())
+                    {
+                        return Some(TypeExpr::Union(vec![
+                            TypeExpr::Named("Nil".into()),
+                            ret,
+                        ]));
+                    }
+                    None
+                }
                 _ => None,
             },
             Expr::Assign { value, .. } => self.infer_type(value),

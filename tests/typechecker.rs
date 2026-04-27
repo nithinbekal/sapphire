@@ -254,3 +254,43 @@ fn infer_assign_chained_through_variable() {
     );
     assert_function_returns!(types, "f", Int);
 }
+
+#[test]
+fn safe_get_call_infers_nil_union() {
+    use sapphire::ast::TypeExpr;
+    let types = check_types_ok(
+        "class Foo {\n\
+           def bar() -> Int { 42 }\n\
+         }\n\
+         def f(x: Foo) { x&.bar() }",
+    );
+    assert_eq!(
+        types.function_return_type("f"),
+        Some(Some(TypeExpr::Union(vec![
+            TypeExpr::Named("Nil".into()),
+            TypeExpr::Named("Int".into()),
+        ])))
+    );
+}
+
+#[test]
+fn safe_get_call_rejects_when_int_expected() {
+    assert_typecheck_error!(
+        "class Foo {\n\
+           def bar() -> Int { 42 }\n\
+         }\n\
+         def f(x: Foo) -> Int { x&.bar() }",
+        "expected Int",
+        "got Nil | Int"
+    );
+}
+
+#[test]
+fn safe_get_call_accepts_nullable_return() {
+    typecheck_ok(
+        "class Foo {\n\
+           def bar() -> Int { 42 }\n\
+         }\n\
+         def f(x: Foo) -> Int? { x&.bar() }",
+    );
+}
