@@ -14,6 +14,38 @@ impl std::fmt::Display for TypeCheckError {
     }
 }
 
+/// Result of a full typecheck, including any errors and the resolved (annotated or inferred) return
+/// types of top-level functions and class methods.
+pub struct TypeCheckInfo {
+    pub errors: Vec<TypeCheckError>,
+    pub types: CheckedTypes,
+}
+
+/// Return types of functions and methods as recorded by the typechecker after a successful pass.
+/// Look up with [`CheckedTypes::function_return_type`] and [`CheckedTypes::method_return_type`].
+/// Each lookup returns `None` if the name is not in the program; inner [`Option`] is `None` if no
+/// return type is known.
+#[derive(Debug, Clone)]
+pub struct CheckedTypes {
+    function_returns: HashMap<String, Option<TypeExpr>>,
+    class_method_returns: HashMap<String, HashMap<String, Option<TypeExpr>>>,
+}
+
+impl CheckedTypes {
+    /// Outer `None`: no such top-level function. Inner: inferred or annotated return type, if any.
+    pub fn function_return_type(&self, name: &str) -> Option<Option<TypeExpr>> {
+        self.function_returns.get(name).cloned()
+    }
+
+    /// Outer `None`: class or method missing from the program. Inner: return type, if any.
+    pub fn method_return_type(&self, class: &str, method: &str) -> Option<Option<TypeExpr>> {
+        self.class_method_returns
+            .get(class)
+            .and_then(|m| m.get(method))
+            .cloned()
+    }
+}
+
 #[derive(Clone)]
 struct FnSig {
     #[allow(dead_code)]
@@ -55,6 +87,11 @@ impl TypeChecker {
     }
 
     pub fn check(exprs: &[Expr]) -> Vec<TypeCheckError> {
+        Self::check_info(exprs).errors
+    }
+
+    /// Like [`TypeChecker::check`], but also returns resolved function and method return types.
+    pub fn check_info(exprs: &[Expr]) -> TypeCheckInfo {
         let mut tc = Self::new();
         for e in exprs {
             tc.collect_def(e);
@@ -62,7 +99,33 @@ impl TypeChecker {
         for e in exprs {
             tc.check_expr(e);
         }
-        tc.errors
+        let errors = std::mem::take(&mut tc.errors);
+        let types = tc.into_checked_types();
+        TypeCheckInfo { errors, types }
+    }
+
+    fn into_checked_types(self) -> CheckedTypes {
+        let function_returns = self
+            .functions
+            .into_iter()
+            .map(|(name, sig)| (name, sig.return_type))
+            .collect();
+        let class_method_returns = self
+            .classes
+            .into_iter()
+            .map(|(name, class)| {
+                let methods: HashMap<String, Option<TypeExpr>> = class
+                    .methods
+                    .into_iter()
+                    .map(|(mname, sig)| (mname, sig.return_type))
+                    .collect();
+                (name, methods)
+            })
+            .collect();
+        CheckedTypes {
+            function_returns,
+            class_method_returns,
+        }
     }
 
     /// Resolve a type expression by expanding any named aliases.

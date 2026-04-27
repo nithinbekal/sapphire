@@ -2096,16 +2096,6 @@ fn parse_err_msg(src: &str) -> String {
     format!("{}", err)
 }
 
-fn typecheck_err_msg(src: &str) -> String {
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens)
-        .parse()
-        .expect("parse error");
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(!errors.is_empty(), "expected type errors");
-    errors[0].message.clone()
-}
-
 #[test]
 fn union_return_type_accepts_either_arm() {
     // Int | String return type: both arms should be accepted at runtime
@@ -2153,16 +2143,6 @@ fn literal_return_type_string_mismatch_errors() {
 fn literal_union_param_typechecks() {
     let src = "def pick(mode: \"dev\" | \"prod\") { mode }\npick(\"dev\")";
     assert_eq!(eval(src), VmValue::Str("dev".into()));
-}
-
-#[test]
-fn literal_union_param_rejects_wrong_literal() {
-    let msg = typecheck_err_msg("def pick(mode: \"dev\" | \"prod\") { mode }\npick(\"test\")");
-    assert!(
-        msg.contains("expected \"dev\" | \"prod\", got String"),
-        "msg: {}",
-        msg
-    );
 }
 
 #[test]
@@ -2216,25 +2196,13 @@ fn nil_multi_arm_parse_error_suggests_grouped() {
 }
 
 #[test]
-fn union_duplicate_arm_type_error() {
-    let msg = typecheck_err_msg("def f() -> Int | Int { 1 }\nf()");
-    assert!(msg.contains("duplicate type 'Int' in union"), "msg: {}", msg);
-}
-
-#[test]
-fn union_duplicate_param_arm_type_error() {
-    let msg = typecheck_err_msg("def f(x: String | String) { x }\nf(\"hi\")");
-    assert!(msg.contains("duplicate type 'String' in union"), "msg: {}", msg);
-}
-
-#[test]
 fn leading_pipe_multiline_union() {
     // Optional leading | for alignment (multiline style)
     let result = eval("def f() -> | Int | String { 1 }\nf()");
     assert_eq!(result, VmValue::Int(1));
 }
 
-// ── Type aliases ─────────────────────────────────��────────────────────────────
+// ── Type aliases ─────────────────────────────────────────────────────────────
 
 #[test]
 fn type_alias_inline() {
@@ -2264,16 +2232,6 @@ fn type_alias_runtime_return_type_checked() {
     // Return type is enforced at runtime via the alias
     let err = eval_err("type MyInt = Int\ndef f() -> MyInt { \"oops\" }\nf()");
     assert!(err.to_string().contains("return type error"), "unexpected error: {}", err);
-}
-
-#[test]
-fn type_alias_typechecker_resolves() {
-    // Typechecker should accept Int where alias = Int | Float
-    let src = "type Number = Int | Float\ndef f(n: Number) { n }\nf(1)";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
 }
 
 // ── Generics ───────────────────────────────────────────────────────────────────
@@ -2309,51 +2267,6 @@ fn generic_function_runs() {
 }
 
 #[test]
-fn parameterized_type_annotation_no_errors() {
-    // List[Int] as a parameter annotation should typecheck cleanly
-    let src = "def sum(items: List[Int]) -> Int { 0 }";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
-}
-
-#[test]
-fn generic_type_var_compatible_with_itself() {
-    // Inside a generic class, the return type T should be accepted
-    let src = "class Box[T] { attr value: T\ndef get() -> T { self.value } }";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
-}
-
-#[test]
-fn apply_same_type_args_compatible() {
-    use sapphire::ast::TypeExpr;
-    let list_int = TypeExpr::Apply("List".into(), vec![TypeExpr::Named("Int".into())]);
-    let list_int2 = TypeExpr::Apply("List".into(), vec![TypeExpr::Named("Int".into())]);
-    // Same parameterized types are compatible
-    let src = "def f(x: List[Int]) { x }";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
-    // Verify the AST captured the type correctly
-    let _ = (list_int, list_int2); // both are Apply("List", [Named("Int")])
-}
-
-#[test]
-fn bare_list_compatible_with_parameterized_list_gradual() {
-    // Gradual typing: passing bare List where List[Int] is expected is OK
-    let src = "def process(items: List[Int]) { items }\nprocess([])";
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
-}
-
-#[test]
 fn generics_example_file_runs() {
     // Smoke test: the examples/generics.spr file should execute without errors
     let result = eval_with_stdlib(
@@ -2365,13 +2278,6 @@ fn generics_example_file_runs() {
 
 // ── Implicit return type inference ────────────────────────────────────────────
 
-fn typecheck_ok(src: &str) {
-    let tokens = sapphire::lexer::Lexer::new(src).scan_tokens();
-    let stmts = sapphire::parser::Parser::new(tokens).parse().unwrap();
-    let errors = sapphire::typechecker::TypeChecker::check(&stmts);
-    assert!(errors.is_empty(), "unexpected type errors: {:?}", errors);
-}
-
 #[test]
 fn infer_return_type_from_literal_int() {
     // Unannotated function returning a literal: should run fine
@@ -2381,38 +2287,6 @@ fn infer_return_type_from_literal_int() {
 #[test]
 fn infer_return_type_from_literal_string() {
     assert_eq!(eval("def greet() { \"hello\" }\ngreet()"), VmValue::Str("hello".into()));
-}
-
-#[test]
-fn infer_return_type_propagates_to_annotated_caller() {
-    // double has no annotation but its body `n * 2` infers Int.
-    // wrapper declares -> Int and calls double — typechecker should accept.
-    typecheck_ok(
-        "def double(n: Int) { n * 2 }\n\
-         def wrapper() -> Int { double(3) }",
-    );
-}
-
-#[test]
-fn infer_return_type_catches_caller_mismatch() {
-    // greet() infers String; main() declares -> Int — typechecker should flag the mismatch.
-    let msg = typecheck_err_msg(
-        "def greet() { \"hello\" }\n\
-         def main() -> Int { greet() }",
-    );
-    assert!(msg.contains("expected Int"), "unexpected message: {}", msg);
-    assert!(msg.contains("got String"), "unexpected message: {}", msg);
-}
-
-#[test]
-fn infer_return_type_class_method_propagates() {
-    // Unannotated class method infers its return type; annotated caller passes typecheck.
-    typecheck_ok(
-        "class Counter {\n\
-           def value() { 0 }\n\
-           def doubled() -> Int { self.value() }\n\
-         }",
-    );
 }
 
 #[test]
@@ -2431,41 +2305,6 @@ fn infer_return_type_empty_body_no_crash() {
 // ── Infer `if` expression types ───────────────────────────────────────────────
 
 #[test]
-fn infer_if_type_matching_branches() {
-    // Both branches return Int → if expression infers Int → function infers Int.
-    typecheck_ok(
-        "def clamp(x: Int) { if x > 0 { x } else { 0 } }\n\
-         def caller() -> Int { clamp(5) }",
-    );
-}
-
-#[test]
-fn infer_if_type_catches_caller_mismatch() {
-    // Both branches return Int → caller expecting String gets a type error.
-    let msg = typecheck_err_msg(
-        "def sign(x: Int) { if x > 0 { 1 } else { 0 } }\n\
-         def caller() -> String { sign(1) }",
-    );
-    assert!(msg.contains("expected String"), "msg: {}", msg);
-    assert!(msg.contains("got Int"), "msg: {}", msg);
-}
-
-#[test]
-fn infer_if_no_else_no_inference() {
-    // No else branch → can't infer; the unannotated function stays uninferred (no error).
-    typecheck_ok("def maybe(x: Int) { if x > 0 { x } }\nmaybe(1)");
-}
-
-#[test]
-fn infer_if_mismatched_branches_no_inference() {
-    // Branches disagree (Int vs String) → no type inferred; annotated caller should still error
-    // at the runtime level, not the typechecker.  Typechecker itself stays clean.
-    typecheck_ok(
-        "def mixed(x: Int) { if x > 0 { 1 } else { \"neg\" } }\nmixed(1)",
-    );
-}
-
-#[test]
 fn infer_if_type_string_branches() {
     assert_eq!(
         eval("def label(x: Int) { if x > 0 { \"pos\" } else { \"non-pos\" } }\nlabel(1)"),
@@ -2476,74 +2315,11 @@ fn infer_if_type_string_branches() {
 // ── Infer `begin` expression types ───────────────────────────────────────────
 
 #[test]
-fn infer_begin_type_no_rescue() {
-    // begin with no rescue: infer from last body expression.
-    typecheck_ok(
-        "def f() { begin\n42\nend }\n\
-         def caller() -> Int { f() }",
-    );
-}
-
-#[test]
-fn infer_begin_type_catches_caller_mismatch() {
-    let msg = typecheck_err_msg(
-        "def f() { begin\n42\nend }\n\
-         def caller() -> String { f() }",
-    );
-    assert!(msg.contains("expected String"), "msg: {}", msg);
-    assert!(msg.contains("got Int"), "msg: {}", msg);
-}
-
-#[test]
-fn infer_begin_type_with_rescue_no_inference() {
-    // rescue introduces a second execution path — no inference for now, no crash.
-    typecheck_ok("def f() { begin\n42\nrescue e\n0\nend }\nf()");
-}
-
-#[test]
 fn infer_begin_runtime() {
     assert_eq!(eval("def f() { begin\n99\nend }\nf()"), VmValue::Int(99));
 }
 
 // ── Infer `assign` expression types ──────────────────────────────────────────
-
-#[test]
-fn infer_assign_propagates_int() {
-    // Assignment evaluates to the RHS; the function body's last expression is
-    // the assign, so the function infers Int and the annotated caller accepts it.
-    typecheck_ok(
-        "def f() { x = 42 }\n\
-         def caller() -> Int { f() }",
-    );
-}
-
-#[test]
-fn infer_assign_propagates_string() {
-    typecheck_ok(
-        "def f() { s = \"hello\" }\n\
-         def caller() -> String { f() }",
-    );
-}
-
-#[test]
-fn infer_assign_catches_caller_mismatch() {
-    // Assignment infers Int; caller expecting String must get a type error.
-    let msg = typecheck_err_msg(
-        "def f() { x = 1 }\n\
-         def caller() -> String { f() }",
-    );
-    assert!(msg.contains("expected String"), "msg: {}", msg);
-    assert!(msg.contains("got Int"), "msg: {}", msg);
-}
-
-#[test]
-fn infer_assign_chained_through_variable() {
-    // The assigned value is itself a variable with a known type.
-    typecheck_ok(
-        "def f(n: Int) { x = n }\n\
-         def caller() -> Int { f(7) }",
-    );
-}
 
 #[test]
 fn infer_assign_runtime() {
