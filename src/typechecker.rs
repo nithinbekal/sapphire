@@ -328,11 +328,46 @@ impl TypeChecker {
             Expr::Raise(inner) => self.check_expr(inner),
             Expr::Break(inner) | Expr::Next(inner) => self.check_expr(inner),
             Expr::MultiAssign { names, values } => {
-                for (name, ve) in names.iter().zip(values.iter()) {
-                    if let Some(ty) = self.infer_type(ve) {
-                        self.set_var(name, ty);
+                if values.len() == 1 {
+                    let value = &values[0];
+                    // Destructure a list literal: spread element types to names.
+                    if let Expr::ListLit(elems) = value {
+                        for (name, elem) in names.iter().zip(elems.iter()) {
+                            if let Some(ty) = self.infer_type(elem) {
+                                self.set_var(name, ty);
+                            }
+                        }
+                        self.check_expr(value);
+                    } else if let Some(ty) = self.infer_type(value) {
+                        match ty {
+                            TypeExpr::Apply(list_name, args)
+                                if list_name == "List" && args.len() == 1 =>
+                            {
+                                for name in names {
+                                    self.set_var(name, args[0].clone());
+                                }
+                            }
+                            other => {
+                                for name in names {
+                                    self.set_var(name, other.clone());
+                                }
+                            }
+                        }
+                        self.check_expr(value);
+                    } else {
+                        self.check_expr(value);
                     }
-                    self.check_expr(ve);
+                } else {
+                    for (name, ve) in names.iter().zip(values.iter()) {
+                        if let Some(ty) = self.infer_type(ve) {
+                            self.set_var(name, ty);
+                        }
+                        self.check_expr(ve);
+                    }
+                    // Type-check any extra values on the RHS.
+                    for ve in values.iter().skip(names.len()) {
+                        self.check_expr(ve);
+                    }
                 }
             }
             Expr::Call { callee, args, .. } => self.check_call(callee, args),
@@ -810,8 +845,10 @@ impl TypeChecker {
             }
             Expr::Return(inner) => self.infer_type(inner),
             Expr::While { .. } => Some(TypeExpr::Named("Nil".into())),
-            Expr::MultiAssign { .. }
-            | Expr::Break(_)
+            Expr::MultiAssign { values, .. } => {
+                values.last().and_then(|v| self.infer_type(v))
+            }
+            Expr::Break(_)
             | Expr::Next(_)
             | Expr::Raise(_) => None,
             Expr::Lambda { .. } => None,
