@@ -865,6 +865,47 @@ impl TypeChecker {
             },
             Expr::Assign { value, .. } => self.infer_type(value),
             Expr::Set { value, .. } => self.infer_type(value),
+            Expr::Index { object, .. } => {
+                // List literal with uniform element type → element type.
+                if let Expr::ListLit(elems) = object.as_ref() {
+                    let mut elem_type = None;
+                    for e in elems {
+                        let t = self.infer_type(e);
+                        if elem_type.is_none() {
+                            elem_type = t;
+                        } else if t != elem_type {
+                            return None;
+                        }
+                    }
+                    return elem_type;
+                }
+                // Map literal with uniform value type → value type.
+                if let Expr::MapLit(pairs) = object.as_ref() {
+                    let mut val_type = None;
+                    for (_, v) in pairs {
+                        let t = self.infer_type(v);
+                        if val_type.is_none() {
+                            val_type = t;
+                        } else if t != val_type {
+                            return None;
+                        }
+                    }
+                    return val_type;
+                }
+                // Parameterized types: List[T] → T, Map[K,V] → V.
+                if let Some(ty) = self.infer_type(object) {
+                    match ty {
+                        TypeExpr::Apply(name, args) if name == "List" && args.len() == 1 => {
+                            return Some(args[0].clone());
+                        }
+                        TypeExpr::Apply(name, args) if name == "Map" && args.len() == 2 => {
+                            return Some(args[1].clone());
+                        }
+                        _ => {}
+                    }
+                }
+                None
+            }
             _ => None,
         }
     }
