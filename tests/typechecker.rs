@@ -195,6 +195,25 @@ fn infer_if_mismatched_branches_no_inference() {
 }
 
 #[test]
+fn infer_while_returns_nil() {
+    let types = check_types_ok(
+        "def f() { while true { 42 } }\n\
+         def caller() -> Nil { f() }",
+    );
+    assert_function_returns!(types, "f", Nil);
+}
+
+#[test]
+fn infer_while_nil_catches_caller_mismatch() {
+    assert_typecheck_error!(
+        "def f() { while true { 42 } }\n\
+         def caller() -> Int { f() }",
+        "expected Int",
+        "got Nil"
+    );
+}
+
+#[test]
 fn infer_begin_type_no_rescue() {
     let types = check_types_ok(
         "def f() { begin\n42\nend }\n\
