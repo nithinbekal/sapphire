@@ -2,7 +2,7 @@ class Point {
   attr x: Int
   attr y: Int
 
-  def to_s() -> String {
+  def to_s -> String {
     "(#{self.x}, #{self.y})"
   }
 }

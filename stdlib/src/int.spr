@@ -3,7 +3,7 @@
 #
 #   x = 42
 #   x.zero?()     # false
-#   x.abs()       # 42
+#   x.abs       # 42
 #   x.is_a?(Num)  # true
 #
 class Int < Num {

@@ -1,13 +1,13 @@
 # Set is an unordered collection of unique values.
 # Backed natively by an insertion-ordered Vec with linear deduplication.
-# Construction: Set.new() or Set.new([1, 2, 3])
+# Construction: Set.new or Set.new([1, 2, 3])
 #
 class Set {
   # Returns a new List built by calling the block once per element.
   #
   #   Set.new([1, 2, 3]).map { |x| x * 2 }   # [2, 4, 6]
   #
-  def map() {
+  def map {
     result = []
     each { |x| result.append(yield(x)) }
     result
@@ -17,8 +17,8 @@ class Set {
   #
   #   Set.new([1, 2, 3, 4]).select { |x| x > 2 }   # Set{3, 4}
   #
-  def select() {
-    result = Set.new()
+  def select {
+    result = Set.new
     each { |x| result.add(x) if yield(x) }
     result
   }
@@ -27,8 +27,8 @@ class Set {
   #
   #   Set.new([1, 2, 3]).reject { |x| x == 2 }   # Set{1, 3}
   #
-  def reject() {
-    result = Set.new()
+  def reject {
+    result = Set.new
     each { |x| result.add(x) if !yield(x) }
     result
   }
@@ -64,7 +64,7 @@ class Set {
   #
   #   Set.new(["a", "b"]).each_with_index { |item, i| print "#{i}: #{item}" }
   #
-  def each_with_index() {
+  def each_with_index {
     i = 0
     each { |x|
       yield(x, i)

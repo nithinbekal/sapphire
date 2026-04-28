@@ -1,6 +1,6 @@
 class SetTest < Test {
   def test_new_empty_set {
-    s = Set.new()
+    s = Set.new
     assert_equal(0, s.size)
     assert(s.empty?)
   }
@@ -30,7 +30,7 @@ class SetTest < Test {
   }
 
   def test_add_new_element_increases_size {
-    s = Set.new()
+    s = Set.new
     s.add(1)
     s.add(2)
     assert_equal(2, s.size)
@@ -43,7 +43,7 @@ class SetTest < Test {
   }
 
   def test_add_returns_self {
-    s = Set.new()
+    s = Set.new
     result = s.add(1)
     assert_equal(1, result.size)
   }
@@ -65,7 +65,7 @@ class SetTest < Test {
 
   def test_to_a_returns_list {
     s = Set.new([3, 1, 2])
-    a = s.to_a()
+    a = s.to_a
     assert_equal(3, a.size)
     assert(a.include?(1))
     assert(a.include?(2))
@@ -74,12 +74,12 @@ class SetTest < Test {
 
   def test_to_s_single_element {
     s = Set.new([1])
-    assert_equal("Set{1}", s.to_s())
+    assert_equal("Set{1}", s.to_s)
   }
 
   def test_to_s_empty_set {
-    s = Set.new()
-    assert_equal("Set{}", s.to_s())
+    s = Set.new
+    assert_equal("Set{}", s.to_s)
   }
 
   def test_union_combines_elements {
@@ -142,7 +142,7 @@ class SetTest < Test {
   }
 
   def test_subset_empty_set_is_subset_of_anything {
-    assert(Set.new().subset?(Set.new([1, 2])))
+    assert(Set.new.subset?(Set.new([1, 2])))
   }
 
   def test_superset_true {

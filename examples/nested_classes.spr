@@ -6,7 +6,7 @@ class Geometry {
     attr x: Int
     attr y: Int
 
-    def to_s() {
+    def to_s {
       "(#{self.x}, #{self.y})"
     }
 
@@ -22,60 +22,60 @@ class Geometry {
     attr top_left
     attr bottom_right
 
-    def width() {
+    def width {
       self.bottom_right.x - self.top_left.x
     }
 
-    def height() {
+    def height {
       self.bottom_right.y - self.top_left.y
     }
 
-    def area() {
-      self.width() * self.height()
+    def area {
+      self.width * self.height
     }
   }
 }
 
 origin = Geometry.Point.new(x: 0, y: 0)
 corner = Geometry.Point.new(x: 3, y: 4)
-print "Origin: #{origin.to_s()}"
-print "Corner: #{corner.to_s()}"
+print "Origin: #{origin.to_s}"
+print "Corner: #{corner.to_s}"
 print "Squared distance: #{origin.distance_to(corner)}"
 
 tl = Geometry.Point.new(x: 1, y: 1)
 br = Geometry.Point.new(x: 5, y: 4)
 rect = Geometry.Rectangle.new(top_left: tl, bottom_right: br)
-print "Rectangle #{rect.width()}x#{rect.height()}, area=#{rect.area()}"
+print "Rectangle #{rect.width}x#{rect.height}, area=#{rect.area}"
 
 # Nested class as a superclass via dot notation
 class Animals {
   class Animal {
     attr name: String
 
-    def speak() {
+    def speak {
       "..."
     }
 
-    def introduce() {
-      "I am #{self.name} and I say: #{self.speak()}"
+    def introduce {
+      "I am #{self.name} and I say: #{self.speak}"
     }
   }
 }
 
 class Dog < Animals.Animal {
-  def speak() {
+  def speak {
     "woof"
   }
 }
 
 class Cat < Animals.Animal {
-  def speak() {
+  def speak {
     "meow"
   }
 }
 
 d = Dog.new(name: "Rex")
 c = Cat.new(name: "Whiskers")
-print d.introduce()
-print c.introduce()
+print d.introduce
+print c.introduce
 print d.is_a?(Animals.Animal)

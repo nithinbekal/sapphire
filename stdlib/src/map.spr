@@ -6,7 +6,7 @@ class Map {
   #
   #   { name: "Alice", age: 30 }.select { |k, v| v == 30 }   # { age: 30 }
   #
-  def select() {
+  def select {
     result = {}
     each { |k, v| result[k] = v if yield(k, v) }
     result

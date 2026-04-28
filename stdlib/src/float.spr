@@ -3,7 +3,7 @@
 #
 #   x = 3.14
 #   x.positive?()  # true
-#   x.abs()        # 3.14
+#   x.abs        # 3.14
 #   x.is_a?(Num)   # true
 #
 class Float < Num {
