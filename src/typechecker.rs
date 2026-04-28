@@ -809,8 +809,8 @@ impl TypeChecker {
                 }
             }
             Expr::Return(inner) => self.infer_type(inner),
-            Expr::While { .. }
-            | Expr::MultiAssign { .. }
+            Expr::While { .. } => Some(TypeExpr::Named("Nil".into())),
+            Expr::MultiAssign { .. }
             | Expr::Break(_)
             | Expr::Next(_)
             | Expr::Raise(_) => None,
