@@ -444,3 +444,46 @@ fn infer_function_calling_method_on_later_declared_class() {
     assert_function_returns!(types, "caller", Int);
     assert_method_returns!(types, "B", "helper", Int);
 }
+
+#[test]
+fn infer_list_literal_index() {
+    let types = check_types_ok(
+        "def f() { [1, 2, 3][0] }\n\
+         def caller() -> Int { f() }",
+    );
+    assert_function_returns!(types, "f", Int);
+}
+
+#[test]
+fn infer_list_literal_index_catches_mismatch() {
+    assert_typecheck_error!(
+        "def f() { [1, 2, 3][0] }\n\
+         def caller() -> String { f() }",
+        "expected String",
+        "got Int"
+    );
+}
+
+#[test]
+fn infer_list_param_index() {
+    let types = check_types_ok(
+        "def first(items: List[Int]) { items[0] }\n\
+         def caller() -> Int { first([]) }",
+    );
+    assert_function_returns!(types, "first", Int);
+}
+
+#[test]
+fn infer_map_literal_index() {
+    let types = check_types_ok(
+        "def f() { {a: 1, b: 2}[\"a\"] }\n\
+         def caller() -> Int { f() }",
+    );
+    assert_function_returns!(types, "f", Int);
+}
+
+#[test]
+fn infer_mixed_list_literal_index_no_inference() {
+    // Mixed element types → no element type inference, so return type stays unknown
+    typecheck_ok("def f() { [1, \"two\", 3][0] }");
+}
