@@ -337,18 +337,7 @@ impl TypeChecker {
             }
             Expr::Call { callee, args, .. } => self.check_call(callee, args),
             Expr::Assign { name, value } => {
-                let ty = self.infer_type(value).or_else(|| {
-                    if let Expr::Call { callee, .. } = value.as_ref()
-                        && let Expr::Get { object, name: m } = callee.as_ref()
-                        && m == "new"
-                        && let Expr::Variable(cn) = object.as_ref()
-                        && self.classes.contains_key(cn)
-                    {
-                        return Some(TypeExpr::Named(cn.clone()));
-                    }
-                    None
-                });
-                if let Some(ty) = ty {
+                if let Some(ty) = self.infer_type(value) {
                     self.set_var(name, ty);
                 }
                 self.check_expr(value);
