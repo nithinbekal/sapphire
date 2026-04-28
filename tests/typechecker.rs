@@ -506,3 +506,31 @@ fn infer_mixed_list_literal_index_no_inference() {
     // Mixed element types → no element type inference, so return type stays unknown
     typecheck_ok("def f() { [1, \"two\", 3][0] }");
 }
+
+#[test]
+fn infer_multiassign_return_type() {
+    let types = check_types_ok(
+        "def f() { a, b = 1, 2 }\n\
+         def caller() -> Int { f() }",
+    );
+    assert_function_returns!(types, "f", Int);
+}
+
+#[test]
+fn infer_multiassign_spread_list_literal() {
+    typecheck_ok(
+        "a, b = [1, 2]\n\
+         def f(x: Int, y: Int) { }\n\
+         f(a, b)",
+    );
+}
+
+#[test]
+fn infer_multiassign_spread_list_call() {
+    typecheck_ok(
+        "def g() -> List[Int] { [] }\n\
+         a, b = g()\n\
+         def f(x: Int, y: Int) { }\n\
+         f(a, b)",
+    );
+}
