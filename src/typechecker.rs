@@ -29,6 +29,7 @@ pub struct TypeCheckInfo {
 pub struct CheckedTypes {
     function_returns: HashMap<String, Option<TypeExpr>>,
     class_method_returns: HashMap<String, HashMap<String, Option<TypeExpr>>>,
+    class_constant_types: HashMap<String, HashMap<String, TypeExpr>>,
 }
 
 impl CheckedTypes {
@@ -43,6 +44,13 @@ impl CheckedTypes {
             .get(class)
             .and_then(|m| m.get(method))
             .cloned()
+    }
+
+    /// Outer `None`: class missing. Inner `None`: constant not found or type not inferred.
+    pub fn constant_type(&self, class: &str, constant: &str) -> Option<Option<TypeExpr>> {
+        self.class_constant_types
+            .get(class)
+            .map(|m| m.get(constant).cloned())
     }
 }
 
@@ -60,6 +68,7 @@ struct ClassInfo {
     type_params: Vec<String>,
     fields: Vec<FieldDef>,
     methods: HashMap<String, FnSig>,
+    constants: HashMap<String, TypeExpr>,
 }
 
 pub struct TypeChecker {
@@ -146,21 +155,22 @@ impl TypeChecker {
             .into_iter()
             .map(|(name, sig)| (name, sig.return_type))
             .collect();
-        let class_method_returns = self
-            .classes
-            .into_iter()
-            .map(|(name, class)| {
-                let methods: HashMap<String, Option<TypeExpr>> = class
-                    .methods
-                    .into_iter()
-                    .map(|(mname, sig)| (mname, sig.return_type))
-                    .collect();
-                (name, methods)
-            })
-            .collect();
+        let mut class_method_returns: HashMap<String, HashMap<String, Option<TypeExpr>>> =
+            HashMap::new();
+        let mut class_constant_types: HashMap<String, HashMap<String, TypeExpr>> = HashMap::new();
+        for (name, class) in self.classes {
+            let methods = class
+                .methods
+                .into_iter()
+                .map(|(mname, sig)| (mname, sig.return_type))
+                .collect();
+            class_method_returns.insert(name.clone(), methods);
+            class_constant_types.insert(name, class.constants);
+        }
         CheckedTypes {
             function_returns,
             class_method_returns,
+            class_constant_types,
         }
     }
 
@@ -254,6 +264,7 @@ impl TypeChecker {
                 type_params,
                 fields,
                 methods,
+                constants,
                 ..
             } => {
                 let method_sigs = methods
@@ -269,12 +280,19 @@ impl TypeChecker {
                         )
                     })
                     .collect();
+                let constants_map: HashMap<String, TypeExpr> = constants
+                    .iter()
+                    .filter_map(|(cname, expr)| {
+                        self.infer_type(expr).map(|ty| (cname.clone(), ty))
+                    })
+                    .collect();
                 self.classes.insert(
                     name.clone(),
                     ClassInfo {
                         type_params: type_params.clone(),
                         fields: fields.clone(),
                         methods: method_sigs,
+                        constants: constants_map,
                     },
                 );
             }
@@ -399,18 +417,7 @@ impl TypeChecker {
             }
             Expr::Call { callee, args, .. } => self.check_call(callee, args),
             Expr::Assign { name, value } => {
-                let ty = self.infer_type(value).or_else(|| {
-                    if let Expr::Call { callee, .. } = value.as_ref()
-                        && let Expr::Get { object, name: m } = callee.as_ref()
-                        && m == "new"
-                        && let Expr::Variable(cn) = object.as_ref()
-                        && self.classes.contains_key(cn)
-                    {
-                        return Some(TypeExpr::Named(cn.clone()));
-                    }
-                    None
-                });
-                if let Some(ty) = ty {
+                if let Some(ty) = self.infer_type(value) {
                     self.set_var(name, ty);
                 }
                 self.check_expr(value);
@@ -510,7 +517,7 @@ impl TypeChecker {
                 }
             }
             Expr::Print(inner) => self.check_expr(inner),
-            Expr::Class { name, type_params, methods, .. } => {
+            Expr::Class { name, type_params, methods, constants, .. } => {
                 let saved_class = self.current_class.replace(name.clone());
                 self.push_type_vars(type_params);
                 for method in methods {
@@ -559,6 +566,9 @@ impl TypeChecker {
                     self.pop_type_vars();
                     self.pop_scope();
                     self.current_return_type = saved;
+                }
+                for (_cname, expr) in constants {
+                    self.check_expr(expr);
                 }
                 self.pop_type_vars();
                 self.current_class = saved_class;
@@ -859,7 +869,18 @@ impl TypeChecker {
                 Value::Bool(_) => Some(TypeExpr::Named("Bool".into())),
                 Value::Nil => Some(TypeExpr::Named("Nil".into())),
             },
-            Expr::Variable(name) => self.get_var(name),
+            Expr::Variable(name) => {
+                if let Some(ty) = self.get_var(name) {
+                    return Some(ty);
+                }
+                if let Some(class_name) = &self.current_class
+                    && let Some(cls) = self.classes.get(class_name)
+                    && let Some(ty) = cls.constants.get(name)
+                {
+                    return Some(ty.clone());
+                }
+                None
+            }
             Expr::Grouping(inner) => self.infer_type(inner),
             Expr::StringInterp(_) => Some(TypeExpr::Named("String".into())),
             Expr::ListLit(_) => Some(TypeExpr::Named("List".into())),
@@ -976,6 +997,14 @@ impl TypeChecker {
                         return Some(TypeExpr::Named(cn.clone()));
                     }
 
+                    // Class constant accessed as a zero-arg call: Math.PI
+                    if let Expr::Variable(cn) = object.as_ref()
+                        && let Some(cls) = self.classes.get(cn)
+                        && let Some(ty) = cls.constants.get(method_name)
+                    {
+                        return Some(ty.clone());
+                    }
+
                     if let Some(TypeExpr::Named(cn)) = self.infer_type(object)
                         && let Some(cls) = self.classes.get(&cn)
                     {
@@ -1047,6 +1076,15 @@ impl TypeChecker {
                         }
                         _ => {}
                     }
+                }
+                None
+            }
+            Expr::Get { object, name } => {
+                if let Expr::Variable(class_name) = object.as_ref()
+                    && let Some(cls) = self.classes.get(class_name)
+                    && let Some(ty) = cls.constants.get(name)
+                {
+                    return Some(ty.clone());
                 }
                 None
             }

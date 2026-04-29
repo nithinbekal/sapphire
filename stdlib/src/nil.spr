@@ -12,9 +12,9 @@ class Nil {
 
   # Returns the string "nil" for display.
   #
-  #   nil.to_s()   # "nil"
+  #   nil.to_s   # "nil"
   #
-  def to_s() {
+  def to_s {
     "nil"
   }
 }

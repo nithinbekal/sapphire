@@ -62,6 +62,16 @@ macro_rules! assert_method_returns {
     };
 }
 
+/// Asserts a class constant's inferred type; same `$ty` convention as [`assert_function_returns!`].
+macro_rules! assert_constant_type {
+    ($types:expr, $class:expr, $constant:expr, $ty:ident) => {
+        assert_eq!(
+            $types.constant_type($class, $constant),
+            Some(Some(sapphire::ast::TypeExpr::Named(stringify!($ty).to_string())))
+        );
+    };
+}
+
 #[test]
 fn literal_union_param_rejects_wrong_literal() {
     assert_typecheck_error!(
@@ -272,6 +282,32 @@ fn infer_assign_chained_through_variable() {
          def caller() -> Int { f(7) }",
     );
     assert_function_returns!(types, "f", Int);
+}
+
+#[test]
+fn assign_tracks_type_for_subsequent_typed_call() {
+    typecheck_ok(
+        "def foo(n: Int) { n }\n\
+         def f() { x = 42\nfoo(x) }",
+    );
+}
+
+#[test]
+fn assign_tracked_type_causes_error_on_mismatch() {
+    assert_typecheck_error!(
+        "def foo(n: Int) { n }\n\
+         def f() { x = \"hello\"\nfoo(x) }",
+        "expected Int",
+        "got String"
+    );
+}
+
+#[test]
+fn reassign_overwrites_tracked_type() {
+    typecheck_ok(
+        "def foo(n: String) { n }\n\
+         def f() { x = 42\nx = \"hello\"\nfoo(x) }",
+    );
 }
 
 #[test]
@@ -618,4 +654,50 @@ fn infer_self_recursive_with_base_case() {
         "def fact(n: Int) { if n <= 1 { 1 } else { n * fact(n - 1) } }",
     );
     assert_function_returns!(types, "fact", Int);
+}
+
+// ── Class constants ────────────────────────────────────────────────────────────
+
+#[test]
+fn class_constant_int_type_inferred() {
+    let types = check_types_ok("class C { X = 42 }");
+    assert_constant_type!(types, "C", "X", Int);
+}
+
+#[test]
+fn class_constant_float_type_inferred() {
+    let types = check_types_ok("class Math { PI = 3.141592653589793 }");
+    assert_constant_type!(types, "Math", "PI", Float);
+}
+
+#[test]
+fn class_constant_string_type_inferred() {
+    let types = check_types_ok("class Config { VERSION = \"1.0.0\" }");
+    assert_constant_type!(types, "Config", "VERSION", String);
+}
+
+#[test]
+fn class_constant_bool_type_inferred() {
+    let types = check_types_ok("class Flags { ENABLED = true }");
+    assert_constant_type!(types, "Flags", "ENABLED", Bool);
+}
+
+#[test]
+fn class_constant_dot_access_infers_type() {
+    let types = check_types_ok(
+        "class Math { PI = 3.14159 }\n\
+         def circle_area(r: Float) { Math.PI + r }",
+    );
+    assert_function_returns!(types, "circle_area", Float);
+}
+
+#[test]
+fn class_constant_lexical_access_in_method_infers_type() {
+    let types = check_types_ok(
+        "class Math {\n\
+           PI = 3.14159\n\
+           def approx_pi() { PI }\n\
+         }",
+    );
+    assert_method_returns!(types, "Math", "approx_pi", Float);
 }

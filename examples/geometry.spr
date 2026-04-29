@@ -5,22 +5,22 @@ a = Point.new(x: 0.0, y: 0.0)
 b = Point.new(x: 3.0, y: 4.0)
 
 print "Points:"
-print "  a = #{a.to_s()}"
-print "  b = #{b.to_s()}"
+print "  a = #{a.to_s}"
+print "  b = #{b.to_s}"
 print "  distance a->b = #{a.distance_to(b)}"
-print "  b translated by (1, -1) = #{b.translate(1.0, -1.0).to_s()}"
+print "  b translated by (1, -1) = #{b.translate(1.0, -1.0).to_s}"
 
 print ""
 print "Circle:"
 c = Circle.new(center: a, radius: 5.0)
-print "  #{c.to_s()}"
-print "  area = #{c.area()}"
+print "  #{c.to_s}"
+print "  area = #{c.area}"
 print "  contains b? #{c.contains(b)}"
 print "  contains (10, 10)? #{c.contains(Point.new(x: 10.0, y: 10.0))}"
 
 print ""
 print "Rectangle:"
 r = Rectangle.new(top_left: Point.new(x: 1.0, y: 1.0), width: 6.0, height: 4.0)
-print "  #{r.to_s()}"
-print "  area = #{r.area()}"
-print "  perimeter = #{r.perimeter()}"
+print "  #{r.to_s}"
+print "  area = #{r.area}"
+print "  perimeter = #{r.perimeter}"

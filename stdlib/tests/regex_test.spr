@@ -39,7 +39,7 @@ class RegexTest < Test {
     m = r.match("foo123")
     assert(m)
     assert_equal("foo123", m.full)
-    assert_equal(2, m.captures.size())
+    assert_equal(2, m.captures.size)
     assert_equal("foo", m.captures[0])
     assert_equal("123", m.captures[1])
   }
@@ -48,13 +48,13 @@ class RegexTest < Test {
     r = Regex.new("[0-9]+")
     m = r.match("123")
     assert(m)
-    assert_equal(0, m.captures.size())
+    assert_equal(0, m.captures.size)
   }
 
   def test_scan_returns_all_matches {
     r = Regex.new("[0-9]+")
     matches = r.scan("foo123bar456baz789")
-    assert_equal(3, matches.size())
+    assert_equal(3, matches.size)
     assert_equal("123", matches[0])
     assert_equal("456", matches[1])
     assert_equal("789", matches[2])
@@ -63,7 +63,7 @@ class RegexTest < Test {
   def test_scan_returns_empty_list_on_no_match {
     r = Regex.new("[0-9]+")
     matches = r.scan("foobar")
-    assert_equal(0, matches.size())
+    assert_equal(0, matches.size)
   }
 
   def test_replace_replaces_first_match {
