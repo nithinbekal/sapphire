@@ -534,3 +534,88 @@ fn infer_multiassign_spread_list_call() {
          f(a, b)",
     );
 }
+
+// ── Mutual-recursion fixed-point inference ─────────────────────────────────────
+
+#[test]
+fn infer_mutual_recursion_with_base_case() {
+    // f has a concrete base-case (Int); g delegates to f.
+    // The lenient second pass should resolve both to Int.
+    let types = check_types_ok(
+        "def f(n: Int) { if n > 0 { g(n - 1) } else { 0 } }\n\
+         def g(n: Int) { f(n) }",
+    );
+    assert_function_returns!(types, "f", Int);
+    assert_function_returns!(types, "g", Int);
+}
+
+#[test]
+fn infer_mutual_recursion_base_in_else() {
+    // Base case lives in the else branch instead of then.
+    let types = check_types_ok(
+        "def f(n: Int) { if n == 0 { g(n) } else { 42 } }\n\
+         def g(n: Int) { f(n - 1) }",
+    );
+    assert_function_returns!(types, "f", Int);
+    assert_function_returns!(types, "g", Int);
+}
+
+#[test]
+fn infer_mutual_recursion_three_functions() {
+    // Three-way cycle: f → g → h → f, with a base case in f.
+    let types = check_types_ok(
+        "def f(n: Int) { if n == 0 { 0 } else { g(n - 1) } }\n\
+         def g(n: Int) { h(n) }\n\
+         def h(n: Int) { f(n) }",
+    );
+    assert_function_returns!(types, "f", Int);
+    assert_function_returns!(types, "g", Int);
+    assert_function_returns!(types, "h", Int);
+}
+
+#[test]
+fn infer_mutual_recursion_pure_cycle_stays_none() {
+    // Pure cycle with no base case — both should remain None.
+    let types = check_types_ok(
+        "def f() { g() }\n\
+         def g() { f() }",
+    );
+    assert_eq!(types.function_return_type("f"), Some(None));
+    assert_eq!(types.function_return_type("g"), Some(None));
+}
+
+#[test]
+fn infer_mutual_recursion_catches_mismatch() {
+    // After resolving mutual recursion, the inferred type should
+    // trigger a mismatch when a caller expects the wrong type.
+    assert_typecheck_error!(
+        "def f(n: Int) { if n > 0 { g(n - 1) } else { 0 } }\n\
+         def g(n: Int) { f(n) }\n\
+         def caller() -> String { g(1) }",
+        "expected String",
+        "got Int"
+    );
+}
+
+#[test]
+fn infer_mutual_recursion_methods() {
+    // Mutual recursion between two methods in the same class.
+    let types = check_types_ok(
+        "class C {\n\
+           def f(n: Int) { if n == 0 { 0 } else { self.g(n - 1) } }\n\
+           def g(n: Int) { self.f(n) }\n\
+         }",
+    );
+    assert_method_returns!(types, "C", "f", Int);
+    assert_method_returns!(types, "C", "g", Int);
+}
+
+#[test]
+fn infer_self_recursive_with_base_case() {
+    // Single self-recursive function — already worked before the
+    // lenient pass but should still pass.
+    let types = check_types_ok(
+        "def fact(n: Int) { if n <= 1 { 1 } else { n * fact(n - 1) } }",
+    );
+    assert_function_returns!(types, "fact", Int);
+}
