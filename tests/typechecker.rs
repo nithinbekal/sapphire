@@ -285,6 +285,32 @@ fn infer_assign_chained_through_variable() {
 }
 
 #[test]
+fn assign_tracks_type_for_subsequent_typed_call() {
+    typecheck_ok(
+        "def foo(n: Int) { n }\n\
+         def f() { x = 42\nfoo(x) }",
+    );
+}
+
+#[test]
+fn assign_tracked_type_causes_error_on_mismatch() {
+    assert_typecheck_error!(
+        "def foo(n: Int) { n }\n\
+         def f() { x = \"hello\"\nfoo(x) }",
+        "expected Int",
+        "got String"
+    );
+}
+
+#[test]
+fn reassign_overwrites_tracked_type() {
+    typecheck_ok(
+        "def foo(n: String) { n }\n\
+         def f() { x = 42\nx = \"hello\"\nfoo(x) }",
+    );
+}
+
+#[test]
 fn safe_get_call_infers_nil_union() {
     use sapphire::ast::TypeExpr;
     let types = check_types_ok(
