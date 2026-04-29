@@ -17,11 +17,11 @@ print "even count: #{evens.size}"
 total = numbers.reduce(0) { |acc, n| acc + n }
 print "sum: #{total}"
 
-sorted = numbers.sort()
+sorted = numbers.sort
 print "min: #{sorted.first}"
 print "max: #{sorted.last}"
 
-unique = numbers.uniq()
+unique = numbers.uniq
 print "unique: #{unique.size} values"
 
 numbers.each_with_index { |n, i| print "  [#{i}] = #{n}" }
@@ -35,7 +35,7 @@ stack = []
 stack.append(10)
 stack.append(20)
 stack.append(30)
-print "popped: #{stack.pop()}"
+print "popped: #{stack.pop}"
 print "stack size: #{stack.size}"
 
 # ── Maps ───────────────────────────────────────────────────────────────────────

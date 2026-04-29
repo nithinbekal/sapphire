@@ -16,7 +16,7 @@ class Test {
 
   # Fails unless `expected` equals `actual`.
   #
-  #   assert_equal(5, (-5).abs())   # passes
+  #   assert_equal(5, (-5).abs)   # passes
   #   assert_equal(5, 3)            # raises "expected 5, got 3"
   #
   def assert_equal(expected, actual) {
@@ -43,7 +43,7 @@ class Test {
   #   assert_in_delta(3.14, 3.15, 0.001)    # raises
   #
   def assert_in_delta(expected, actual, delta) {
-    diff = (expected - actual).abs()
+    diff = (expected - actual).abs
     if diff > delta {
       raise("expected #{actual} to be within #{delta} of #{expected}")
     }

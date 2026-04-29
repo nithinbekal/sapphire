@@ -4,7 +4,7 @@
 class String {
   # Returns self. Strings already print as their text content.
   #
-  #   "hi".to_s()   # "hi"
+  #   "hi".to_s   # "hi"
   #
-  def to_s() { self }
+  def to_s { self }
 }

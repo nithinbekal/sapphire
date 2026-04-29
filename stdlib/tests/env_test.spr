@@ -20,6 +20,6 @@ class EnvTest < Test {
 
   def test_all_contains_set_var {
     Env.set("SPR_SALL", "yes")
-    assert(Env.all().has_key?("SPR_SALL"))
+    assert(Env.all.has_key?("SPR_SALL"))
   }
 }

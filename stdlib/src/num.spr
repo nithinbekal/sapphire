@@ -31,12 +31,12 @@ class Num {
 
   # Returns the absolute value.
   #
-  #   (-5).abs()  # 5
-  #   5.abs()     # 5
-  #   (-2.5).abs() # 2.5
+  #   (-5).abs  # 5
+  #   5.abs     # 5
+  #   (-2.5).abs # 2.5
   #
 
-  def abs() { if self < 0 { -self } else { self } }
+  def abs { if self < 0 { -self } else { self } }
 
   # Returns the value clamped between min and max.
   # If the value is less than min, returns min.

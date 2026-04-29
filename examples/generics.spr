@@ -1,11 +1,11 @@
 class Box[T] {
   attr value: T
 
-  def get() -> T {
+  def get -> T {
     self.value
   }
 
-  def to_s() -> String {
+  def to_s -> String {
     "Box(#{self.value})"
   }
 }
@@ -14,7 +14,7 @@ class Pair[A, B] {
   attr first: A
   attr second: B
 
-  def swap() -> Pair {
+  def swap -> Pair {
     Pair.new(first: self.second, second: self.first)
   }
 }
@@ -25,15 +25,15 @@ def identity[T](x: T) -> T {
 
 def first_or_default[T](items: List[T], default: T) -> T {
   if items.empty?() { default }
-  else { items.first() }
+  else { items.first }
 }
 
 b = Box.new(value: 42)
-print(b.get())
-print(b.to_s())
+print(b.get)
+print(b.to_s)
 
 s = Box.new(value: "hello")
-print(s.get())
+print(s.get)
 
 p = Pair.new(first: 1, second: "one")
 print(p.first)

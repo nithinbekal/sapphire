@@ -24,11 +24,11 @@ class NumTest < Test {
   }
 
   def test_abs_positive {
-    assert_equal(5, (-5).abs())
+    assert_equal(5, (-5).abs)
   }
 
   def test_abs_already_positive {
-    assert_equal(5, 5.abs())
+    assert_equal(5, 5.abs)
   }
 
   def test_clamp_above_max {

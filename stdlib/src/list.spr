@@ -6,7 +6,7 @@ class List {
   #
   #   [1, 2, 3].map { |x| x * 2 }   # [2, 4, 6]
   #
-  def map() {
+  def map {
     result = []
     each { |x| result.append(yield(x)) }
     result
@@ -16,7 +16,7 @@ class List {
   #
   #   [1, 2, 3, 4].select { |x| x > 2 }   # [3, 4]
   #
-  def select() {
+  def select {
     result = []
     each { |x| result.append(x) if yield(x) }
     result
@@ -56,7 +56,7 @@ class List {
   #
   #   ["a", "b"].each_with_index { |item, i| print "#{i}: #{item}" }
   #
-  def each_with_index() {
+  def each_with_index {
     i = 0
     each { |x|
       yield(x, i)
