@@ -82,6 +82,10 @@ pub struct TypeChecker {
     var_scopes: Vec<HashMap<String, TypeExpr>>,
     /// Stacked scopes of in-scope type variable names (from generic class/function params).
     type_vars: Vec<HashSet<String>>,
+    /// When true, `infer_type` for `if` expressions returns the known branch type even when the
+    /// other branch is `None`.  Enabled during a second fixed-point pass so that mutually
+    /// recursive functions whose bodies contain a resolvable base-case branch can converge.
+    lenient: bool,
 }
 
 impl TypeChecker {
@@ -95,6 +99,7 @@ impl TypeChecker {
             current_class: None,
             var_scopes: vec![HashMap::new()],
             type_vars: Vec::new(),
+            lenient: false,
         }
     }
 
@@ -115,6 +120,28 @@ impl TypeChecker {
             let progress = exprs.iter().any(|e| tc.propagate_return_type(e));
             if !progress {
                 break;
+            }
+        }
+        // Second fixed-point pass in lenient mode: resolve mutually recursive functions
+        // whose bodies have a base-case branch with a known type.  The lenient flag lets
+        // `infer_type` for `if` return the known branch even when the other is still None.
+        let has_unresolved = tc.functions.values().any(|s| s.return_type.is_none())
+            || tc.classes.values().any(|c| c.methods.values().any(|s| s.return_type.is_none()));
+        if has_unresolved {
+            tc.lenient = true;
+            let max_iters = tc.functions.len()
+                + tc.classes.values().map(|c| c.methods.len()).sum::<usize>();
+            for _ in 0..max_iters {
+                let progress = exprs.iter().any(|e| tc.propagate_return_type(e));
+                if !progress {
+                    break;
+                }
+            }
+            tc.lenient = false;
+            // After the lenient pass resolves new types, re-verify annotated return types
+            // so that mismatches against newly-resolved callee types are caught.
+            for e in exprs {
+                tc.verify_annotated_return_types(e);
             }
         }
         let errors = std::mem::take(&mut tc.errors);
@@ -681,6 +708,76 @@ impl TypeChecker {
         }
     }
 
+    /// Re-check annotated return types for functions/methods whose body return type may have
+    /// been resolved by the lenient fixed-point pass after the initial `check_expr` run.
+    /// Only emits errors that could not have been emitted before (i.e., callee type was
+    /// previously `None` and is now known).
+    fn verify_annotated_return_types(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Function { name: _, type_params, params, return_type: Some(rt), body } => {
+                let rt = rt.clone();
+                self.push_type_vars(type_params);
+                self.push_scope();
+                for p in params {
+                    if let Some(te) = &p.type_ann {
+                        self.set_var(&p.name, te.clone());
+                    }
+                }
+                if let Some(last_expr) = body.last()
+                    && let Some(actual) = self.infer_type(last_expr)
+                    && !self.types_compat(&actual, &rt)
+                {
+                    // Only report if this error wasn't already caught. Since the first
+                    // check_expr pass only emits when infer_type succeeds, any error here
+                    // means infer_type previously returned None (unknown) and now succeeded.
+                    let msg = format!(
+                        "return value expected {}, got {}",
+                        te_name(&rt),
+                        te_name(&actual)
+                    );
+                    if !self.errors.iter().any(|e| e.message == msg) {
+                        self.errors.push(TypeCheckError { message: msg });
+                    }
+                }
+                self.pop_scope();
+                self.pop_type_vars();
+            }
+            Expr::Class { name, type_params, methods, .. } => {
+                let saved_class = self.current_class.replace(name.clone());
+                self.push_type_vars(type_params);
+                for method in methods {
+                    let Some(rt) = &method.return_type else { continue };
+                    let rt = rt.clone();
+                    self.push_type_vars(&method.type_params);
+                    self.push_scope();
+                    for p in &method.params {
+                        if let Some(te) = &p.type_ann {
+                            self.set_var(&p.name, te.clone());
+                        }
+                    }
+                    if let Some(last_expr) = method.body.last()
+                        && let Some(actual) = self.infer_type(last_expr)
+                        && !self.types_compat(&actual, &rt)
+                    {
+                        let msg = format!(
+                            "return value expected {}, got {}",
+                            te_name(&rt),
+                            te_name(&actual)
+                        );
+                        if !self.errors.iter().any(|e| e.message == msg) {
+                            self.errors.push(TypeCheckError { message: msg });
+                        }
+                    }
+                    self.pop_scope();
+                    self.pop_type_vars();
+                }
+                self.pop_type_vars();
+                self.current_class = saved_class;
+            }
+            _ => {}
+        }
+    }
+
     fn check_call(&mut self, callee: &Expr, args: &[CallArg]) {
         for arg in args {
             self.check_expr(&arg.value);
@@ -852,10 +949,20 @@ impl TypeChecker {
             },
             Expr::Print(inner) => self.infer_type(inner),
             Expr::If { then_branch, else_branch, .. } => {
-                let then_type = then_branch.last().and_then(|e| self.infer_type(e))?;
-                let else_stmts = else_branch.as_ref()?;
-                let else_type = else_stmts.last().and_then(|e| self.infer_type(e))?;
-                if then_type == else_type { Some(then_type) } else { None }
+                let then_type = then_branch.last().and_then(|e| self.infer_type(e));
+                let else_type = else_branch
+                    .as_ref()
+                    .and_then(|stmts| stmts.last())
+                    .and_then(|e| self.infer_type(e));
+                match (&then_type, &else_type) {
+                    (Some(t), Some(e)) if t == e => Some(t.clone()),
+                    // In lenient mode, return whichever branch has a known type.
+                    // This lets mutually-recursive functions with a concrete base-case
+                    // branch converge even when the recursive branch is still None.
+                    (Some(t), None) if self.lenient => Some(t.clone()),
+                    (None, Some(e)) if self.lenient => Some(e.clone()),
+                    _ => None,
+                }
             }
             Expr::Begin { body, rescue_body, .. } => {
                 if rescue_body.is_empty() {
