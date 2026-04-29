@@ -2,6 +2,29 @@
 use rustyline::{DefaultEditor, error::ReadlineError};
 use sapphire::{compiler, lexer, parser, token::TokenKind, typechecker, vm};
 
+fn emit_error(message: &str, line: usize, column: usize, source: &str, path: &str) {
+    eprintln!("error: {}", message);
+    if line == 0 {
+        return;
+    }
+    if column > 0 {
+        eprintln!(" --> {}:{}:{}", path, line, column);
+    } else {
+        eprintln!(" --> {}:{}", path, line);
+    }
+    if let Some(src_line) = source.lines().nth(line - 1) {
+        let ln = line.to_string();
+        let pad = " ".repeat(ln.len());
+        eprintln!("{} |", pad);
+        eprintln!("{} | {}", ln, src_line);
+        if column > 0 {
+            eprintln!("{} | {}^", pad, " ".repeat(column.saturating_sub(1)));
+        } else {
+            eprintln!("{} |", pad);
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.as_slice() {
@@ -37,17 +60,17 @@ fn run_file(path: &str) {
     let exprs = match parser::Parser::new(tokens).parse() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("{}", e);
+            display_parse_error(&e, &source, path);
             std::process::exit(1);
         }
     };
-    if !report_type_errors(&exprs) {
+    if !report_type_errors(&exprs, &source, path) {
         std::process::exit(1);
     }
     let func = match compiler::compile(&exprs) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("{}", e);
+            emit_error(&e.message, e.line as usize, e.column as usize, &source, path);
             std::process::exit(1);
         }
     };
@@ -63,7 +86,7 @@ fn run_file(path: &str) {
         std::process::exit(1);
     }
     if let Err(e) = vm.run() {
-        eprintln!("{}", e);
+        display_vm_error(&e, &source, path);
         std::process::exit(1);
     }
 }
@@ -79,11 +102,11 @@ fn typecheck_file(path: &str) {
     let tokens = lexer::Lexer::new(&source).scan_tokens();
     match parser::Parser::new(tokens).parse() {
         Err(e) => {
-            eprintln!("{}", e);
+            display_parse_error(&e, &source, path);
             std::process::exit(1);
         }
         Ok(exprs) => {
-            if report_type_errors(&exprs) {
+            if report_type_errors(&exprs, &source, path) {
                 println!("No type errors found.");
             } else {
                 std::process::exit(1);
@@ -92,13 +115,31 @@ fn typecheck_file(path: &str) {
     }
 }
 
-fn report_type_errors(exprs: &[sapphire::ast::Expr]) -> bool {
+fn display_parse_error(e: &sapphire::error::SapphireError, source: &str, path: &str) {
+    match e {
+        sapphire::error::SapphireError::ParseError { message, line, column } => {
+            emit_error(message, *line, *column, source, path);
+        }
+        other => eprintln!("{}", other),
+    }
+}
+
+fn display_vm_error(e: &vm::VmError, source: &str, path: &str) {
+    match e {
+        vm::VmError::TypeError { message, line } => {
+            emit_error(message, *line as usize, 0, source, path);
+        }
+        other => eprintln!("{}", other),
+    }
+}
+
+fn report_type_errors(exprs: &[sapphire::ast::Expr], source: &str, path: &str) -> bool {
     let errors = typechecker::TypeChecker::check(exprs);
     if errors.is_empty() {
         true
     } else {
         for e in &errors {
-            eprintln!("{}", e);
+            emit_error(&e.message, e.line, 0, source, path);
         }
         false
     }
@@ -154,21 +195,22 @@ fn run_tests(path: &str) {
                 std::process::exit(1);
             }
         };
+        let file_path_str = file_path.to_string_lossy();
         let tokens = lexer::Lexer::new(&source).scan_tokens();
         let exprs = match parser::Parser::new(tokens).parse() {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("{}", e);
+                display_parse_error(&e, &source, &file_path_str);
                 std::process::exit(1);
             }
         };
-        if !report_type_errors(&exprs) {
+        if !report_type_errors(&exprs, &source, &file_path_str) {
             std::process::exit(1);
         }
         let func = match compiler::compile(&exprs) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("{}", e);
+                emit_error(&e.message, e.line as usize, e.column as usize, &source, &file_path_str);
                 std::process::exit(1);
             }
         };
@@ -185,7 +227,7 @@ fn run_tests(path: &str) {
             std::process::exit(1);
         }
         if let Err(e) = machine.run() {
-            eprintln!("{}", e);
+            display_vm_error(&e, &source, &file_path_str);
             std::process::exit(1);
         }
 
@@ -302,17 +344,17 @@ fn run_repl() {
         let tokens = lexer::Lexer::new(trimmed).scan_tokens();
         let exprs = match parser::Parser::new(tokens).parse() {
             Err(e) => {
-                eprintln!("{}", e);
+                display_parse_error(&e, trimmed, "<repl>");
                 continue;
             }
             Ok(e) => e,
         };
-        if !report_type_errors(&exprs) {
+        if !report_type_errors(&exprs, trimmed, "<repl>") {
             continue;
         }
         let func = match compiler::compile_repl(&exprs) {
             Err(e) => {
-                eprintln!("{}", e);
+                emit_error(&e.message, e.line as usize, e.column as usize, trimmed, "<repl>");
                 continue;
             }
             Ok(f) => f,
@@ -320,7 +362,7 @@ fn run_repl() {
         match vm.eval(func) {
             Ok(Some(result)) if result.to_string() != "nil" => println!("{}", result),
             Ok(_) => {}
-            Err(e) => eprintln!("{}", e),
+            Err(e) => display_vm_error(&e, trimmed, "<repl>"),
         }
     }
 }

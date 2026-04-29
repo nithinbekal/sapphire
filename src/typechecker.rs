@@ -6,11 +6,17 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone)]
 pub struct TypeCheckError {
     pub message: String,
+    /// Source line (1-based); 0 means unknown.
+    pub line: usize,
 }
 
 impl std::fmt::Display for TypeCheckError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "type error: {}", self.message)
+        if self.line > 0 {
+            write!(f, "[line {}] type error: {}", self.line, self.message)
+        } else {
+            write!(f, "type error: {}", self.message)
+        }
     }
 }
 
@@ -86,6 +92,8 @@ pub struct TypeChecker {
     /// other branch is `None`.  Enabled during a second fixed-point pass so that mutually
     /// recursive functions whose bodies contain a resolvable base-case branch can converge.
     lenient: bool,
+    /// Best-effort source line for the expression currently being checked (updated on Binary/Unary).
+    current_line: usize,
 }
 
 impl TypeChecker {
@@ -100,6 +108,7 @@ impl TypeChecker {
             var_scopes: vec![HashMap::new()],
             type_vars: Vec::new(),
             lenient: false,
+            current_line: 0,
         }
     }
 
@@ -317,7 +326,7 @@ impl TypeChecker {
             _ => {
                 let resolved = self.resolve_type(te.clone());
                 if let Some(msg) = check_union_duplicates(&resolved) {
-                    self.errors.push(TypeCheckError { message: msg });
+                    self.errors.push(TypeCheckError { message: msg, line: self.current_line });
                 }
             }
         }
@@ -351,6 +360,7 @@ impl TypeChecker {
                             te_name(&rt),
                             te_name(&actual)
                         ),
+                        line: self.current_line,
                     });
                 }
                 self.check_expr(inner);
@@ -422,11 +432,15 @@ impl TypeChecker {
                 }
                 self.check_expr(value);
             }
-            Expr::Binary { left, right, .. } => {
+            Expr::Binary { left, op, right } => {
+                self.current_line = op.line;
                 self.check_expr(left);
                 self.check_expr(right);
             }
-            Expr::Unary { right, .. } => self.check_expr(right),
+            Expr::Unary { op, right } => {
+                self.current_line = op.line;
+                self.check_expr(right);
+            }
             Expr::Get { object, .. } | Expr::SafeGet { object, .. } => self.check_expr(object),
             Expr::Set {
                 object,
@@ -448,6 +462,7 @@ impl TypeChecker {
                             te_name(te),
                             te_name(&actual)
                         ),
+                        line: self.current_line,
                     });
                 }
                 self.check_expr(object);
@@ -551,6 +566,7 @@ impl TypeChecker {
                                 te_name(rt),
                                 te_name(&actual)
                             ),
+                            line: self.current_line,
                         });
                     }
 
@@ -615,6 +631,7 @@ impl TypeChecker {
                             te_name(rt),
                             te_name(&actual)
                         ),
+                        line: self.current_line,
                     });
                 }
 
@@ -736,7 +753,7 @@ impl TypeChecker {
                         te_name(&actual)
                     );
                     if !self.errors.iter().any(|e| e.message == msg) {
-                        self.errors.push(TypeCheckError { message: msg });
+                        self.errors.push(TypeCheckError { message: msg, line: self.current_line });
                     }
                 }
                 self.pop_scope();
@@ -765,7 +782,7 @@ impl TypeChecker {
                             te_name(&actual)
                         );
                         if !self.errors.iter().any(|e| e.message == msg) {
-                            self.errors.push(TypeCheckError { message: msg });
+                            self.errors.push(TypeCheckError { message: msg, line: self.current_line });
                         }
                     }
                     self.pop_scope();
@@ -795,6 +812,7 @@ impl TypeChecker {
             Expr::Get {
                 object,
                 name: method_name,
+                ..
             } => {
                 self.check_expr(object);
                 if method_name == "new" {
@@ -817,6 +835,7 @@ impl TypeChecker {
                                         te_name(te),
                                         te_name(&actual)
                                     ),
+                                    line: self.current_line,
                                 });
                             }
                         }
@@ -854,6 +873,7 @@ impl TypeChecker {
                         te_name(te),
                         te_name(&actual)
                     ),
+                    line: self.current_line,
                 });
             }
         }
@@ -989,6 +1009,7 @@ impl TypeChecker {
                 Expr::Get {
                     object,
                     name: method_name,
+                    ..
                 } => {
                     if method_name == "new"
                         && let Expr::Variable(cn) = object.as_ref()
@@ -1019,6 +1040,7 @@ impl TypeChecker {
                 Expr::SafeGet {
                     object,
                     name: method_name,
+                    ..
                 } => {
                     if let Some(TypeExpr::Named(cn)) = self.infer_type(object)
                         && let Some(cls) = self.classes.get(&cn)
@@ -1079,7 +1101,7 @@ impl TypeChecker {
                 }
                 None
             }
-            Expr::Get { object, name } => {
+            Expr::Get { object, name, .. } => {
                 if let Expr::Variable(class_name) = object.as_ref()
                     && let Some(cls) = self.classes.get(class_name)
                     && let Some(ty) = cls.constants.get(name)

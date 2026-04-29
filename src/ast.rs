@@ -85,10 +85,12 @@ pub enum Expr {
     Get {
         object: Box<Expr>,
         name: String,
+        line: usize,
     },
     SafeGet {
         object: Box<Expr>,
         name: String,
+        line: usize,
     },
     Set {
         object: Box<Expr>,

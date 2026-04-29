@@ -135,7 +135,7 @@ impl Parser {
                     "Nil is not allowed as a union arm; use {} instead",
                     suggestion
                 ),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
 
@@ -151,7 +151,7 @@ impl Parser {
             if !self.check(&TokenKind::RightParen) {
                 return Err(SapphireError::ParseError {
                     message: "expected ')' after type group".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume ')'
@@ -212,7 +212,7 @@ impl Parser {
             }
             _ => Err(SapphireError::ParseError {
                 message: "expected type".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             }),
         }
     }
@@ -232,7 +232,7 @@ impl Parser {
         if !self.check(&TokenKind::RightBracket) {
             return Err(SapphireError::ParseError {
                 message: "expected ']' after type arguments".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume ']'
@@ -256,7 +256,7 @@ impl Parser {
                 _ => {
                     return Err(SapphireError::ParseError {
                         message: "expected type parameter name".into(),
-                        line: self.peek().line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
             }
@@ -268,7 +268,7 @@ impl Parser {
         if !self.check(&TokenKind::RightBracket) {
             return Err(SapphireError::ParseError {
                 message: "expected ']' after type parameters".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume ']'
@@ -403,7 +403,6 @@ impl Parser {
             return Ok(Expr::Print(Box::new(self.logical()?)));
         }
         if self.check(&TokenKind::Type) {
-            let line = self.peek().line;
             self.advance(); // consume 'type'
             let name = match self.peek().kind.clone() {
                 TokenKind::Identifier(n) => {
@@ -413,14 +412,14 @@ impl Parser {
                 _ => {
                     return Err(SapphireError::ParseError {
                         message: "expected type alias name after 'type'".into(),
-                        line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
             };
             if !self.check(&TokenKind::Eq) {
                 return Err(SapphireError::ParseError {
                     message: "expected '=' after type alias name".into(),
-                    line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume '='
@@ -428,7 +427,6 @@ impl Parser {
             return Ok(Expr::TypeAlias { name, type_expr });
         }
         if self.check(&TokenKind::Import) {
-            let line = self.peek().line;
             self.advance();
             match self.peek().kind.clone() {
                 TokenKind::StringLit(path) => {
@@ -438,7 +436,7 @@ impl Parser {
                                 "import path must be relative (start with ./ or ../): {:?}",
                                 path
                             ),
-                            line,
+                            line: self.peek().line, column: self.peek().column,
                         });
                     }
                     self.advance();
@@ -447,7 +445,7 @@ impl Parser {
                 _ => {
                     return Err(SapphireError::ParseError {
                         message: "expected a string literal after 'import'".into(),
-                        line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
             }
@@ -465,7 +463,7 @@ impl Parser {
             _ => {
                 return Err(SapphireError::ParseError {
                     message: "expected class name".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
         };
@@ -480,13 +478,14 @@ impl Parser {
                 _ => {
                     return Err(SapphireError::ParseError {
                         message: "expected superclass name after '<'".into(),
-                        line: self.peek().line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
             };
             let mut expr: Expr = Expr::Variable(first);
             while self.check(&TokenKind::Dot) {
                 self.advance(); // consume '.'
+                let dot_line = self.peek().line;
                 let field = match self.peek().kind.clone() {
                     TokenKind::Identifier(n) => {
                         self.advance();
@@ -495,13 +494,14 @@ impl Parser {
                     _ => {
                         return Err(SapphireError::ParseError {
                             message: "expected identifier after '.' in superclass".into(),
-                            line: self.peek().line,
+                            line: self.peek().line, column: self.peek().column,
                         });
                     }
                 };
                 expr = Expr::Get {
                     object: Box::new(expr),
                     name: field,
+                    line: dot_line,
                 };
             }
             Some(Box::new(expr))
@@ -511,7 +511,7 @@ impl Parser {
         if !self.check(&TokenKind::LeftBrace) {
             return Err(SapphireError::ParseError {
                 message: "expected '{' after class name".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume '{'
@@ -545,7 +545,7 @@ impl Parser {
                     return Err(SapphireError::ParseError {
                         message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body"
                             .into(),
-                        line: self.peek().line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
             } else if self.check(&TokenKind::Attr) {
@@ -558,7 +558,7 @@ impl Parser {
                     _ => {
                         return Err(SapphireError::ParseError {
                             message: "expected field name after 'attr'".into(),
-                            line: self.peek().line,
+                            line: self.peek().line, column: self.peek().column,
                         });
                     }
                 };
@@ -582,7 +582,7 @@ impl Parser {
                 if !self.check(&TokenKind::LeftBrace) {
                     return Err(SapphireError::ParseError {
                         message: "expected '{' after 'self' in class body".into(),
-                        line: self.peek().line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
                 self.advance(); // consume '{'
@@ -599,14 +599,14 @@ impl Parser {
                     } else {
                         return Err(SapphireError::ParseError {
                             message: "expected 'def' or 'defp' inside 'self' block".into(),
-                            line: self.peek().line,
+                            line: self.peek().line, column: self.peek().column,
                         });
                     }
                 }
                 if !self.check(&TokenKind::RightBrace) {
                     return Err(SapphireError::ParseError {
                         message: "expected '}' to close 'self' block".into(),
-                        line: self.peek().line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
                 self.advance(); // consume '}'
@@ -614,14 +614,14 @@ impl Parser {
                 return Err(SapphireError::ParseError {
                     message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body"
                         .into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
         }
         if !self.check(&TokenKind::RightBrace) {
             return Err(SapphireError::ParseError {
                 message: "expected '}'".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume '}'
@@ -694,7 +694,7 @@ impl Parser {
             _ => {
                 return Err(SapphireError::ParseError {
                     message: "expected function name or '(' after 'def'".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
         };
@@ -713,7 +713,7 @@ impl Parser {
                         _ => {
                             return Err(SapphireError::ParseError {
                                 message: "expected parameter name".into(),
-                                line: self.peek().line,
+                                line: self.peek().line, column: self.peek().column,
                             });
                         }
                     }
@@ -726,7 +726,7 @@ impl Parser {
             if !self.check(&TokenKind::RightParen) {
                 return Err(SapphireError::ParseError {
                     message: "expected ')' after parameters".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume ')'
@@ -756,7 +756,7 @@ impl Parser {
                     _ => {
                         return Err(SapphireError::ParseError {
                             message: "expected parameter name in lambda".into(),
-                            line: self.peek().line,
+                            line: self.peek().line, column: self.peek().column,
                         });
                     }
                 }
@@ -769,7 +769,7 @@ impl Parser {
         if !self.check(&TokenKind::RightParen) {
             return Err(SapphireError::ParseError {
                 message: "expected ')' after lambda parameters".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume ')'
@@ -787,7 +787,7 @@ impl Parser {
             _ => {
                 return Err(SapphireError::ParseError {
                     message: "expected method name".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
         };
@@ -806,7 +806,7 @@ impl Parser {
                         _ => {
                             return Err(SapphireError::ParseError {
                                 message: "expected parameter name".into(),
-                                line: self.peek().line,
+                                line: self.peek().line, column: self.peek().column,
                             });
                         }
                     }
@@ -819,7 +819,7 @@ impl Parser {
             if !self.check(&TokenKind::RightParen) {
                 return Err(SapphireError::ParseError {
                     message: "expected ')' after parameters".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume ')'
@@ -860,7 +860,7 @@ impl Parser {
                 _ => {
                     return Err(SapphireError::ParseError {
                         message: "expected identifier in multiple assignment".into(),
-                        line: self.peek().line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
             }
@@ -873,7 +873,7 @@ impl Parser {
         if !self.check(&TokenKind::Eq) {
             return Err(SapphireError::ParseError {
                 message: "expected '=' in multiple assignment".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume '='
@@ -936,7 +936,7 @@ impl Parser {
         if !self.check(&TokenKind::End) {
             return Err(SapphireError::ParseError {
                 message: "expected 'end' to close 'begin'".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume 'end'
@@ -954,7 +954,7 @@ impl Parser {
         if !self.check(&TokenKind::LeftBrace) {
             return Err(SapphireError::ParseError {
                 message: "expected '{'".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume '{'
@@ -988,7 +988,7 @@ impl Parser {
             if !self.check(&TokenKind::RightBrace) {
                 return Err(SapphireError::ParseError {
                     message: "expected '}'".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume '}'
@@ -1002,7 +1002,7 @@ impl Parser {
             if !self.check(&TokenKind::RightBrace) {
                 return Err(SapphireError::ParseError {
                     message: "expected '}'".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume '}'
@@ -1014,7 +1014,7 @@ impl Parser {
         if !self.check(&TokenKind::LeftBrace) {
             return Err(SapphireError::ParseError {
                 message: "expected '{'".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume '{'
@@ -1029,7 +1029,7 @@ impl Parser {
         if !self.check(&TokenKind::RightBrace) {
             return Err(SapphireError::ParseError {
                 message: "expected '}'".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume '}'
@@ -1229,6 +1229,7 @@ impl Parser {
                 expr = self.finish_call(expr)?;
             } else if self.check(&TokenKind::Dot) {
                 self.advance(); // consume '.'
+                let dot_line = self.peek().line;
                 let name = match self.peek().kind.clone() {
                     TokenKind::Identifier(n) => {
                         self.advance();
@@ -1242,7 +1243,7 @@ impl Parser {
                     _ => {
                         return Err(SapphireError::ParseError {
                             message: "expected field or method name after '.'".into(),
-                            line: self.peek().line,
+                            line: self.peek().line, column: self.peek().column,
                         });
                     }
                 };
@@ -1261,6 +1262,7 @@ impl Parser {
                     let get = Expr::Get {
                         object: Box::new(expr),
                         name,
+                        line: dot_line,
                     };
                     expr = Expr::Call {
                         callee: Box::new(get),
@@ -1272,6 +1274,7 @@ impl Parser {
                 let get = Expr::Get {
                     object: Box::new(expr),
                     name,
+                    line: dot_line,
                 };
                 if self.check(&TokenKind::LeftParen) {
                     expr = self.finish_call(get)?;
@@ -1284,6 +1287,7 @@ impl Parser {
                 }
             } else if self.check(&TokenKind::AmpDot) {
                 self.advance(); // consume '&.'
+                let amp_line = self.peek().line;
                 let name = match self.peek().kind.clone() {
                     TokenKind::Identifier(n) => {
                         self.advance();
@@ -1292,7 +1296,7 @@ impl Parser {
                     _ => {
                         return Err(SapphireError::ParseError {
                             message: "expected method or field name after '&.'".into(),
-                            line: self.peek().line,
+                            line: self.peek().line, column: self.peek().column,
                         });
                     }
                 };
@@ -1300,6 +1304,7 @@ impl Parser {
                     let safe_get = Expr::SafeGet {
                         object: Box::new(expr),
                         name,
+                        line: amp_line,
                     };
                     let call = self.finish_call(safe_get)?;
                     expr = call;
@@ -1307,6 +1312,7 @@ impl Parser {
                     expr = Expr::SafeGet {
                         object: Box::new(expr),
                         name,
+                        line: amp_line,
                     };
                 }
             } else if self.check(&TokenKind::LeftBracket) {
@@ -1315,7 +1321,7 @@ impl Parser {
                 if !self.check(&TokenKind::RightBracket) {
                     return Err(SapphireError::ParseError {
                         message: "expected ']' after index".into(),
-                        line: self.peek().line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
                 self.advance(); // consume ']'
@@ -1365,7 +1371,7 @@ impl Parser {
         if !self.check(&TokenKind::RightParen) {
             return Err(SapphireError::ParseError {
                 message: "expected ')' after arguments".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume ')'
@@ -1395,7 +1401,7 @@ impl Parser {
                         _ => {
                             return Err(SapphireError::ParseError {
                                 message: "expected parameter name in block".into(),
-                                line: self.peek().line,
+                                line: self.peek().line, column: self.peek().column,
                             });
                         }
                     }
@@ -1408,7 +1414,7 @@ impl Parser {
             if !self.check(&TokenKind::Pipe) {
                 return Err(SapphireError::ParseError {
                     message: "expected '|' after block parameters".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume '|'
@@ -1427,7 +1433,7 @@ impl Parser {
         if !self.check(&TokenKind::RightBrace) {
             return Err(SapphireError::ParseError {
                 message: "expected '}'".into(),
-                line: self.peek().line,
+                line: self.peek().line, column: self.peek().column,
             });
         }
         self.advance(); // consume '}'
@@ -1525,7 +1531,7 @@ impl Parser {
                 if !self.check(&TokenKind::RightParen) {
                     return Err(SapphireError::ParseError {
                         message: "expected ')' after yield arguments".into(),
-                        line: self.peek().line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
                 self.advance(); // consume ')'
@@ -1542,7 +1548,7 @@ impl Parser {
             if !self.check(&TokenKind::Dot) {
                 return Err(SapphireError::ParseError {
                     message: "expected '.' after 'super'".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume '.'
@@ -1552,7 +1558,7 @@ impl Parser {
             } else {
                 return Err(SapphireError::ParseError {
                     message: "expected method name after 'super.'".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             };
             let (args, block) = if self.check(&TokenKind::LeftParen) {
@@ -1568,7 +1574,7 @@ impl Parser {
                 if !self.check(&TokenKind::RightParen) {
                     return Err(SapphireError::ParseError {
                         message: "expected ')' after arguments".into(),
-                        line: self.peek().line,
+                        line: self.peek().line, column: self.peek().column,
                     });
                 }
                 self.advance(); // consume ')'
@@ -1617,7 +1623,7 @@ impl Parser {
             if !self.check(&TokenKind::RightBracket) {
                 return Err(SapphireError::ParseError {
                     message: "expected ']' after list elements".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume ']'
@@ -1637,14 +1643,14 @@ impl Parser {
                         _ => {
                             return Err(SapphireError::ParseError {
                                 message: "expected key name in map literal".into(),
-                                line: self.peek().line,
+                                line: self.peek().line, column: self.peek().column,
                             });
                         }
                     };
                     if !self.check(&TokenKind::Colon) {
                         return Err(SapphireError::ParseError {
                             message: "expected ':' after map key".into(),
-                            line: self.peek().line,
+                            line: self.peek().line, column: self.peek().column,
                         });
                     }
                     self.advance(); // consume ':'
@@ -1659,7 +1665,7 @@ impl Parser {
             if !self.check(&TokenKind::RightBrace) {
                 return Err(SapphireError::ParseError {
                     message: "expected '}' after map literal".into(),
-                    line: self.peek().line,
+                    line: self.peek().line, column: self.peek().column,
                 });
             }
             self.advance(); // consume '}'
@@ -1668,7 +1674,7 @@ impl Parser {
 
         Err(SapphireError::ParseError {
             message: format!("unexpected token '{:?}'", self.peek().kind),
-            line: self.peek().line,
+            line: self.peek().line, column: self.peek().column,
         })
     }
 }

@@ -12,12 +12,40 @@ use std::rc::Rc;
 pub struct CompileError {
     pub message: String,
     pub line: u32,
+    pub column: u32,
 }
 
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[line {}] compile error: {}", self.line, self.message)
+        write!(f, "[line {}:{}] compile error: {}", self.line, self.column, self.message)
     }
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let m = b.len();
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr = vec![0usize; m + 1];
+    for (i, &ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            curr[j + 1] = (curr[j] + 1).min(prev[j + 1] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
+}
+
+fn suggest_name<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str> {
+    let threshold = (name.len() / 3).max(2);
+    candidates
+        .iter()
+        .map(|&c| (c, levenshtein(name, c)))
+        .filter(|(_, dist)| *dist <= threshold)
+        .min_by_key(|(_, dist)| *dist)
+        .map(|(c, _)| c)
 }
 
 // ── Per-function compiler state ───────────────────────────────────────────────
@@ -44,6 +72,7 @@ struct LoopCtx {
 struct FunctionState {
     chunk: Chunk,
     current_line: u32,
+    current_column: u32,
     locals: Vec<LocalInfo>,
     upvalue_defs: Vec<UpvalueInfo>,
     name: String,
@@ -58,6 +87,7 @@ impl FunctionState {
         FunctionState {
             chunk: Chunk::new(),
             current_line: line,
+            current_column: 1,
             locals: Vec::new(),
             upvalue_defs: Vec::new(),
             name: name.to_string(),
@@ -453,18 +483,20 @@ impl Compiler {
 
             Expr::Unary { op, right } => {
                 self.state_mut().current_line = op.line as u32;
+                self.state_mut().current_column = op.column as u32;
                 self.expr(right)?;
                 match &op.kind {
                     TokenKind::Minus => self.emit(OpCode::Negate),
                     TokenKind::Bang => self.emit(OpCode::Not),
                     TokenKind::Tilde => self.emit(OpCode::BitNot),
-                    other => return Err(self.error(format!("unknown unary op: {:?}", other))),
+                    other => return Err(self.error(format!("unsupported unary operator '{:?}'", other))),
                 }
                 Ok(())
             }
 
             Expr::Binary { left, op, right } => {
                 self.state_mut().current_line = op.line as u32;
+                self.state_mut().current_column = op.column as u32;
                 // Short-circuit operators: evaluate only the left side first.
                 match &op.kind {
                     TokenKind::AmpAmp => {
@@ -504,7 +536,7 @@ impl Compiler {
                     TokenKind::LessEq => self.emit(OpCode::LessEqual),
                     TokenKind::Greater => self.emit(OpCode::Greater),
                     TokenKind::GreaterEq => self.emit(OpCode::GreaterEqual),
-                    other => return Err(self.error(format!("unknown binary op: {:?}", other))),
+                    other => return Err(self.error(format!("unsupported binary operator '{:?}'", other))),
                 }
                 Ok(())
             }
@@ -521,7 +553,19 @@ impl Compiler {
                 {
                     self.emit_maybe_lexical_or_global(name);
                 } else {
-                    return Err(self.error(format!("undefined variable '{}'", name)));
+                    let candidates: Vec<&str> = self
+                        .states
+                        .iter()
+                        .flat_map(|s| s.locals.iter().map(|l| l.name.as_str()))
+                        .collect();
+                    let msg = match suggest_name(name, &candidates) {
+                        Some(suggestion) => format!(
+                            "undefined variable '{}' — did you mean '{}'?",
+                            name, suggestion
+                        ),
+                        None => format!("undefined variable '{}'", name),
+                    };
+                    return Err(self.error(msg));
                 }
                 Ok(())
             }
@@ -561,7 +605,10 @@ impl Compiler {
                 block,
             } => {
                 // Method call: `obj.method(args)` or `obj.method(args) { |x| ... }`
-                if let Expr::Get { object, name } = callee.as_ref() {
+                if let Expr::Get { object, name, line: get_line } = callee.as_ref() {
+                    if *get_line > 0 {
+                        self.state_mut().current_line = *get_line as u32;
+                    }
                     if name == "new" && block.is_none() {
                         // Class construction: `ClassName.new(field: val, ...)`
                         self.expr(object)?;
@@ -648,7 +695,10 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::Get { object, name } => {
+            Expr::Get { object, name, line: get_line } => {
+                if *get_line > 0 {
+                    self.state_mut().current_line = *get_line as u32;
+                }
                 self.expr(object)?;
                 let idx = self
                     .state_mut()
@@ -658,7 +708,10 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::SafeGet { object, name } => {
+            Expr::SafeGet { object, name, line: get_line } => {
+                if *get_line > 0 {
+                    self.state_mut().current_line = *get_line as u32;
+                }
                 self.expr(object)?;
                 let idx = self
                     .state_mut()
@@ -1499,6 +1552,7 @@ impl Compiler {
         CompileError {
             message,
             line: self.state().current_line,
+            column: self.state().current_column,
         }
     }
 }
