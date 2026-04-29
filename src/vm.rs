@@ -2474,7 +2474,7 @@ impl Vm {
                             }
                             None => {
                                 return Err(VmError::TypeError {
-                                    message: format!("'{}' has no method '{}'", recv, method_name),
+                                    message: format!("{} has no method '{}'", value_type_name(&recv), method_name),
                                     line,
                                 });
                             }
@@ -2967,7 +2967,7 @@ impl Vm {
                             }
                             None => {
                                 return Err(VmError::TypeError {
-                                    message: format!("no method '{}' on {}", method_name, recv),
+                                    message: format!("{} has no method '{}'", value_type_name(&recv), method_name),
                                     line,
                                 });
                             }
