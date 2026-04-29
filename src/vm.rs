@@ -1202,7 +1202,7 @@ impl Vm {
             ("stdlib/date.spr", include_str!("../stdlib/src/date.spr")),
             ("stdlib/time.spr", include_str!("../stdlib/src/time.spr")),
             ("stdlib/datetime.spr", include_str!("../stdlib/src/datetime.spr")),
-            ("stdlib/zoned.spr", include_str!("../stdlib/src/zoned.spr")),
+            ("stdlib/zoned_date_time.spr", include_str!("../stdlib/src/zoned_date_time.spr")),
             ("stdlib/socket.spr", include_str!("../stdlib/src/socket.spr")),
         ];
         for (name, src) in SOURCES {
