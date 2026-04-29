@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.7.0
+
+**Language**
+
+- Union types — annotate a value as one of several types using `|`:
+
+```ruby
+def stringify(x: Int | Float): String
+  x.to_s
+end
+```
+
+- Type aliases — give a name to any type expression with `type`:
+
+```ruby
+type Numeric = Int | Float
+```
+
+- Generics — parameterize classes and methods with type variables (erased at runtime):
+
+```ruby
+class Box[T]
+  attr value: T
+
+  def get -> T { self.value }
+end
+
+def identity[T](x: T) -> T { x }
+
+items: List[Int] = [1, 2, 3]
+```
+
+- Typechecking now runs automatically before `run`, so `sapphire run` will report type errors before executing
+
+**Typechecker**
+
+- Return types are now inferred for unannotated functions and methods, and propagated back to their signatures
+- Type inference now handles the following expression forms:
+  - List and map literals
+  - `if` expressions where both branches agree on a type
+  - `begin` expressions with no `rescue` clause
+  - Unary operators
+  - `String + String` → `String`
+  - Variable assignments and property assignments (inferred from the RHS)
+  - `while` loops → `Nil`
+  - Class-level constants
+  - Multi-assignment
+  - Safe-navigation method calls → `Nil | T`
+- Inferred types propagate across mutually recursive functions
+
+**Infrastructure**
+
+- Sapphire is now published to crates.io as `sapphire-lang`
+- MIT license added
+
+---
+
 ## v0.6.0
 
 **Language**
