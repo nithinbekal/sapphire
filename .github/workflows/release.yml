@@ -14,15 +14,15 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            binary: sapphire
+            binary: sapphire-lang
             asset: sapphire-linux-x86_64
           - target: x86_64-apple-darwin
             os: macos-latest
-            binary: sapphire
+            binary: sapphire-lang
             asset: sapphire-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
-            binary: sapphire
+            binary: sapphire-lang
             asset: sapphire-macos-aarch64
 
     steps:
