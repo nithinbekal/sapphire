@@ -5,6 +5,8 @@ pub struct Lexer {
     start: usize,
     current: usize,
     line: usize,
+    /// 1-based column of the next character to be consumed.
+    current_column: usize,
 }
 
 impl Lexer {
@@ -14,7 +16,22 @@ impl Lexer {
             start: 0,
             current: 0,
             line: 1,
+            current_column: 1,
         }
+    }
+
+    /// Recompute `current_column` by scanning back to the last newline.
+    /// Called after scanning constructs that use raw `self.current` increments.
+    fn recalc_column(&mut self) {
+        let mut col = 1usize;
+        for &c in &self.source[..self.current] {
+            if c == '\n' {
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+        self.current_column = col;
     }
 
     fn ends_statement(kind: &TokenKind) -> bool {
@@ -44,11 +61,13 @@ impl Lexer {
 
         while !self.is_at_end() {
             self.start = self.current;
+            let tok_col = self.current_column;
             let c = self.advance();
 
             let kind = match c {
                 '\n' => {
                     self.line += 1;
+                    self.current_column = 1;
                     if last_kind.as_ref().is_some_and(Self::ends_statement) {
                         TokenKind::Newline
                     } else {
@@ -139,7 +158,10 @@ impl Lexer {
                         && self.source[self.current + 1] == '"'
                     {
                         match self.heredoc() {
-                            Some(s) => s,
+                            Some(s) => {
+                                self.recalc_column();
+                                s
+                            }
                             None => continue,
                         }
                     } else {
@@ -165,12 +187,14 @@ impl Lexer {
             tokens.push(Token {
                 kind,
                 line: self.line,
+                column: tok_col,
             });
         }
 
         tokens.push(Token {
             kind: TokenKind::Eof,
             line: self.line,
+            column: self.current_column,
         });
 
         tokens
@@ -181,12 +205,14 @@ impl Lexer {
             return false;
         }
         self.current += 1;
+        self.current_column += 1;
         true
     }
 
     fn advance(&mut self) -> char {
         let c = self.source[self.current];
         self.current += 1;
+        self.current_column += 1;
         c
     }
 
@@ -204,6 +230,7 @@ impl Lexer {
                 parts.push((current.clone(), false));
                 current.clear();
                 self.current += 2; // skip #{
+                self.current_column += 2;
                 let mut depth = 1usize;
                 while !self.is_at_end() && depth > 0 {
                     let c = self.advance();

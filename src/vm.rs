@@ -440,9 +440,11 @@ pub enum VmError {
 impl fmt::Display for VmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VmError::StackUnderflow => write!(f, "stack underflow"),
+            VmError::StackUnderflow => {
+                write!(f, "internal error: stack underflow (this is a Sapphire bug)")
+            }
             VmError::TypeError { message, line } => {
-                write!(f, "[line {}] type error: {}", line, message)
+                write!(f, "[line {}] error: {}", line, message)
             }
             VmError::Raised(v) => write!(f, "uncaught raise: {}", v),
             VmError::Break(v) => write!(f, "break outside block: {}", v),
@@ -2472,7 +2474,7 @@ impl Vm {
                             }
                             None => {
                                 return Err(VmError::TypeError {
-                                    message: format!("'{}' has no method '{}'", recv, method_name),
+                                    message: format!("{} ({}) has no method '{}'", recv, value_type_name(&recv), method_name),
                                     line,
                                 });
                             }
@@ -2807,7 +2809,7 @@ impl Vm {
                         }
                         other => {
                             return Err(VmError::TypeError {
-                                message: format!("'{}' is not callable", other),
+                                message: format!("expected a function or method, got {}", other),
                                 line,
                             });
                         }
@@ -2965,7 +2967,7 @@ impl Vm {
                             }
                             None => {
                                 return Err(VmError::TypeError {
-                                    message: format!("no method '{}' on {}", method_name, recv),
+                                    message: format!("{} ({}) has no method '{}'", recv, value_type_name(&recv), method_name),
                                     line,
                                 });
                             }
@@ -3250,7 +3252,7 @@ impl Vm {
                         }
                         other => {
                             return Err(VmError::TypeError {
-                                message: format!("'{}' is not callable", other),
+                                message: format!("expected a function or method, got {}", other),
                                 line,
                             });
                         }
