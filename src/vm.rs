@@ -111,6 +111,7 @@ pub enum HeapObject {
         superclass: Option<GcRef>,
         class_ref: Option<GcRef>,
         methods: HashMap<String, SapphireMethod>,
+        class_methods: HashMap<String, SapphireMethod>,
     },
 }
 
@@ -121,10 +122,16 @@ impl Trace for HeapObject {
             HeapObject::Map(m) => m.values().for_each(|val| collect_refs(val, out)),
             HeapObject::Set(v) => v.iter().for_each(|val| collect_refs(val, out)),
             HeapObject::Fields(f) => f.values().for_each(|val| collect_refs(val, out)),
-            HeapObject::ClassObject { superclass, class_ref, methods, .. } => {
+            HeapObject::ClassObject {
+                superclass,
+                class_ref,
+                methods,
+                class_methods,
+                ..
+            } => {
                 if let Some(r) = superclass { out.push(*r); }
                 if let Some(r) = class_ref  { out.push(*r); }
-                for m in methods.values() {
+                for m in methods.values().chain(class_methods.values()) {
                     if let SapphireMethod::Bytecode(vm_method) = m {
                         for uv in &vm_method.upvalues {
                             if let UpvalueState::Closed(v) = &*uv.0.borrow() {
@@ -221,6 +228,30 @@ pub fn define_native_method(
             );
         }
         _ => panic!("define_native_method: GcRef is not a ClassObject"),
+    }
+}
+
+/// Insert a native class method into a `ClassObject`'s class-method table.
+pub fn define_native_class_method(
+    heap: &mut GcHeap<HeapObject>,
+    class_ref: GcRef,
+    name: &str,
+    arity: impl Into<NativeArity>,
+    func: NativeFn,
+) {
+    let NativeArity { min, max } = arity.into();
+    match heap.get_mut(class_ref) {
+        HeapObject::ClassObject { class_methods, .. } => {
+            class_methods.insert(
+                name.to_string(),
+                SapphireMethod::Native {
+                    min_arity: min,
+                    max_arity: max,
+                    func,
+                },
+            );
+        }
+        _ => panic!("define_native_class_method: GcRef is not a ClassObject"),
     }
 }
 
@@ -506,6 +537,7 @@ pub struct CoreClasses {
     pub range_cls: Option<GcRef>,
     pub list_cls: Option<GcRef>,
     pub map_cls: Option<GcRef>,
+    pub env_cls: Option<GcRef>,
 }
 
 /// Per-class metadata stored by DefClass.
@@ -1009,6 +1041,7 @@ impl Vm {
             self.core_classes.range_cls,
             self.core_classes.list_cls,
             self.core_classes.map_cls,
+            self.core_classes.env_cls,
         ]
         .into_iter()
         .flatten()
@@ -1034,60 +1067,77 @@ impl Vm {
             superclass: None,
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
         let class_cls = self.heap.alloc(HeapObject::ClassObject {
             name: "Class".into(),
             superclass: Some(object),
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
         let set_cls = self.heap.alloc(HeapObject::ClassObject {
             name: "Set".into(),
             superclass: Some(object),
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
         let nil_cls = self.heap.alloc(HeapObject::ClassObject {
             name: "Nil".into(),
             superclass: Some(object),
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
         let int_cls = self.heap.alloc(HeapObject::ClassObject {
             name: "Int".into(),
             superclass: Some(object),
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
         let float_cls = self.heap.alloc(HeapObject::ClassObject {
             name: "Float".into(),
             superclass: Some(object),
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
         let string_cls = self.heap.alloc(HeapObject::ClassObject {
             name: "String".into(),
             superclass: Some(object),
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
         let range_cls = self.heap.alloc(HeapObject::ClassObject {
             name: "Range".into(),
             superclass: Some(object),
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
         let list_cls = self.heap.alloc(HeapObject::ClassObject {
             name: "List".into(),
             superclass: Some(object),
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
         let map_cls = self.heap.alloc(HeapObject::ClassObject {
             name: "Map".into(),
             superclass: Some(object),
             class_ref: None,
             methods: HashMap::new(),
+            class_methods: HashMap::new(),
+        });
+        let env_cls = self.heap.alloc(HeapObject::ClassObject {
+            name: "Env".into(),
+            superclass: Some(object),
+            class_ref: None,
+            methods: HashMap::new(),
+            class_methods: HashMap::new(),
         });
 
         // Two-phase fixup: set class_ref now that class_cls is known.
@@ -1102,6 +1152,7 @@ impl Vm {
             range_cls,
             list_cls,
             map_cls,
+            env_cls,
         ] {
             if let HeapObject::ClassObject { class_ref, .. } = self.heap.get_mut(r) {
                 *class_ref = Some(class_cls);
@@ -1119,8 +1170,10 @@ impl Vm {
             range_cls: Some(range_cls),
             list_cls: Some(list_cls),
             map_cls: Some(map_cls),
+            env_cls: Some(env_cls),
         };
         crate::native_set::register_methods(&mut self.heap, set_cls);
+        crate::native_env::register_class_methods(&mut self.heap, env_cls);
         crate::native_nil::register_methods(&mut self.heap, nil_cls);
         crate::native_int::register_methods(&mut self.heap, int_cls);
         crate::native_float::register_methods(&mut self.heap, float_cls);
@@ -1162,6 +1215,31 @@ impl Vm {
         }
     }
 
+    /// Walk the `ClassObject` superclass chain and return the first **class method**
+    /// named `name`, if any.
+    fn lookup_class_object_class_method(
+        &self,
+        mut start: GcRef,
+        name: &str,
+    ) -> Option<SapphireMethod> {
+        loop {
+            let superclass = match self.heap.get(start) {
+                HeapObject::ClassObject {
+                    class_methods,
+                    superclass,
+                    ..
+                } => {
+                    if let Some(m) = class_methods.get(name) {
+                        return Some(m.clone());
+                    }
+                    *superclass
+                }
+                _ => return None,
+            };
+            start = superclass?;
+        }
+    }
+
     /// Return the `GcRef` for the bootstrapped ClassObject with the given name,
     /// if one exists.
     fn find_core_class_obj(&self, name: &str) -> Option<GcRef> {
@@ -1176,6 +1254,7 @@ impl Vm {
             "Range" => self.core_classes.range_cls,
             "List" => self.core_classes.list_cls,
             "Map" => self.core_classes.map_cls,
+            "Env" => self.core_classes.env_cls,
             _ => None,
         }
     }
@@ -2137,6 +2216,89 @@ impl Vm {
                                 rescues: vec![],
                                 class_name: Some(method.defined_in),
                             });
+                        } else if let Some(core_ref) = self.find_core_class_obj(name.as_str())
+                            && let Some(m) =
+                                self.lookup_class_object_class_method(core_ref, &method_name)
+                        {
+                            let recv = self.stack[recv_slot].clone();
+                            let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
+                            match m {
+                                SapphireMethod::Native {
+                                    min_arity,
+                                    max_arity,
+                                    func,
+                                } => {
+                                    if arg_count < min_arity
+                                        || (max_arity != NativeArity::VARIADIC_MAX
+                                            && arg_count > max_arity)
+                                    {
+                                        let expected = if min_arity == max_arity {
+                                            format!("{}", min_arity)
+                                        } else if max_arity == NativeArity::VARIADIC_MAX {
+                                            format!("at least {}", min_arity)
+                                        } else {
+                                            format!("{} to {}", min_arity, max_arity)
+                                        };
+                                        return Err(VmError::TypeError {
+                                            message: format!(
+                                                "class method '{}' expects {} arg(s), got {}",
+                                                method_name, expected, arg_count
+                                            ),
+                                            line,
+                                        });
+                                    }
+                                    match func(&mut self.heap, &recv, &args, line) {
+                                        Ok(val) => {
+                                            self.stack.truncate(recv_slot);
+                                            self.stack.push(val);
+                                        }
+                                        Err(VmError::Raised(val)) => {
+                                            self.stack.truncate(recv_slot);
+                                            self.raise_value(val)?;
+                                            continue;
+                                        }
+                                        Err(e) => return Err(e),
+                                    }
+                                }
+                                SapphireMethod::Bytecode(m) => {
+                                    if m.private {
+                                        let caller_class = self
+                                            .frames
+                                            .last()
+                                            .and_then(|f| f.class_name.as_deref())
+                                            .unwrap_or("");
+                                        if caller_class != m.defined_in {
+                                            return Err(VmError::TypeError {
+                                                message: format!(
+                                                    "private class method '{}' called from outside class",
+                                                    method_name
+                                                ),
+                                                line,
+                                            });
+                                        }
+                                    }
+                                    if m.function.arity != arg_count {
+                                        return Err(VmError::TypeError {
+                                            message: format!(
+                                                "class method '{}' expects {} arg(s), got {}",
+                                                method_name, m.function.arity, arg_count
+                                            ),
+                                            line,
+                                        });
+                                    }
+                                    self.frames.push(CallFrame {
+                                        function: m.function,
+                                        upvalues: m.upvalues,
+                                        ip: 0,
+                                        base: recv_slot,
+                                        block: None,
+                                        is_block_caller: false,
+                                        is_native_block: false,
+                                        rescues: vec![],
+                                        class_name: Some(m.defined_in),
+                                    });
+                                }
+                            }
                         } else if arg_count == 0 && let Some(val) = namespace.get(&method_name) {
                             // Namespace lookup: constants and nested classes (e.g. Math.PI, Outer.Inner).
                             self.stack.truncate(recv_slot);
@@ -2158,25 +2320,6 @@ impl Vm {
                                     continue;
                                 }
                                 Err(e) => return Err(e),
-                            };
-                            self.stack.truncate(recv_slot);
-                            self.stack.push(result);
-                        } else if name == "Env" {
-                            let result = if method_name == "all" && arg_count == 0 {
-                                let vars: std::collections::HashMap<String, VmValue> =
-                                    std::env::vars().map(|(k, v)| (k, VmValue::Str(v))).collect();
-                                self.alloc_map(vars)
-                            } else {
-                                let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                                match crate::native_env::dispatch_env_class_method(&method_name, &args, line) {
-                                    Ok(val) => val,
-                                    Err(VmError::Raised(val)) => {
-                                        self.stack.truncate(recv_slot);
-                                        self.raise_value(val)?;
-                                        continue;
-                                    }
-                                    Err(e) => return Err(e),
-                                }
                             };
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
