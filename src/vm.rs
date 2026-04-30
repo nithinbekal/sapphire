@@ -538,6 +538,7 @@ pub struct CoreClasses {
     pub list_cls: Option<GcRef>,
     pub map_cls: Option<GcRef>,
     pub env_cls: Option<GcRef>,
+    pub file_cls: Option<GcRef>,
 }
 
 /// Per-class metadata stored by DefClass.
@@ -1042,6 +1043,7 @@ impl Vm {
             self.core_classes.list_cls,
             self.core_classes.map_cls,
             self.core_classes.env_cls,
+            self.core_classes.file_cls,
         ]
         .into_iter()
         .flatten()
@@ -1139,6 +1141,13 @@ impl Vm {
             methods: HashMap::new(),
             class_methods: HashMap::new(),
         });
+        let file_cls = self.heap.alloc(HeapObject::ClassObject {
+            name: "File".into(),
+            superclass: Some(object),
+            class_ref: None,
+            methods: HashMap::new(),
+            class_methods: HashMap::new(),
+        });
 
         // Two-phase fixup: set class_ref now that class_cls is known.
         for r in [
@@ -1153,6 +1162,7 @@ impl Vm {
             list_cls,
             map_cls,
             env_cls,
+            file_cls,
         ] {
             if let HeapObject::ClassObject { class_ref, .. } = self.heap.get_mut(r) {
                 *class_ref = Some(class_cls);
@@ -1171,9 +1181,11 @@ impl Vm {
             list_cls: Some(list_cls),
             map_cls: Some(map_cls),
             env_cls: Some(env_cls),
+            file_cls: Some(file_cls),
         };
         crate::native_set::register_methods(&mut self.heap, set_cls);
         crate::native_env::register_class_methods(&mut self.heap, env_cls);
+        crate::native_file::register_class_methods(&mut self.heap, file_cls);
         crate::native_nil::register_methods(&mut self.heap, nil_cls);
         crate::native_int::register_methods(&mut self.heap, int_cls);
         crate::native_float::register_methods(&mut self.heap, float_cls);
@@ -1255,6 +1267,7 @@ impl Vm {
             "List" => self.core_classes.list_cls,
             "Map" => self.core_classes.map_cls,
             "Env" => self.core_classes.env_cls,
+            "File" => self.core_classes.file_cls,
             _ => None,
         }
     }
@@ -2306,21 +2319,6 @@ impl Vm {
                         } else if name == "Math" {
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
                             let result = crate::native_math::dispatch_math_class_method(&method_name, &args, line)?;
-                            self.stack.truncate(recv_slot);
-                            self.stack.push(result);
-                        } else if name == "File" {
-                            // Native File class method dispatch.
-                            let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                            let result = match crate::native_file::dispatch_file_class_method(&method_name, &args, line)
-                            {
-                                Ok(val) => val,
-                                Err(VmError::Raised(val)) => {
-                                    self.stack.truncate(recv_slot);
-                                    self.raise_value(val)?;
-                                    continue;
-                                }
-                                Err(e) => return Err(e),
-                            };
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
                         } else if name == "Process" {
