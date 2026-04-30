@@ -7,18 +7,27 @@ fn emit_error(message: &str, line: usize, column: usize, source: &str, path: &st
     if line == 0 {
         return;
     }
-    if column > 0 {
-        eprintln!(" --> {}:{}:{}", path, line, column);
+    // If the error is past the end of the file (e.g. unexpected EOF), fall back
+    // to the last line and point past its end so the caret is still meaningful.
+    let total_lines = source.lines().count();
+    let (show_line, show_col) = if line <= total_lines {
+        (line, column)
     } else {
-        eprintln!(" --> {}:{}", path, line);
+        let last_len = source.lines().last().map(|l| l.len()).unwrap_or(0);
+        (total_lines.max(1), last_len + 1)
+    };
+    if show_col > 0 {
+        eprintln!(" --> {}:{}:{}", path, show_line, show_col);
+    } else {
+        eprintln!(" --> {}:{}", path, show_line);
     }
-    if let Some(src_line) = source.lines().nth(line - 1) {
-        let ln = line.to_string();
+    if let Some(src_line) = source.lines().nth(show_line - 1) {
+        let ln = show_line.to_string();
         let pad = " ".repeat(ln.len());
         eprintln!("{} |", pad);
         eprintln!("{} | {}", ln, src_line);
-        if column > 0 {
-            eprintln!("{} | {}^", pad, " ".repeat(column.saturating_sub(1)));
+        if show_col > 0 {
+            eprintln!("{} | {}^", pad, " ".repeat(show_col.saturating_sub(1)));
         } else {
             eprintln!("{} |", pad);
         }
