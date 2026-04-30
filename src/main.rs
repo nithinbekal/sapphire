@@ -256,7 +256,10 @@ fn is_input_complete(source: &str) -> bool {
 
 #[cfg(feature = "cli")]
 fn run_repl() {
-    println!("Sapphire {} — type quit or exit, or press Ctrl+D to quit", env!("CARGO_PKG_VERSION"));
+    println!(
+        "Sapphire {} — type quit, or press Ctrl+D to quit",
+        env!("CARGO_PKG_VERSION")
+    );
 
     let mut vm = vm::Vm::new_repl();
     if let Err(e) = vm.load_stdlib() {
@@ -299,7 +302,7 @@ fn run_repl() {
         rl.add_history_entry(&source).ok();
 
         let trimmed = source.trim();
-        if trimmed == "quit" || trimmed == "exit" {
+        if trimmed == "quit" {
             break;
         }
         let tokens = lexer::Lexer::new(trimmed).scan_tokens();
