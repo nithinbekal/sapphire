@@ -526,7 +526,7 @@ fn super_method_call() {
   def speak() { \"animal\" }
 }
 class Dog < Animal {
-  def speak() { \"dog:\" + super.speak() }
+  def speak() { \"dog:\" + super() }
 }
 Dog.new().speak()";
     assert_eq!(eval(src), VmValue::Str("dog:animal".into()));
@@ -538,7 +538,7 @@ fn super_with_args() {
   def add(x, y) { x + y }
 }
 class Child < Base {
-  def add(x, y) { super.add(x, y) + 1 }
+  def add(x, y) { super(x, y) + 1 }
 }
 Child.new().add(2, 3)";
     assert_eq!(eval(src), VmValue::Int(6));
@@ -1305,7 +1305,7 @@ fn super_with_field_override() {
   def describe() { self.name }
 }
 class Dog < Animal { attr breed
-  def describe() { super.describe() + " (" + self.breed + ")" }
+  def describe() { super() + " (" + self.breed + ")" }
 }
 d = Dog.new(name: "Rex", breed: "Lab")
 d.describe()"#;
@@ -1317,9 +1317,22 @@ fn super_still_works_with_implicit_object() {
     let src = r#"class Animal { attr name
   def speak() { "..." }
 }
-class Dog < Animal { def speak() { super.speak() } }
+class Dog < Animal { def speak() { super } }
 Dog.new(name: "Rex").speak()"#;
     assert_eq!(eval(src), VmValue::Str("...".into()));
+}
+
+#[test]
+fn super_bare_in_nested_closure() {
+    let src = r#"class Animal { def speak() { "a" } }
+class Dog < Animal {
+  def speak() {
+    f = def() { super }
+    f()
+  }
+}
+Dog.new().speak()"#;
+    assert_eq!(eval(src), VmValue::Str("a".into()));
 }
 
 #[test]

@@ -2785,16 +2785,22 @@ impl Vm {
                             Constant::Str(s) => s.clone(),
                             _ => panic!("SuperInvoke: expected Str constant"),
                         };
-                    let current_class =
-                        self.frames
-                            .last()
-                            .unwrap()
-                            .class_name
-                            .clone()
-                            .ok_or_else(|| VmError::TypeError {
-                                message: "super used outside of a method".into(),
-                                line,
-                            })?;
+                    let last = self.frames.len() - 1;
+                    let current_class = if let Some(ref cn) = self.frames[last].class_name {
+                        cn.clone()
+                    } else {
+                        let mut resolved: Option<String> = None;
+                        for j in (0..last).rev() {
+                            if let Some(ref cn) = self.frames[j].class_name {
+                                resolved = Some(cn.clone());
+                                break;
+                            }
+                        }
+                        resolved.ok_or_else(|| VmError::TypeError {
+                            message: "super used outside of a method".into(),
+                            line,
+                        })?
+                    };
                     let super_name = match self.classes.get(&current_class) {
                         Some(ClassEntry {
                             superclass: Some(s),
