@@ -503,6 +503,8 @@ impl Lexer {
             "break" => TokenKind::Break,
             "next" => TokenKind::Next,
             "class" => TokenKind::Class,
+            "module" => TokenKind::Module,
+            "include" => TokenKind::Include,
             "attr" => TokenKind::Attr,
             "self" => TokenKind::SelfKw,
             "super" => TokenKind::SuperKw,

@@ -375,6 +375,9 @@ impl Parser {
         if self.check(&TokenKind::Class) {
             return self.class_def();
         }
+        if self.check(&TokenKind::Module) {
+            return self.module_def();
+        }
         if self.check(&TokenKind::Def) {
             return self.function_def();
         }
@@ -453,6 +456,184 @@ impl Parser {
         self.logical()
     }
 
+    /// Parse `include A`, `include A.B`, … — adds dotted constant paths as strings.
+    fn parse_include_spec(&mut self, includes: &mut Vec<String>) -> Result<(), SapphireError> {
+        let first = match self.peek().kind.clone() {
+            TokenKind::Identifier(n) => {
+                self.advance();
+                n
+            }
+            _ => {
+                return Err(SapphireError::ParseError {
+                    message: "expected mixin name after 'include'".into(),
+                    line: self.peek().line,
+                    column: self.peek().column,
+                });
+            }
+        };
+        let mut path = first;
+        while self.check(&TokenKind::Dot) {
+            self.advance();
+            let segment = match self.peek().kind.clone() {
+                TokenKind::Identifier(n) => {
+                    self.advance();
+                    n
+                }
+                _ => {
+                    return Err(SapphireError::ParseError {
+                        message: "expected identifier after '.' in include".into(),
+                        line: self.peek().line,
+                        column: self.peek().column,
+                    });
+                }
+            };
+            path.push('.');
+            path.push_str(&segment);
+        }
+        includes.push(path);
+        Ok(())
+    }
+
+    fn module_def(&mut self) -> Result<Expr, SapphireError> {
+        self.advance(); // consume 'module'
+        let name = match self.peek().kind.clone() {
+            TokenKind::Identifier(n) => {
+                self.advance();
+                n
+            }
+            _ => {
+                return Err(SapphireError::ParseError {
+                    message: "expected module name".into(),
+                    line: self.peek().line,
+                    column: self.peek().column,
+                });
+            }
+        };
+        let type_params = self.parse_type_param_names()?;
+        if !self.check(&TokenKind::LeftBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '{' after module name".into(),
+                line: self.peek().line,
+                column: self.peek().column,
+            });
+        }
+        self.advance(); // consume '{'
+        let fields = Vec::new();
+        let mut methods = Vec::new();
+        let mut nested = Vec::new();
+        let mut constants = Vec::new();
+        let mut includes = Vec::new();
+        loop {
+            self.skip_terminators();
+            if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+                break;
+            }
+            if self.check(&TokenKind::Include) {
+                self.advance();
+                self.parse_include_spec(&mut includes)?;
+            } else if self.check(&TokenKind::Class) {
+                nested.push(self.class_def()?);
+            } else if self.check(&TokenKind::Module) {
+                nested.push(self.module_def()?);
+            } else if let TokenKind::Identifier(n) = self.peek().kind.clone() {
+                let next_is_eq = self
+                    .tokens
+                    .get(self.current + 1)
+                    .map(|t| t.kind == TokenKind::Eq)
+                    .unwrap_or(false);
+                if n.chars()
+                    .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+                    && next_is_eq
+                {
+                    self.advance();
+                    self.advance(); // '='
+                    let val = self.logical()?;
+                    constants.push((n, Box::new(val)));
+                } else {
+                    return Err(SapphireError::ParseError {
+                        message:
+                            "expected 'class', 'def', 'defp', 'include', 'module', or constant in module body"
+                                .into(),
+                        line: self.peek().line,
+                        column: self.peek().column,
+                    });
+                }
+            } else if self.check(&TokenKind::Attr) {
+                return Err(SapphireError::ParseError {
+                    message: "'attr' is not allowed in a module body".into(),
+                    line: self.peek().line,
+                    column: self.peek().column,
+                });
+            } else if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
+                let private = self.check(&TokenKind::Defp);
+                methods.push(self.method_def(private)?);
+            } else if self.check(&TokenKind::SelfKw) {
+                self.advance();
+                if !self.check(&TokenKind::LeftBrace) {
+                    return Err(SapphireError::ParseError {
+                        message: "expected '{' after 'self' in module body".into(),
+                        line: self.peek().line,
+                        column: self.peek().column,
+                    });
+                }
+                self.advance();
+                loop {
+                    self.skip_terminators();
+                    if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+                        break;
+                    }
+                    if self.check(&TokenKind::Def) || self.check(&TokenKind::Defp) {
+                        let private = self.check(&TokenKind::Defp);
+                        let mut m = self.method_def(private)?;
+                        m.class_method = true;
+                        methods.push(m);
+                    } else {
+                        return Err(SapphireError::ParseError {
+                            message: "expected 'def' or 'defp' inside 'self' block".into(),
+                            line: self.peek().line,
+                            column: self.peek().column,
+                        });
+                    }
+                }
+                if !self.check(&TokenKind::RightBrace) {
+                    return Err(SapphireError::ParseError {
+                        message: "expected '}' to close 'self' block".into(),
+                        line: self.peek().line,
+                        column: self.peek().column,
+                    });
+                }
+                self.advance();
+            } else {
+                return Err(SapphireError::ParseError {
+                    message:
+                        "expected 'class', 'def', 'defp', 'include', 'module', or 'self' in module body"
+                            .into(),
+                    line: self.peek().line,
+                    column: self.peek().column,
+                });
+            }
+        }
+        if !self.check(&TokenKind::RightBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '}'".into(),
+                line: self.peek().line,
+                column: self.peek().column,
+            });
+        }
+        self.advance();
+        Ok(Expr::Class {
+            name,
+            type_params,
+            superclass: None,
+            is_module: true,
+            includes,
+            fields,
+            methods,
+            nested,
+            constants,
+        })
+    }
+
     fn class_def(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'class'
         let name = match self.peek().kind.clone() {
@@ -519,13 +700,19 @@ impl Parser {
         let mut methods = Vec::new();
         let mut nested = Vec::new();
         let mut constants = Vec::new();
+        let mut includes = Vec::new();
         loop {
             self.skip_terminators();
             if self.check(&TokenKind::RightBrace) || self.is_at_end() {
                 break;
             }
-            if self.check(&TokenKind::Class) {
+            if self.check(&TokenKind::Include) {
+                self.advance();
+                self.parse_include_spec(&mut includes)?;
+            } else if self.check(&TokenKind::Class) {
                 nested.push(self.class_def()?);
+            } else if self.check(&TokenKind::Module) {
+                nested.push(self.module_def()?);
             } else if let TokenKind::Identifier(n) = self.peek().kind.clone() {
                 // ALL_CAPS identifier followed by `=` is a class constant: `PI = 3.14`
                 let next_is_eq = self
@@ -543,7 +730,7 @@ impl Parser {
                     constants.push((n, Box::new(val)));
                 } else {
                     return Err(SapphireError::ParseError {
-                        message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body"
+                        message: "expected 'attr', 'class', 'def', 'defp', 'include', 'module', or 'self' in class body"
                             .into(),
                         line: self.peek().line, column: self.peek().column,
                     });
@@ -612,7 +799,7 @@ impl Parser {
                 self.advance(); // consume '}'
             } else {
                 return Err(SapphireError::ParseError {
-                    message: "expected 'attr', 'class', 'def', 'defp', or 'self' in class body"
+                    message: "expected 'attr', 'class', 'def', 'defp', 'include', 'module', or 'self' in class body"
                         .into(),
                     line: self.peek().line, column: self.peek().column,
                 });
@@ -629,6 +816,8 @@ impl Parser {
             name,
             type_params,
             superclass,
+            is_module: false,
+            includes,
             fields,
             methods,
             nested,

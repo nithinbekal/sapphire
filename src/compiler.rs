@@ -834,6 +834,8 @@ impl Compiler {
                 name,
                 type_params,
                 superclass,
+                includes,
+                is_module,
                 fields,
                 methods,
                 nested,
@@ -843,6 +845,8 @@ impl Compiler {
                     name,
                     type_params,
                     superclass.as_deref(),
+                    includes,
+                    *is_module,
                     fields,
                     methods,
                     nested,
@@ -1336,6 +1340,8 @@ impl Compiler {
         name: &str,
         class_type_params: &[String],
         superclass: Option<&Expr>,
+        includes: &[String],
+        is_module: bool,
         fields: &[crate::ast::FieldDef],
         methods: &[MethodDef],
         nested: &[Expr],
@@ -1347,6 +1353,8 @@ impl Compiler {
             name,
             class_type_params,
             superclass,
+            includes,
+            is_module,
             fields,
             methods,
             nested,
@@ -1363,6 +1371,8 @@ impl Compiler {
         name: &str,
         class_type_params: &[String],
         superclass: Option<&Expr>,
+        includes: &[String],
+        is_module: bool,
         fields: &[crate::ast::FieldDef],
         methods: &[MethodDef],
         nested: &[Expr],
@@ -1451,6 +1461,8 @@ impl Compiler {
                     name: nname,
                     type_params: ntparams,
                     superclass: nsuper,
+                    includes: nincludes,
+                    is_module: nmodule,
                     fields: nfields,
                     methods: nmethods,
                     nested: nnested,
@@ -1461,6 +1473,8 @@ impl Compiler {
                         nname,
                         ntparams,
                         nsuper.as_deref(),
+                        nincludes,
+                        *nmodule,
                         nfields,
                         nmethods,
                         nnested,
@@ -1481,6 +1495,8 @@ impl Compiler {
             nested_class_names.push(cname.clone());
             self.expr(cexpr)?;
         }
+
+        let resolved_includes = resolve_include_names(&self.enclosing_class_stack, includes);
 
         // Resolve superclass: static (simple Variable) vs dynamic (any other expr).
         let (static_super, superclass_dynamic) = match superclass {
@@ -1516,6 +1532,8 @@ impl Compiler {
             name: name.to_string(),
             superclass: static_super.map(|s| s.to_string()),
             superclass_dynamic,
+            is_module,
+            includes: resolved_includes,
             field_names,
             field_defaults,
             method_names,
@@ -1564,6 +1582,31 @@ pub fn compile(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
 
 pub fn compile_repl(exprs: &[Expr]) -> Result<Rc<Function>, CompileError> {
     Compiler::compile_repl(exprs)
+}
+
+fn resolve_include_names(enclosing_stack: &[String], includes: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(includes.len());
+    for inc in includes {
+        let resolved = if inc.contains('.') {
+            let mut parts: Vec<&str> = inc.split('.').collect();
+            let Some(last) = parts.pop() else {
+                continue;
+            };
+            let mut keys: Vec<String> = Vec::new();
+            for ec in enclosing_stack {
+                keys.push(ec.clone());
+            }
+            for p in parts {
+                keys.push(p.to_string());
+            }
+            keys.push(last.to_string());
+            keys.join(".")
+        } else {
+            inc.clone()
+        };
+        out.push(resolved);
+    }
+    out
 }
 
 /// Replace any Named type that is a type variable with `Any` so the compiler

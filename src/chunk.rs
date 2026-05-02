@@ -236,6 +236,10 @@ pub enum Constant {
         superclass: Option<String>,
         /// When true, the superclass value is on the stack (TOS) and must be popped by DefClass.
         superclass_dynamic: bool,
+        /// `module` definitions cannot be instantiated.
+        is_module: bool,
+        /// Included mixin names in source order (resolved names, may be dotted).
+        includes: Vec<String>,
         field_names: Vec<String>,
         field_defaults: Vec<Option<Constant>>,
         method_names: Vec<String>,
@@ -269,6 +273,11 @@ impl std::fmt::Display for Constant {
                 superclass_dynamic: true,
                 ..
             } => write!(f, "<class {} extends (dynamic)>", name),
+            Constant::ClassDesc {
+                name,
+                is_module: true,
+                ..
+            } => write!(f, "<module {}>", name),
             Constant::ClassDesc { name, .. } => write!(f, "<class {}>", name),
             Constant::LexicalClassScope { .. } => write!(f, "<lexical class scope>"),
         }
