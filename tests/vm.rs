@@ -1,4 +1,5 @@
 use sapphire::compiler::compile;
+use sapphire::error::SapphireError;
 use sapphire::lexer::Lexer;
 use sapphire::parser::Parser;
 use sapphire::vm::{Vm, VmError, VmValue};
@@ -1333,6 +1334,22 @@ class Dog < Animal {
 }
 Dog.new().speak()"#;
     assert_eq!(eval(src), VmValue::Str("a".into()));
+}
+
+#[test]
+fn super_dot_method_is_rejected() {
+    let src = "class A { def m() { 1 } }\nclass B < A { def m() { super.m() } }";
+    let tokens = Lexer::new(src).scan_tokens();
+    let err = Parser::new(tokens).parse().expect_err("expected parse error");
+    match err {
+        SapphireError::ParseError { message, .. } => {
+            assert!(
+                message.contains("super"),
+                "unexpected message: {message}"
+            );
+        }
+        other => panic!("expected ParseError, got {:?}", other),
+    }
 }
 
 #[test]

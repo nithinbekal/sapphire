@@ -405,7 +405,7 @@ d.greet()   # I am Rex  (inherited from Animal)
 c.speak()   # Meow!
 ```
 
-Use `super.method_name(args)` to call the parent's version of a method:
+Use bare `super` or `super(...)` to call the superclass method with the same name (like Ruby):
 
 ```ruby
 class Animal {
@@ -420,7 +420,7 @@ class Dog < Animal {
   attr breed: Str
 
   def describe() -> Str {
-    super.describe() + " (#{breed})"
+    super() + " (#{breed})"
   }
 }
 

@@ -817,12 +817,11 @@ impl Compiler {
             }
 
             Expr::Super {
-                method,
                 args,
                 forward_args,
                 block: _,
             } => {
-                if method.is_none() && *forward_args && !args.is_empty() {
+                if *forward_args && !args.is_empty() {
                     return Err(self.error(
                         "internal: bare super with non-empty args".to_string(),
                     ));
@@ -841,18 +840,13 @@ impl Compiler {
                     }
                     args.len()
                 };
-                let name_idx = if let Some(m) = method {
-                    self.state_mut()
-                        .chunk
-                        .add_constant(Constant::Str(m.clone()))
-                } else {
-                    let method_name = self.state().super_method_name.clone().ok_or_else(|| {
-                        self.error("`super` without a method name is only valid inside a class method".to_string())
-                    })?;
-                    self.state_mut()
-                        .chunk
-                        .add_constant(Constant::Str(method_name))
-                };
+                let method_name = self.state().super_method_name.clone().ok_or_else(|| {
+                    self.error("`super` is only valid inside a class method".to_string())
+                })?;
+                let name_idx = self
+                    .state_mut()
+                    .chunk
+                    .add_constant(Constant::Str(method_name));
                 self.emit(OpCode::SuperInvoke(name_idx, arg_count));
                 Ok(())
             }
