@@ -240,6 +240,10 @@ pub enum Constant {
         superclass_dynamic: bool,
         /// `module` definitions cannot be instantiated.
         is_module: bool,
+        /// When true, `abstract class` — cannot be instantiated.
+        is_abstract: bool,
+        /// Instance method names declared abstract (no bytecode closure).
+        abstract_method_names: Vec<String>,
         /// Included mixin names in source order (resolved names, may be dotted).
         includes: Vec<String>,
         field_names: Vec<String>,
@@ -280,6 +284,11 @@ impl std::fmt::Display for Constant {
                 is_module: true,
                 ..
             } => write!(f, "<module {}>", name),
+            Constant::ClassDesc {
+                name,
+                is_abstract: true,
+                ..
+            } => write!(f, "<abstract class {}>", name),
             Constant::ClassDesc { name, .. } => write!(f, "<class {}>", name),
             Constant::LexicalClassScope { .. } => write!(f, "<lexical class scope>"),
         }

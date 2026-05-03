@@ -701,3 +701,19 @@ fn class_constant_lexical_access_in_method_infers_type() {
     );
     assert_method_returns!(types, "Math", "approx_pi", Float);
 }
+
+#[test]
+fn abstract_def_in_non_abstract_class_errors() {
+    assert_typecheck_error!(
+        "class C {\n  abstract def m() -> Int\n}",
+        "abstract method 'm' is only allowed in an abstract class",
+    );
+}
+
+#[test]
+fn concrete_class_must_implement_inherited_abstract() {
+    assert_typecheck_error!(
+        "abstract class A {\n  abstract def m() -> Int\n}\nclass B < A {\n}",
+        "must implement abstract method: m",
+    );
+}
