@@ -36,37 +36,25 @@ fn emit_error(message: &str, line: usize, column: usize, source: &str, path: &st
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    match args.get(1).map(|s| s.as_str()) {
-        Some("run") if args.len() == 3 => run_file(&args[2]),
-        Some("typecheck") if args.len() == 3 => typecheck_file(&args[2]),
-        Some("test") => {
-            let roots: Vec<&str> = if args.len() <= 2 {
-                vec!["."]
-            } else {
-                args[2..].iter().map(|s| s.as_str()).collect()
-            };
-            run_tests(&roots);
-        }
+    match args.as_slice() {
+        [_, cmd, path, ..] if cmd == "run" => run_file(path),
+        [_, cmd, path] if cmd == "typecheck" => typecheck_file(path),
+        [_, cmd, path] if cmd == "test" => run_tests(path),
+        [_, cmd] if cmd == "test" => run_tests("."),
         #[cfg(feature = "cli")]
-        Some("console") if args.len() == 2 => run_repl(),
-        Some("version") if args.len() == 2 => println!("sapphire {}", env!("CARGO_PKG_VERSION")),
-        _ => emit_usage_and_exit(&args),
+        [_, cmd] if cmd == "console" => run_repl(),
+        [_, cmd] if cmd == "version" => println!("sapphire {}", env!("CARGO_PKG_VERSION")),
+        _ => {
+            eprintln!("Usage: sapphire <command>\n");
+            eprintln!("Commands:");
+            eprintln!("  run <file.spr>       Run a Sapphire file");
+            eprintln!("  typecheck <file.spr> Type-check a file");
+            eprintln!("  test [path]          Run tests (file or directory)");
+            eprintln!("  console              Start the REPL");
+            eprintln!("  version              Print the version");
+            std::process::exit(1);
+        }
     }
-}
-
-fn emit_usage_and_exit(args: &[String]) -> ! {
-    if args.len() > 1 {
-        eprintln!("Unknown command `{}`", args[1]);
-        eprintln!();
-    }
-    eprintln!("Usage: sapphire <command>\n");
-    eprintln!("Commands:");
-    eprintln!("  run <file.spr>               Run a Sapphire file");
-    eprintln!("  typecheck <file.spr>        Type-check a file");
-    eprintln!("  test [path...]              Run *_test.spr under each path (defaults to cwd)");
-    eprintln!("  console                     Start the REPL");
-    eprintln!("  version                     Print the version");
-    std::process::exit(1);
 }
 
 fn run_file(path: &str) {
@@ -166,29 +154,10 @@ fn report_type_errors(exprs: &[sapphire::ast::Expr], source: &str, path: &str) -
     }
 }
 
-fn collect_all_test_files(roots: &[&str]) -> Vec<std::path::PathBuf> {
-    use std::collections::BTreeSet;
-    let mut set = BTreeSet::new();
-    for root in roots {
-        for f in collect_test_files(root) {
-            set.insert(f);
-        }
-    }
-    set.into_iter().collect()
-}
-
 fn collect_test_files(path: &str) -> Vec<std::path::PathBuf> {
     let p = std::path::Path::new(path);
     if p.is_file() {
-        if p.extension().is_some_and(|e| e == "spr")
-            && p
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.ends_with("_test.spr"))
-        {
-            return vec![p.to_path_buf()];
-        }
-        return Vec::new();
+        return vec![p.to_path_buf()];
     }
     let mut files = Vec::new();
     collect_test_files_recursive(p, &mut files);
@@ -215,13 +184,10 @@ fn collect_test_files_recursive(dir: &std::path::Path, out: &mut Vec<std::path::
     }
 }
 
-fn run_tests(roots: &[&str]) {
-    let test_files = collect_all_test_files(roots);
+fn run_tests(path: &str) {
+    let test_files = collect_test_files(path);
     if test_files.is_empty() {
-        eprintln!(
-            "No test files matching *_test.spr under: {}",
-            roots.join(", ")
-        );
+        eprintln!("No test files found in '{}'", path);
         std::process::exit(1);
     }
 
