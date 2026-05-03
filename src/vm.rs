@@ -2034,10 +2034,10 @@ impl Vm {
                         .map(|e| e.is_module)
                         .unwrap_or(false)
                     {
-                        return Err(VmError::TypeError {
-                            message: format!("cannot instantiate module '{}'", class_name),
-                            line,
-                        });
+                        let msg =
+                            VmValue::Str(format!("cannot instantiate module '{}'", class_name));
+                        self.raise_value(msg)?;
+                        continue;
                     }
                     // Regex.new("pattern") / Regex.new("pattern", ignore_case: true)
                     if class_name == "Regex" {
