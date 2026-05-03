@@ -3,6 +3,7 @@ use sapphire::error::SapphireError;
 use sapphire::lexer::Lexer;
 use sapphire::parser::Parser;
 use sapphire::vm::{Vm, VmError, VmValue};
+use std::path::PathBuf;
 
 fn eval(src: &str) -> VmValue {
     let tokens = Lexer::new(src).scan_tokens();
@@ -543,6 +544,86 @@ class Child < Base {
 }
 Child.new().add(2, 3)";
     assert_eq!(eval(src), VmValue::Int(6));
+}
+
+#[test]
+fn mixin_include_instance_method() {
+    let src = "module Greet {
+  def hi { \"hi\" }
+}
+class Person {
+  include(Greet)
+}
+Person.new.hi";
+    assert_eq!(eval(src), VmValue::Str("hi".into()));
+}
+
+#[test]
+fn mixin_super_traverses_module_then_superclass() {
+    let src = "module M {
+  def greet { \"m:\" + super() }
+}
+class Base {
+  def greet { \"base\" }
+}
+class Child < Base {
+  include(M)
+  def greet { \"c:\" + super() }
+}
+Child.new.greet";
+    assert_eq!(eval(src), VmValue::Str("c:m:base".into()));
+}
+
+#[test]
+fn mixin_is_a_question() {
+    let src = "module Trackable { }
+class C {
+  include(Trackable)
+}
+C.new.is_a?(Trackable)";
+    assert_eq!(eval(src), VmValue::Bool(true));
+}
+
+#[test]
+fn nested_module_include_resolves_lexically() {
+    let src = "class Outer {
+  module Inner {
+    def x { 1 }
+  }
+  class Sub {
+    include(Inner)
+  }
+}
+Outer.Sub.new.x";
+    assert_eq!(eval(src), VmValue::Int(1));
+}
+
+#[test]
+fn module_new_is_error() {
+    let err = eval_err("module M {}\nM.new()");
+    match err {
+        VmError::TypeError { message, .. } => {
+            assert!(message.contains("instantiate module"));
+        }
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+#[test]
+fn import_module_fixture() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .canonicalize()
+        .unwrap();
+    let src = r#"import "./module"
+SampleMod.Widget.new.ping"#;
+    let tokens = Lexer::new(src).scan_tokens();
+    let stmts = Parser::new(tokens).parse().expect("parse error");
+    let func = compile(&stmts).expect("compile error");
+    let mut vm = Vm::new(func, dir);
+    vm.load_stdlib().expect("stdlib");
+    let v = vm.run().expect("vm error").expect("empty stack");
+    assert_eq!(v, VmValue::Str("pong".into()));
 }
 
 #[test]
@@ -1340,13 +1421,12 @@ Dog.new().speak()"#;
 fn super_dot_method_is_rejected() {
     let src = "class A { def m() { 1 } }\nclass B < A { def m() { super.m() } }";
     let tokens = Lexer::new(src).scan_tokens();
-    let err = Parser::new(tokens).parse().expect_err("expected parse error");
+    let err = Parser::new(tokens)
+        .parse()
+        .expect_err("expected parse error");
     match err {
         SapphireError::ParseError { message, .. } => {
-            assert!(
-                message.contains("super"),
-                "unexpected message: {message}"
-            );
+            assert!(message.contains("super"), "unexpected message: {message}");
         }
         other => panic!("expected ParseError, got {:?}", other),
     }
@@ -2144,7 +2224,11 @@ fn union_return_type_wrong_type_error() {
     let err = eval_err("def f() -> Int | String { 3.14 }\nf()");
     match err {
         VmError::TypeError { message, .. } => {
-            assert!(message.contains("expected Int | String"), "msg: {}", message);
+            assert!(
+                message.contains("expected Int | String"),
+                "msg: {}",
+                message
+            );
             assert!(message.contains("got Float"), "msg: {}", message);
         }
         other => panic!("expected TypeError, got {:?}", other),
@@ -2261,7 +2345,11 @@ fn type_alias_param() {
 fn type_alias_runtime_return_type_checked() {
     // Return type is enforced at runtime via the alias
     let err = eval_err("type MyInt = Int\ndef f() -> MyInt { \"oops\" }\nf()");
-    assert!(err.to_string().contains("return type error"), "unexpected error: {}", err);
+    assert!(
+        err.to_string().contains("return type error"),
+        "unexpected error: {}",
+        err
+    );
 }
 
 // ── Generics ───────────────────────────────────────────────────────────────────
@@ -2276,9 +2364,8 @@ fn generic_class_runs() {
 
 #[test]
 fn generic_class_string_value_runs() {
-    let result = eval_with_stdlib(
-        "class Box[T] { attr value: T }\nb = Box.new(value: \"hi\")\nb.value",
-    );
+    let result =
+        eval_with_stdlib("class Box[T] { attr value: T }\nb = Box.new(value: \"hi\")\nb.value");
     assert_eq!(result, VmValue::Str("hi".into()));
 }
 
@@ -2316,7 +2403,10 @@ fn infer_return_type_from_literal_int() {
 
 #[test]
 fn infer_return_type_from_literal_string() {
-    assert_eq!(eval("def greet() { \"hello\" }\ngreet()"), VmValue::Str("hello".into()));
+    assert_eq!(
+        eval("def greet() { \"hello\" }\ngreet()"),
+        VmValue::Str("hello".into())
+    );
 }
 
 #[test]

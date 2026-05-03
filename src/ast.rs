@@ -137,6 +137,10 @@ pub enum Expr {
         type_params: Vec<String>,
         /// Superclass expression: `Name` or `Outer.Inner`.  `None` means inherit from Object.
         superclass: Option<Box<Expr>>,
+        /// When true, this is a `module` (cannot be instantiated; only mixed in).
+        is_module: bool,
+        /// Included mixin names in source order (`include(A)`, `include(B.Mod)`).
+        includes: Vec<String>,
         fields: Vec<FieldDef>,
         methods: Vec<MethodDef>,
         /// Nested class definitions — accessible only as `Outer.Inner`.

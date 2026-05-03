@@ -55,6 +55,8 @@ pub enum TokenKind {
     Break,
     Next,
     Class,
+    Module,
+    Include,
     Attr,
     SelfKw,
     SuperKw,

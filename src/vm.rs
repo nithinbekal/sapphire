@@ -1,8 +1,8 @@
 use crate::chunk::{Constant, Function, OpCode, RuntimeType};
 use crate::gc::{GcHeap, GcRef, Trace};
 use crate::native::{
-    is_falsy, numeric_binop, numeric_cmp, primitive_class_name,
-    value_type_name, vm_value_partial_cmp,
+    is_falsy, numeric_binop, numeric_cmp, primitive_class_name, value_type_name,
+    vm_value_partial_cmp,
 };
 use crate::value::Value;
 use std::cell::RefCell;
@@ -52,12 +52,8 @@ fn runtime_type_matches(value: &VmValue, expected: &RuntimeType) -> bool {
 // ── GC heap objects ───────────────────────────────────────────────────────────
 
 /// Rust function pointer for a native instance method on a `ClassObject`.
-pub type NativeFn = fn(
-    &mut GcHeap<HeapObject>,
-    &VmValue,
-    &[VmValue],
-    u32,
-) -> Result<VmValue, VmError>;
+pub type NativeFn =
+    fn(&mut GcHeap<HeapObject>, &VmValue, &[VmValue], u32) -> Result<VmValue, VmError>;
 
 /// Inclusive arity bounds for a [`SapphireMethod::Native`] (`min`..=`max` arguments).
 #[derive(Clone, Copy)]
@@ -129,8 +125,12 @@ impl Trace for HeapObject {
                 class_methods,
                 ..
             } => {
-                if let Some(r) = superclass { out.push(*r); }
-                if let Some(r) = class_ref  { out.push(*r); }
+                if let Some(r) = superclass {
+                    out.push(*r);
+                }
+                if let Some(r) = class_ref {
+                    out.push(*r);
+                }
                 for m in methods.values().chain(class_methods.values()) {
                     if let SapphireMethod::Bytecode(vm_method) = m {
                         for uv in &vm_method.upvalues {
@@ -148,9 +148,7 @@ impl Trace for HeapObject {
 /// Push all GcRefs contained directly in `val` into `out`.
 fn collect_refs(val: &VmValue, out: &mut Vec<GcRef>) {
     match val {
-        VmValue::List(r) | VmValue::Map(r) | VmValue::Set(r) | VmValue::ClassObj(r) => {
-            out.push(*r)
-        }
+        VmValue::List(r) | VmValue::Map(r) | VmValue::Set(r) | VmValue::ClassObj(r) => out.push(*r),
         VmValue::Instance { fields, .. } => out.push(*fields),
         _ => {}
     }
@@ -365,6 +363,8 @@ pub enum VmValue {
     /// A live instance of a class.
     Instance {
         class_name: String,
+        #[allow(dead_code)]
+        ancestor_chain: Rc<Vec<String>>,
         fields: GcRef,
         methods: Rc<HashMap<String, VmMethod>>,
     },
@@ -472,7 +472,10 @@ impl fmt::Display for VmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VmError::StackUnderflow => {
-                write!(f, "internal error: stack underflow (this is a Sapphire bug)")
+                write!(
+                    f,
+                    "internal error: stack underflow (this is a Sapphire bug)"
+                )
             }
             VmError::TypeError { message, line } => {
                 write!(f, "[line {}] error: {}", line, message)
@@ -551,6 +554,11 @@ pub struct CoreClasses {
 ///   correct merged map for that ancestor level.
 struct ClassEntry {
     superclass: Option<String>,
+    /// Linearized ancestors (class/module name chain) for `super` and `is_a?`.
+    ancestors: Vec<String>,
+    /// Included mixin names in source order (registry keys).
+    includes: Vec<String>,
+    is_module: bool,
     /// The merged (inherited + own) field list with default values.
     fields: Vec<(String, VmValue)>,
     /// Merged (inherited + own) instance methods.
@@ -735,14 +743,90 @@ impl Vm {
         self.heap.alloc(HeapObject::Fields(m))
     }
 
+    /// DFS expansion of a module and its transitive `include`s (dependencies first), deduped.
+    fn mixin_expansion_order(
+        &self,
+        module_name: &str,
+        visiting: &mut HashSet<String>,
+        line: u32,
+    ) -> Result<Vec<String>, VmError> {
+        if visiting.contains(module_name) {
+            return Err(VmError::TypeError {
+                message: format!("cyclic module include involving '{}'", module_name),
+                line,
+            });
+        }
+        let entry = self
+            .classes
+            .get(module_name)
+            .ok_or_else(|| VmError::TypeError {
+                message: format!("module '{}' not found", module_name),
+                line,
+            })?;
+        if !entry.is_module {
+            return Err(VmError::TypeError {
+                message: format!("include expects a module, '{}' is a class", module_name),
+                line,
+            });
+        }
+        visiting.insert(module_name.to_string());
+        let mut seq: Vec<String> = Vec::new();
+        for inc in &entry.includes {
+            let part = self.mixin_expansion_order(inc, visiting, line)?;
+            for m in part {
+                if !seq.contains(&m) {
+                    seq.push(m);
+                }
+            }
+        }
+        seq.push(module_name.to_string());
+        visiting.remove(module_name);
+        Ok(seq)
+    }
+
+    /// Ancestor chain for `super` / `is_a?`: mixin expansion (classes only), then this type, then superclass chain.
+    fn ancestor_list_for_defines(
+        &self,
+        name: &str,
+        effective_super: Option<&str>,
+        includes: &[String],
+        is_module: bool,
+        line: u32,
+    ) -> Result<Vec<String>, VmError> {
+        let mut chain = vec![name.to_string()];
+        if !is_module {
+            // Later `include` wins for method lookup; it sits closer to the class in ancestors.
+            for inc in includes.iter().rev() {
+                let exp = self.mixin_expansion_order(inc, &mut HashSet::new(), line)?;
+                for m in exp {
+                    if !chain.contains(&m) {
+                        chain.push(m);
+                    }
+                }
+            }
+        }
+        if let Some(sname) = effective_super {
+            let parent_chain = self
+                .classes
+                .get(sname)
+                .map(|e| e.ancestors.clone())
+                .ok_or_else(|| VmError::TypeError {
+                    message: format!("superclass '{}' not found", sname),
+                    line,
+                })?;
+            for a in parent_chain {
+                if !chain.contains(&a) {
+                    chain.push(a);
+                }
+            }
+        }
+        Ok(chain)
+    }
+
     /// Materialise a `DtValue` returned by the datetime dispatch module into a
     /// fully-formed `VmValue`.  For `NewInstance` we look up the class entry in
     /// the registry to obtain the compiled method table.
-    fn finalize_dt(
-        &mut self,
-        dt: crate::datetime::DtValue,
-        line: u32,
-    ) -> Result<VmValue, VmError> {
+    fn finalize_dt(&mut self, dt: crate::datetime::DtValue, line: u32) -> Result<VmValue, VmError> {
         match dt {
             crate::datetime::DtValue::Value(v) => Ok(v),
             crate::datetime::DtValue::NewInstance { class_name, fields } => {
@@ -758,8 +842,19 @@ impl Vm {
                         ),
                         line,
                     })?;
+                let ancestor_chain = Rc::new(
+                    self.classes
+                        .get(&class_name)
+                        .map(|e| e.ancestors.clone())
+                        .unwrap_or_else(|| vec![class_name.clone()]),
+                );
                 let gc_fields = self.alloc_fields(fields);
-                Ok(VmValue::Instance { class_name, fields: gc_fields, methods })
+                Ok(VmValue::Instance {
+                    class_name,
+                    ancestor_chain,
+                    fields: gc_fields,
+                    methods,
+                })
             }
         }
     }
@@ -778,7 +873,7 @@ impl Vm {
                         return Err(VmError::TypeError {
                             message: "Socket.connect expects (String, Int)".into(),
                             line,
-                        })
+                        });
                     }
                 };
                 let reader = crate::native_socket::socket_connect(&host, port, line)?;
@@ -798,6 +893,12 @@ impl Vm {
                 let fields_ref = self.alloc_fields(fields_map);
                 Ok(VmValue::Instance {
                     class_name: "Socket".to_string(),
+                    ancestor_chain: Rc::new(
+                        self.classes
+                            .get("Socket")
+                            .map(|e| e.ancestors.clone())
+                            .unwrap_or_else(|| vec!["Socket".to_string()]),
+                    ),
                     fields: fields_ref,
                     methods,
                 })
@@ -827,7 +928,7 @@ impl Vm {
                         return Err(VmError::TypeError {
                             message: "socket.write expects a String".into(),
                             line,
-                        })
+                        });
                     }
                 };
                 let reader = self.sockets.get_mut(&fd).ok_or_else(closed_err)?;
@@ -851,7 +952,7 @@ impl Vm {
                         return Err(VmError::TypeError {
                             message: "socket.read_bytes expects an Int".into(),
                             line,
-                        })
+                        });
                     }
                 };
                 let reader = self.sockets.get_mut(&fd).ok_or_else(closed_err)?;
@@ -887,11 +988,9 @@ impl Vm {
     ) -> Result<VmValue, VmError> {
         let fields = self.heap.get_fields(fields_ref).clone();
         let id = crate::native_regex::extract_id(&fields, line)?;
-        let re = self.regexes.get(&id).ok_or_else(|| {
-            VmError::TypeError {
-                message: format!("regex id {} not found", id),
-                line,
-            }
+        let re = self.regexes.get(&id).ok_or_else(|| VmError::TypeError {
+            message: format!("regex id {} not found", id),
+            line,
         })?;
         match method_name {
             "match?" => {
@@ -901,10 +1000,12 @@ impl Vm {
                         return Err(VmError::TypeError {
                             message: "regex.match? expects a String".into(),
                             line,
-                        })
+                        });
                     }
                 };
-                Ok(VmValue::Bool(crate::native_regex::regex_match_bool(re, &text)))
+                Ok(VmValue::Bool(crate::native_regex::regex_match_bool(
+                    re, &text,
+                )))
             }
             "match" => {
                 let text = match args {
@@ -913,7 +1014,7 @@ impl Vm {
                         return Err(VmError::TypeError {
                             message: "regex.match expects a String".into(),
                             line,
-                        })
+                        });
                     }
                 };
                 match re.captures(&text) {
@@ -946,6 +1047,12 @@ impl Vm {
                         let gc_fields = self.alloc_fields(match_fields);
                         Ok(VmValue::Instance {
                             class_name: "Match".to_string(),
+                            ancestor_chain: Rc::new(
+                                self.classes
+                                    .get("Match")
+                                    .map(|e| e.ancestors.clone())
+                                    .unwrap_or_else(|| vec!["Match".to_string()]),
+                            ),
                             fields: gc_fields,
                             methods,
                         })
@@ -959,7 +1066,7 @@ impl Vm {
                         return Err(VmError::TypeError {
                             message: "regex.scan expects a String".into(),
                             line,
-                        })
+                        });
                     }
                 };
                 let matches = crate::native_regex::regex_scan(re, &text);
@@ -973,7 +1080,7 @@ impl Vm {
                         return Err(VmError::TypeError {
                             message: "regex.replace expects (String, String)".into(),
                             line,
-                        })
+                        });
                     }
                 };
                 Ok(VmValue::Str(crate::native_regex::regex_replace(
@@ -989,7 +1096,7 @@ impl Vm {
                         return Err(VmError::TypeError {
                             message: "regex.replace_all expects (String, String)".into(),
                             line,
-                        })
+                        });
                     }
                 };
                 Ok(VmValue::Str(crate::native_regex::regex_replace_all(
@@ -1151,18 +1258,8 @@ impl Vm {
 
         // Two-phase fixup: set class_ref now that class_cls is known.
         for r in [
-            object,
-            class_cls,
-            set_cls,
-            nil_cls,
-            int_cls,
-            float_cls,
-            string_cls,
-            range_cls,
-            list_cls,
-            map_cls,
-            env_cls,
-            file_cls,
+            object, class_cls, set_cls, nil_cls, int_cls, float_cls, string_cls, range_cls,
+            list_cls, map_cls, env_cls, file_cls,
         ] {
             if let HeapObject::ClassObject { class_ref, .. } = self.heap.get_mut(r) {
                 *class_ref = Some(class_cls);
@@ -1215,7 +1312,11 @@ impl Vm {
     fn lookup_class_object_method(&self, mut start: GcRef, name: &str) -> Option<SapphireMethod> {
         loop {
             let superclass = match self.heap.get(start) {
-                HeapObject::ClassObject { methods, superclass, .. } => {
+                HeapObject::ClassObject {
+                    methods,
+                    superclass,
+                    ..
+                } => {
                     if let Some(m) = methods.get(name) {
                         return Some(m.clone());
                     }
@@ -1257,11 +1358,11 @@ impl Vm {
     fn find_core_class_obj(&self, name: &str) -> Option<GcRef> {
         match name {
             "Object" => self.core_classes.object,
-            "Class"  => self.core_classes.class_cls,
-            "Set"    => self.core_classes.set_cls,
-            "Nil"    => self.core_classes.nil_cls,
-            "Int"    => self.core_classes.int_cls,
-            "Float"  => self.core_classes.float_cls,
+            "Class" => self.core_classes.class_cls,
+            "Set" => self.core_classes.set_cls,
+            "Nil" => self.core_classes.nil_cls,
+            "Int" => self.core_classes.int_cls,
+            "Float" => self.core_classes.float_cls,
             "String" => self.core_classes.string_cls,
             "Range" => self.core_classes.range_cls,
             "List" => self.core_classes.list_cls,
@@ -1275,12 +1376,18 @@ impl Vm {
     /// Compile and execute the stdlib Sapphire files to populate the class registry.
     pub fn load_stdlib(&mut self) -> Result<(), VmError> {
         const SOURCES: &[(&str, &str)] = &[
-            ("stdlib/object.spr", include_str!("../stdlib/src/object.spr")),
+            (
+                "stdlib/object.spr",
+                include_str!("../stdlib/src/object.spr"),
+            ),
             ("stdlib/nil.spr", include_str!("../stdlib/src/nil.spr")),
             ("stdlib/num.spr", include_str!("../stdlib/src/num.spr")),
             ("stdlib/int.spr", include_str!("../stdlib/src/int.spr")),
             ("stdlib/float.spr", include_str!("../stdlib/src/float.spr")),
-            ("stdlib/string.spr", include_str!("../stdlib/src/string.spr")),
+            (
+                "stdlib/string.spr",
+                include_str!("../stdlib/src/string.spr"),
+            ),
             ("stdlib/bool.spr", include_str!("../stdlib/src/bool.spr")),
             ("stdlib/list.spr", include_str!("../stdlib/src/list.spr")),
             ("stdlib/map.spr", include_str!("../stdlib/src/map.spr")),
@@ -1289,15 +1396,33 @@ impl Vm {
             ("stdlib/test.spr", include_str!("../stdlib/src/test.spr")),
             ("stdlib/file.spr", include_str!("../stdlib/src/file.spr")),
             ("stdlib/env.spr", include_str!("../stdlib/src/env.spr")),
-            ("stdlib/process.spr", include_str!("../stdlib/src/process.spr")),
+            (
+                "stdlib/process.spr",
+                include_str!("../stdlib/src/process.spr"),
+            ),
             ("stdlib/math.spr", include_str!("../stdlib/src/math.spr")),
-            ("stdlib/duration.spr", include_str!("../stdlib/src/duration.spr")),
-            ("stdlib/instant.spr", include_str!("../stdlib/src/instant.spr")),
+            (
+                "stdlib/duration.spr",
+                include_str!("../stdlib/src/duration.spr"),
+            ),
+            (
+                "stdlib/instant.spr",
+                include_str!("../stdlib/src/instant.spr"),
+            ),
             ("stdlib/date.spr", include_str!("../stdlib/src/date.spr")),
             ("stdlib/time.spr", include_str!("../stdlib/src/time.spr")),
-            ("stdlib/datetime.spr", include_str!("../stdlib/src/datetime.spr")),
-            ("stdlib/zoned_date_time.spr", include_str!("../stdlib/src/zoned_date_time.spr")),
-            ("stdlib/socket.spr", include_str!("../stdlib/src/socket.spr")),
+            (
+                "stdlib/datetime.spr",
+                include_str!("../stdlib/src/datetime.spr"),
+            ),
+            (
+                "stdlib/zoned_date_time.spr",
+                include_str!("../stdlib/src/zoned_date_time.spr"),
+            ),
+            (
+                "stdlib/socket.spr",
+                include_str!("../stdlib/src/socket.spr"),
+            ),
         ];
         for (name, src) in SOURCES {
             let tokens = crate::lexer::Lexer::new(src).scan_tokens();
@@ -1333,12 +1458,24 @@ impl Vm {
         // `Object`, `Class`, and `Set` resolve to the new heap-allocated class
         // objects rather than old-style VmValue::Class entries.
         let cc = self.core_classes.clone();
-        if let Some(r) = cc.object    { self.globals.insert("Object".into(), VmValue::ClassObj(r)); }
-        if let Some(r) = cc.class_cls { self.globals.insert("Class".into(),  VmValue::ClassObj(r)); }
-        if let Some(r) = cc.set_cls   { self.globals.insert("Set".into(),    VmValue::ClassObj(r)); }
-        if let Some(r) = cc.nil_cls   { self.globals.insert("Nil".into(),    VmValue::ClassObj(r)); }
-        if let Some(r) = cc.int_cls  { self.globals.insert("Int".into(),    VmValue::ClassObj(r)); }
-        if let Some(r) = cc.float_cls { self.globals.insert("Float".into(), VmValue::ClassObj(r)); }
+        if let Some(r) = cc.object {
+            self.globals.insert("Object".into(), VmValue::ClassObj(r));
+        }
+        if let Some(r) = cc.class_cls {
+            self.globals.insert("Class".into(), VmValue::ClassObj(r));
+        }
+        if let Some(r) = cc.set_cls {
+            self.globals.insert("Set".into(), VmValue::ClassObj(r));
+        }
+        if let Some(r) = cc.nil_cls {
+            self.globals.insert("Nil".into(), VmValue::ClassObj(r));
+        }
+        if let Some(r) = cc.int_cls {
+            self.globals.insert("Int".into(), VmValue::ClassObj(r));
+        }
+        if let Some(r) = cc.float_cls {
+            self.globals.insert("Float".into(), VmValue::ClassObj(r));
+        }
         if let Some(r) = cc.string_cls {
             self.globals.insert("String".into(), VmValue::ClassObj(r));
         }
@@ -1633,6 +1770,8 @@ impl Vm {
                         class_name,
                         superclass_name,
                         superclass_dynamic,
+                        is_module,
+                        includes,
                         own_fields,
                         class_method_names,
                         method_names,
@@ -1645,6 +1784,8 @@ impl Vm {
                                 name,
                                 superclass,
                                 superclass_dynamic,
+                                is_module,
+                                includes,
                                 field_names,
                                 field_defaults,
                                 method_names,
@@ -1666,6 +1807,8 @@ impl Vm {
                                     name.clone(),
                                     superclass.clone(),
                                     *superclass_dynamic,
+                                    *is_module,
+                                    includes.clone(),
                                     own_fields,
                                     class_method_names.clone(),
                                     method_names.clone(),
@@ -1745,16 +1888,27 @@ impl Vm {
                         .zip(nested_values.iter())
                         .map(|(n, v)| (n.clone(), v.clone()))
                         .collect();
-                    // Resolve the effective superclass name.
-                    let effective_super = dynamic_super.or(superclass_name).or_else(|| {
-                        if class_name != "Object" && self.classes.contains_key("Object") {
-                            Some("Object".to_string())
-                        } else {
-                            None
-                        }
-                    });
-                    // Merge inherited fields, instance methods, and class methods.
-                    let (merged_fields, merged_methods, merged_class_methods) =
+                    // Resolve the effective superclass name (modules have no superclass).
+                    let effective_super = if is_module {
+                        None
+                    } else {
+                        dynamic_super.or(superclass_name).or_else(|| {
+                            if class_name != "Object" && self.classes.contains_key("Object") {
+                                Some("Object".to_string())
+                            } else {
+                                None
+                            }
+                        })
+                    };
+                    let ancestors = self.ancestor_list_for_defines(
+                        &class_name,
+                        effective_super.as_deref(),
+                        &includes,
+                        is_module,
+                        line,
+                    )?;
+                    // Merge inherited fields, instance methods, and class methods from superclass.
+                    let (merged_fields, mut merged_methods, mut merged_class_methods) =
                         if let Some(ref sname) = effective_super {
                             let (parent_fields, parent_methods, parent_class_methods) =
                                 match self.classes.get(sname) {
@@ -1772,14 +1926,37 @@ impl Vm {
                                 };
                             let mut mf = parent_fields;
                             mf.extend(own_fields);
-                            let mut mm = parent_methods;
-                            mm.extend(own_methods);
-                            let mut mc = parent_class_methods;
-                            mc.extend(own_class_methods);
+                            let mm = parent_methods;
+                            let mc = parent_class_methods;
                             (mf, mm, mc)
                         } else {
-                            (own_fields, own_methods, own_class_methods)
+                            (own_fields, HashMap::new(), HashMap::new())
                         };
+                    // Overlay included modules (classes only).
+                    if !is_module {
+                        let mut visiting = HashSet::new();
+                        for inc in &includes {
+                            let order = self.mixin_expansion_order(inc, &mut visiting, line)?;
+                            for mname in order {
+                                let mentry =
+                                    self.classes.get(&mname).ok_or_else(|| VmError::TypeError {
+                                        message: format!("module '{}' not found", mname),
+                                        line,
+                                    })?;
+                                merged_methods.extend(
+                                    mentry.methods.iter().map(|(k, v)| (k.clone(), v.clone())),
+                                );
+                                merged_class_methods.extend(
+                                    mentry
+                                        .class_methods
+                                        .iter()
+                                        .map(|(k, v)| (k.clone(), v.clone())),
+                                );
+                            }
+                        }
+                    }
+                    merged_methods.extend(own_methods);
+                    merged_class_methods.extend(own_class_methods);
                     let merged_rc = Rc::new(merged_methods);
                     let merged_class_rc = Rc::new(merged_class_methods);
                     let namespace_rc = Rc::new(namespace);
@@ -1787,6 +1964,9 @@ impl Vm {
                         class_name.clone(),
                         ClassEntry {
                             superclass: effective_super.clone(),
+                            ancestors,
+                            includes: includes.clone(),
+                            is_module,
                             fields: merged_fields.clone(),
                             methods: merged_rc.clone(),
                             class_methods: merged_class_rc.clone(),
@@ -1831,26 +2011,37 @@ impl Vm {
                         .len()
                         .checked_sub(1 + n_pairs * 2)
                         .ok_or(VmError::StackUnderflow)?;
-                    let (class_name, field_decls, methods) = match &self.stack[base] {
+                    let (class_name, field_decls, methods, ancestor_chain) = match &self.stack[base]
+                    {
                         VmValue::Class {
                             name,
                             fields,
                             methods,
                             ..
-                        } => (name.clone(), fields.clone(), methods.clone()),
+                        } => {
+                            let anc = self
+                                .classes
+                                .get(name)
+                                .map(|e| Rc::new(e.ancestors.clone()))
+                                .unwrap_or_else(|| Rc::new(vec![name.clone()]));
+                            (name.clone(), fields.clone(), methods.clone(), anc)
+                        }
                         VmValue::ClassObj(r) => {
-                            // Resolve name from the heap, then look up fields/methods
-                            // in ClassEntry so the normal constructor path works.
                             let r = *r;
                             let name = match self.heap.get(r) {
                                 HeapObject::ClassObject { name, .. } => name.clone(),
                                 _ => unreachable!(),
                             };
                             match self.classes.get(&name) {
-                                Some(entry) => {
-                                    (name, entry.fields.clone(), entry.methods.clone())
+                                Some(entry) => (
+                                    name,
+                                    entry.fields.clone(),
+                                    entry.methods.clone(),
+                                    Rc::new(entry.ancestors.clone()),
+                                ),
+                                None => {
+                                    (name, vec![], Rc::new(HashMap::new()), Rc::new(Vec::new()))
                                 }
-                                None => (name, vec![], Rc::new(HashMap::new())),
                             }
                         }
                         other => {
@@ -1860,6 +2051,17 @@ impl Vm {
                             });
                         }
                     };
+                    if self
+                        .classes
+                        .get(&class_name)
+                        .map(|e| e.is_module)
+                        .unwrap_or(false)
+                    {
+                        return Err(VmError::TypeError {
+                            message: format!("cannot instantiate module '{}'", class_name),
+                            line,
+                        });
+                    }
                     // Regex.new("pattern") / Regex.new("pattern", ignore_case: true)
                     if class_name == "Regex" {
                         let pattern = match self.stack.get(base + 2) {
@@ -1904,6 +2106,12 @@ impl Vm {
                         self.stack.drain(base..);
                         self.stack.push(VmValue::Instance {
                             class_name: "Regex".to_string(),
+                            ancestor_chain: Rc::new(
+                                self.classes
+                                    .get("Regex")
+                                    .map(|e| e.ancestors.clone())
+                                    .unwrap_or_else(|| vec!["Regex".to_string()]),
+                            ),
                             fields: gc_fields,
                             methods,
                         });
@@ -1955,6 +2163,7 @@ impl Vm {
                         class_name,
                         fields,
                         methods,
+                        ancestor_chain,
                     });
                 }
 
@@ -2087,8 +2296,7 @@ impl Vm {
                     if method_name == "is_a?" && arg_count == 1 {
                         let recv = self.stack[recv_slot].clone();
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                        let result =
-                            invoke_is_a(&self.heap, &self.classes, &recv, &args, line)?;
+                        let result = invoke_is_a(&self.heap, &self.classes, &recv, &args, line)?;
                         self.stack.truncate(recv_slot);
                         self.stack.push(result);
                         continue;
@@ -2103,13 +2311,17 @@ impl Vm {
                             VmValue::Nil => self.core_classes.nil_cls.map(VmValue::ClassObj),
                             VmValue::Set(_) => self.core_classes.set_cls.map(VmValue::ClassObj),
                             VmValue::Str(_) => self.core_classes.string_cls.map(VmValue::ClassObj),
-                            VmValue::Range { .. } => self.core_classes.range_cls.map(VmValue::ClassObj),
+                            VmValue::Range { .. } => {
+                                self.core_classes.range_cls.map(VmValue::ClassObj)
+                            }
                             VmValue::List(_) => self.core_classes.list_cls.map(VmValue::ClassObj),
                             VmValue::Map(_) => self.core_classes.map_cls.map(VmValue::ClassObj),
                             VmValue::ClassObj(r) => {
                                 let r = *r;
-                                if let HeapObject::ClassObject { class_ref: Some(cr), .. } =
-                                    self.heap.get(r)
+                                if let HeapObject::ClassObject {
+                                    class_ref: Some(cr),
+                                    ..
+                                } = self.heap.get(r)
                                 {
                                     Some(VmValue::ClassObj(*cr))
                                 } else {
@@ -2312,30 +2524,37 @@ impl Vm {
                                     });
                                 }
                             }
-                        } else if arg_count == 0 && let Some(val) = namespace.get(&method_name) {
+                        } else if arg_count == 0
+                            && let Some(val) = namespace.get(&method_name)
+                        {
                             // Namespace lookup: constants and nested classes (e.g. Math.PI, Outer.Inner).
                             self.stack.truncate(recv_slot);
                             self.stack.push(val.clone());
                         } else if name == "Math" {
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                            let result = crate::native_math::dispatch_math_class_method(&method_name, &args, line)?;
+                            let result = crate::native_math::dispatch_math_class_method(
+                                &method_name,
+                                &args,
+                                line,
+                            )?;
                             self.stack.truncate(recv_slot);
                             self.stack.push(result);
                         } else if name == "Process" {
                             let proc_args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                            let proc_result = match crate::native_process::dispatch_process_class_method(
-                                &method_name,
-                                &proc_args,
-                                line,
-                            ) {
-                                Ok(r) => r,
-                                Err(VmError::Raised(val)) => {
-                                    self.stack.truncate(recv_slot);
-                                    self.raise_value(val)?;
-                                    continue;
-                                }
-                                Err(e) => return Err(e),
-                            };
+                            let proc_result =
+                                match crate::native_process::dispatch_process_class_method(
+                                    &method_name,
+                                    &proc_args,
+                                    line,
+                                ) {
+                                    Ok(r) => r,
+                                    Err(VmError::Raised(val)) => {
+                                        self.stack.truncate(recv_slot);
+                                        self.raise_value(val)?;
+                                        continue;
+                                    }
+                                    Err(e) => return Err(e),
+                                };
                             let result = match proc_result {
                                 crate::native_process::ProcessResult::Primitive(v) => v,
                                 crate::native_process::ProcessResult::List(items) => {
@@ -2361,6 +2580,12 @@ impl Vm {
                                     let gc_fields = self.alloc_fields(fields);
                                     VmValue::Instance {
                                         class_name: "Result".to_string(),
+                                        ancestor_chain: Rc::new(
+                                            self.classes
+                                                .get("Result")
+                                                .map(|e| e.ancestors.clone())
+                                                .unwrap_or_else(|| vec!["Result".to_string()]),
+                                        ),
                                         fields: gc_fields,
                                         methods,
                                     }
@@ -2374,8 +2599,7 @@ impl Vm {
                                 ("new", []) => self.alloc_set(Vec::new()),
                                 ("new", [VmValue::List(list_ref)]) => {
                                     let list_ref = *list_ref;
-                                    let items: Vec<VmValue> =
-                                        self.heap.get_list(list_ref).clone();
+                                    let items: Vec<VmValue> = self.heap.get_list(list_ref).clone();
                                     let mut elements: Vec<VmValue> = Vec::new();
                                     for item in items {
                                         if !elements.contains(&item) {
@@ -2386,8 +2610,7 @@ impl Vm {
                                 }
                                 ("new", [VmValue::Set(set_ref)]) => {
                                     let set_ref = *set_ref;
-                                    let items: Vec<VmValue> =
-                                        self.heap.get_set(set_ref).clone();
+                                    let items: Vec<VmValue> = self.heap.get_set(set_ref).clone();
                                     self.alloc_set(items)
                                 }
                                 _ => {
@@ -2404,7 +2627,8 @@ impl Vm {
                             self.stack.push(result);
                         } else if name == "Socket" {
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
-                            let result = match self.dispatch_socket_class(&method_name, &args, line) {
+                            let result = match self.dispatch_socket_class(&method_name, &args, line)
+                            {
                                 Ok(val) => val,
                                 Err(VmError::Raised(val)) => {
                                     self.stack.truncate(recv_slot);
@@ -2417,12 +2641,7 @@ impl Vm {
                             self.stack.push(result);
                         } else if matches!(
                             name.as_str(),
-                            "Instant"
-                                | "Date"
-                                | "Time"
-                                | "DateTime"
-                                | "ZonedDateTime"
-                                | "Duration"
+                            "Instant" | "Date" | "Time" | "DateTime" | "ZonedDateTime" | "Duration"
                         ) {
                             let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
                             let dt = match crate::datetime::dispatch_class_method(
@@ -2491,8 +2710,7 @@ impl Vm {
                         // ClassObject method table (native + mirrored bytecode) for
                         // bootstrapped primitives before the legacy native dispatch path.
                         if let Some(start) = self.class_object_for_primitive(&recv)
-                            && let Some(m) =
-                                self.lookup_class_object_method(start, &method_name)
+                            && let Some(m) = self.lookup_class_object_method(start, &method_name)
                         {
                             match m {
                                 SapphireMethod::Native {
@@ -2615,7 +2833,12 @@ impl Vm {
                             }
                             None => {
                                 return Err(VmError::TypeError {
-                                    message: format!("{} ({}) has no method '{}'", recv, value_type_name(&recv), method_name),
+                                    message: format!(
+                                        "{} ({}) has no method '{}'",
+                                        recv,
+                                        value_type_name(&recv),
+                                        method_name
+                                    ),
                                     line,
                                 });
                             }
@@ -2623,7 +2846,12 @@ impl Vm {
                     }
 
                     let (method_opt, dt_class, dt_fields) = match &self.stack[recv_slot] {
-                        VmValue::Instance { class_name, methods, fields } => (
+                        VmValue::Instance {
+                            class_name,
+                            methods,
+                            fields,
+                            ..
+                        } => (
                             methods.get(&method_name).cloned(),
                             class_name.clone(),
                             *fields,
@@ -2636,12 +2864,7 @@ impl Vm {
                     let mut dt_handled = false;
                     if matches!(
                         dt_class.as_str(),
-                        "Instant"
-                            | "Date"
-                            | "Time"
-                            | "DateTime"
-                            | "ZonedDateTime"
-                            | "Duration"
+                        "Instant" | "Date" | "Time" | "DateTime" | "ZonedDateTime" | "Duration"
                     ) {
                         let args: Vec<VmValue> = self.stack[recv_slot + 1..].to_vec();
                         match crate::datetime::dispatch_instance_method(
@@ -2785,48 +3008,63 @@ impl Vm {
                             Constant::Str(s) => s.clone(),
                             _ => panic!("SuperInvoke: expected Str constant"),
                         };
+                    let mut recv_slot = self
+                        .stack
+                        .len()
+                        .checked_sub(arg_count + 1)
+                        .ok_or(VmError::StackUnderflow)?;
                     let last = self.frames.len() - 1;
-                    let current_class = if let Some(ref cn) = self.frames[last].class_name {
-                        cn.clone()
-                    } else {
-                        let mut resolved: Option<String> = None;
-                        for j in (0..last).rev() {
-                            if let Some(ref cn) = self.frames[j].class_name {
-                                resolved = Some(cn.clone());
-                                break;
-                            }
-                        }
-                        resolved.ok_or_else(|| VmError::TypeError {
+                    let method_frame_idx = (0..=last)
+                        .rev()
+                        .find(|&j| self.frames[j].class_name.is_some())
+                        .ok_or_else(|| VmError::TypeError {
                             message: "super used outside of a method".into(),
                             line,
-                        })?
-                    };
-                    let super_name = match self.classes.get(&current_class) {
-                        Some(ClassEntry {
-                            superclass: Some(s),
-                            ..
-                        }) => s.clone(),
-                        Some(ClassEntry {
-                            superclass: None, ..
-                        }) => {
+                        })?;
+                    let method_base = self.frames[method_frame_idx].base;
+                    match &self.stack[recv_slot] {
+                        VmValue::Closure { .. } | VmValue::Function(_) => {
+                            recv_slot = method_base;
+                        }
+                        _ => {}
+                    }
+                    let current_class = self.frames[method_frame_idx].class_name.clone().unwrap();
+                    let chain = match &self.stack[recv_slot] {
+                        VmValue::Instance { ancestor_chain, .. } => ancestor_chain.as_slice(),
+                        other => {
                             return Err(VmError::TypeError {
+                                message: format!(
+                                    "super requires an instance receiver, got {}",
+                                    other
+                                ),
+                                line,
+                            });
+                        }
+                    };
+                    let pos = chain
+                        .iter()
+                        .position(|a| a == &current_class)
+                        .ok_or_else(|| VmError::TypeError {
+                            message: format!(
+                                "internal error: '{}' not in receiver ancestor chain",
+                                current_class
+                            ),
+                            line,
+                        })?;
+                    let super_name =
+                        chain
+                            .get(pos + 1)
+                            .cloned()
+                            .ok_or_else(|| VmError::TypeError {
                                 message: format!("'{}' has no superclass", current_class),
                                 line,
-                            });
-                        }
-                        None => {
-                            return Err(VmError::TypeError {
-                                message: format!("class '{}' not in registry", current_class),
-                                line,
-                            });
-                        }
-                    };
+                            })?;
                     let method = match self.classes.get(&super_name) {
                         Some(entry) => {
                             entry.methods.get(&method_name).cloned().ok_or_else(|| {
                                 VmError::TypeError {
                                     message: format!(
-                                        "superclass '{}' has no method '{}'",
+                                        "ancestor '{}' has no method '{}'",
                                         super_name, method_name
                                     ),
                                     line,
@@ -2835,16 +3073,11 @@ impl Vm {
                         }
                         None => {
                             return Err(VmError::TypeError {
-                                message: format!("superclass '{}' not in registry", super_name),
+                                message: format!("ancestor '{}' not in registry", super_name),
                                 line,
                             });
                         }
                     };
-                    let recv_slot = self
-                        .stack
-                        .len()
-                        .checked_sub(arg_count + 1)
-                        .ok_or(VmError::StackUnderflow)?;
                     if method.function.arity != arg_count {
                         return Err(VmError::TypeError {
                             message: format!(
@@ -2854,8 +3087,7 @@ impl Vm {
                             line,
                         });
                     }
-                    // Use super_name as the class for the new frame so chained
-                    // super calls continue up the inheritance chain correctly.
+                    let super_dispatch_class = method.defined_in.clone();
                     self.frames.push(CallFrame {
                         function: method.function,
                         upvalues: method.upvalues,
@@ -2865,7 +3097,7 @@ impl Vm {
                         is_block_caller: false,
                         is_native_block: false,
                         rescues: vec![],
-                        class_name: Some(super_name),
+                        class_name: Some(super_dispatch_class),
                     });
                 }
 
@@ -2914,13 +3146,12 @@ impl Vm {
                     let resolved = if let Some(v) = val {
                         v
                     } else {
-                        self.globals
-                            .get(&const_name)
-                            .cloned()
-                            .ok_or_else(|| VmError::TypeError {
+                        self.globals.get(&const_name).cloned().ok_or_else(|| {
+                            VmError::TypeError {
                                 message: format!("undefined variable '{}'", const_name),
                                 line,
-                            })?
+                            }
+                        })?
                     };
                     self.stack.push(resolved);
                 }
@@ -3049,8 +3280,8 @@ impl Vm {
                             continue;
                         }
                         if let Some(start) = self.class_object_for_primitive(&recv)
-                            && let Some(SapphireMethod::Bytecode(m)) = self
-                                .lookup_class_object_method(start, &method_name)
+                            && let Some(SapphireMethod::Bytecode(m)) =
+                                self.lookup_class_object_method(start, &method_name)
                         {
                             if m.private {
                                 let caller_class = self
@@ -3114,7 +3345,12 @@ impl Vm {
                             }
                             None => {
                                 return Err(VmError::TypeError {
-                                    message: format!("{} ({}) has no method '{}'", recv, value_type_name(&recv), method_name),
+                                    message: format!(
+                                        "{} ({}) has no method '{}'",
+                                        recv,
+                                        value_type_name(&recv),
+                                        method_name
+                                    ),
                                     line,
                                 });
                             }
@@ -4152,7 +4388,7 @@ impl Vm {
             if class_name == "Test" {
                 continue;
             }
-            if !vm_is_subclass(&self.classes, class_name.clone(), "Test") {
+            if !vm_is_subclass(&self.classes, class_name.as_str(), "Test") {
                 continue;
             }
             let entry = &self.classes[class_name];
@@ -4213,6 +4449,7 @@ impl Vm {
             .get(class_name)
             .ok_or_else(|| format!("class '{}' not found", class_name))?;
 
+        let ancestor_chain = Rc::new(entry.ancestors.clone());
         let fields_map: HashMap<String, VmValue> = entry
             .fields
             .iter()
@@ -4222,6 +4459,7 @@ impl Vm {
         let fields = self.alloc_fields(fields_map);
         let instance = VmValue::Instance {
             class_name: class_name.to_string(),
+            ancestor_chain,
             fields,
             methods: methods.clone(),
         };
@@ -4250,24 +4488,23 @@ fn starting_class_name_for_is_a(recv: &VmValue) -> Option<String> {
     }
 }
 
-/// True if `start` is `target` or a subclass of `target` per `classes` superclass links.
-fn vm_is_subclass(
-    classes: &HashMap<String, ClassEntry>,
-    mut current: String,
-    target: &str,
-) -> bool {
-    loop {
-        if current == target {
-            return true;
-        }
-        let Some(entry) = classes.get(&current) else {
-            return false;
-        };
-        match &entry.superclass {
-            Some(s) => current = s.clone(),
-            None => return false,
-        }
+/// True if `start` is `target`, or `target` appears later in `start`'s ancestor chain
+/// (superclass or included module).
+fn vm_is_subclass(classes: &HashMap<String, ClassEntry>, start: &str, target: &str) -> bool {
+    if start == target {
+        return true;
     }
+    let Some(entry) = classes.get(start) else {
+        return false;
+    };
+    let chain = &entry.ancestors;
+    let Some(idx_start) = chain.iter().position(|a| a == start) else {
+        return false;
+    };
+    chain
+        .iter()
+        .position(|a| a == target)
+        .is_some_and(|idx_target| idx_target > idx_start)
 }
 
 fn invoke_is_a(
@@ -4298,5 +4535,9 @@ fn invoke_is_a(
     let Some(start) = starting_class_name_for_is_a(recv) else {
         return Ok(VmValue::Bool(false));
     };
-    Ok(VmValue::Bool(vm_is_subclass(classes, start, &target)))
+    Ok(VmValue::Bool(vm_is_subclass(
+        classes,
+        start.as_str(),
+        &target,
+    )))
 }

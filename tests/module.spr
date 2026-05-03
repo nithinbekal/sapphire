@@ -1,0 +1,6 @@
+# Fixture for Rust (`import "./module"` — see `import_module_fixture` in tests/vm.rs).
+module SampleMod {
+  class Widget {
+    def ping { "pong" }
+  }
+}
