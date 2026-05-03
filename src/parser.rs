@@ -1544,24 +1544,15 @@ impl Parser {
 
         if self.check(&TokenKind::SuperKw) {
             self.advance();
-            // Expect super.method_name(args)
-            if !self.check(&TokenKind::Dot) {
+            if self.check(&TokenKind::Dot) {
                 return Err(SapphireError::ParseError {
-                    message: "expected '.' after 'super'".into(),
-                    line: self.peek().line, column: self.peek().column,
+                    message: "unexpected '.' after 'super'; use bare super or super(...)".into(),
+                    line: self.peek().line,
+                    column: self.peek().column,
                 });
             }
-            self.advance(); // consume '.'
-            let method = if let TokenKind::Identifier(name) = self.peek().kind.clone() {
-                self.advance();
-                name
-            } else {
-                return Err(SapphireError::ParseError {
-                    message: "expected method name after 'super.'".into(),
-                    line: self.peek().line, column: self.peek().column,
-                });
-            };
-            let (args, block) = if self.check(&TokenKind::LeftParen) {
+            // Bare `super` (forwards current method's arguments) or `super(expr, ...)`.
+            let (args, block, forward_args) = if self.check(&TokenKind::LeftParen) {
                 self.advance(); // consume '('
                 let mut args = Vec::new();
                 if !self.check(&TokenKind::RightParen) {
@@ -1574,18 +1565,20 @@ impl Parser {
                 if !self.check(&TokenKind::RightParen) {
                     return Err(SapphireError::ParseError {
                         message: "expected ')' after arguments".into(),
-                        line: self.peek().line, column: self.peek().column,
+                        line: self.peek().line,
+                        column: self.peek().column,
                     });
                 }
                 self.advance(); // consume ')'
                 let block = self.parse_block()?;
-                (args, block)
+                (args, block, false)
             } else {
-                (Vec::new(), None)
+                let block = self.parse_block()?;
+                (Vec::new(), block, true)
             };
             return Ok(Expr::Super {
-                method,
                 args,
+                forward_args,
                 block,
             });
         }

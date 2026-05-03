@@ -77,6 +77,8 @@ struct FunctionState {
     upvalue_defs: Vec<UpvalueInfo>,
     name: String,
     arity: usize,
+    /// When compiling a class/instance method, the method name for bare `super`.
+    super_method_name: Option<String>,
     /// Stack of active while-loop contexts, innermost last.
     loop_stack: Vec<LoopCtx>,
     return_type: Option<RuntimeType>,
@@ -92,6 +94,7 @@ impl FunctionState {
             upvalue_defs: Vec::new(),
             name: name.to_string(),
             arity,
+            super_method_name: None,
             loop_stack: Vec::new(),
             return_type: None,
         }
@@ -215,7 +218,14 @@ impl Compiler {
     // ── Function stack ────────────────────────────────────────────────────────
 
     fn push_fn(&mut self, name: &str, arity: usize, line: u32) {
+        let inherit_super = self
+            .states
+            .last()
+            .and_then(|s| s.super_method_name.clone());
         self.states.push(FunctionState::new(name, arity, line));
+        if let Some(sm) = inherit_super {
+            self.state_mut().super_method_name = Some(sm);
+        }
     }
 
     fn pop_fn(&mut self) -> Rc<Function> {
@@ -223,6 +233,7 @@ impl Compiler {
         Rc::new(Function {
             name: state.name,
             arity: state.arity,
+            super_method_name: state.super_method_name,
             chunk: state.chunk,
             upvalue_defs: state
                 .upvalue_defs
@@ -806,20 +817,36 @@ impl Compiler {
             }
 
             Expr::Super {
-                method,
                 args,
+                forward_args,
                 block: _,
             } => {
-                // Push self (slot 0 of the current method frame).
-                self.emit(OpCode::GetSelf);
-                let arg_count = args.len();
-                for arg in args {
-                    self.expr(&arg.value)?;
+                if *forward_args && !args.is_empty() {
+                    return Err(self.error(
+                        "internal: bare super with non-empty args".to_string(),
+                    ));
                 }
+                self.emit(OpCode::GetSelf);
+                let arg_count = if *forward_args {
+                    let st = self.state();
+                    let arity = st.arity;
+                    for slot in 1..=arity {
+                        self.emit(OpCode::GetLocal(slot));
+                    }
+                    arity
+                } else {
+                    for arg in args {
+                        self.expr(&arg.value)?;
+                    }
+                    args.len()
+                };
+                let method_name = self.state().super_method_name.clone().ok_or_else(|| {
+                    self.error("`super` is only valid inside a class method".to_string())
+                })?;
                 let name_idx = self
                     .state_mut()
                     .chunk
-                    .add_constant(Constant::Str(method.clone()));
+                    .add_constant(Constant::Str(method_name));
                 self.emit(OpCode::SuperInvoke(name_idx, arg_count));
                 Ok(())
             }
@@ -1383,6 +1410,7 @@ impl Compiler {
         for method in &class_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
+            self.state_mut().super_method_name = Some(method.name.clone());
             let all_tvars: std::collections::HashSet<String> = class_tvars
                 .iter()
                 .chain(method.type_params.iter())
@@ -1415,6 +1443,7 @@ impl Compiler {
         for method in &instance_methods {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
+            self.state_mut().super_method_name = Some(method.name.clone());
             let all_tvars: std::collections::HashSet<String> = class_tvars
                 .iter()
                 .chain(method.type_params.iter())

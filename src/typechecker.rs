@@ -647,6 +647,11 @@ impl TypeChecker {
                 self.pop_scope();
                 self.current_return_type = saved;
             }
+            Expr::Super { args, .. } => {
+                for a in args {
+                    self.check_expr(&a.value);
+                }
+            }
             Expr::TypeAlias { .. } => {}
             _ => {}
         }
@@ -882,6 +887,7 @@ impl TypeChecker {
     fn infer_type(&self, expr: &Expr) -> Option<TypeExpr> {
         match expr {
             Expr::SelfExpr => self.current_class.as_ref().map(|cn| TypeExpr::Named(cn.clone())),
+            Expr::Super { .. } => Some(TypeExpr::Any),
             Expr::Literal(v) => match v {
                 Value::Int(_) => Some(TypeExpr::Named("Int".into())),
                 Value::Float(_) => Some(TypeExpr::Named("Float".into())),
