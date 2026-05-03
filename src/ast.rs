@@ -101,8 +101,9 @@ pub enum Expr {
     ListLit(Vec<Expr>),
     MapLit(Vec<(String, Expr)>),
     Super {
-        method: String,
         args: Vec<CallArg>,
+        /// When true, pass the enclosing method's parameters (Ruby bare `super`).
+        forward_args: bool,
         block: Option<Block>,
     },
     Index {

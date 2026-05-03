@@ -23,6 +23,8 @@ pub struct UpvalueDef {
 pub struct Function {
     pub name: String,
     pub arity: usize,
+    /// Method name for bare `super` / `super()` in this closure; set on class methods only.
+    pub super_method_name: Option<String>,
     pub chunk: Chunk,
     pub upvalue_defs: Vec<UpvalueDef>,
     /// Return type annotation, if one was present in the source (`-> TypeName`).
