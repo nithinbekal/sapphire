@@ -10,6 +10,10 @@ keywords = ["scripting", "language", "interpreter", "bytecode", "vm"]
 categories = ["command-line-utilities", "compilers"]
 readme = "README.md"
 
+[lints.clippy]
+large_enum_variant = "allow"
+result_large_err = "allow"
+
 [features]
 default = ["cli"]
 cli = ["rustyline"]

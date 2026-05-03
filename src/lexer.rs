@@ -516,6 +516,7 @@ impl Lexer {
             "end" => TokenKind::End,
             "import" => TokenKind::Import,
             "type" => TokenKind::Type,
+            "abstract" => TokenKind::Abstract,
             _ => TokenKind::Identifier(s),
         }
     }

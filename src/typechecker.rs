@@ -72,6 +72,16 @@ struct FnSig {
 struct ClassInfo {
     #[allow(dead_code)]
     type_params: Vec<String>,
+    /// Static superclass simple or dotted name (`Foo` or `Outer.Inner`); `None` if dynamic/missing.
+    superclass_name: Option<String>,
+    #[allow(dead_code)]
+    is_abstract: bool,
+    #[allow(dead_code)]
+    is_module: bool,
+    /// Instance methods declared `abstract def` in this class only.
+    abstract_declared: std::collections::HashSet<String>,
+    /// Instance methods with a body in this class (`def` / `defp`, not abstract).
+    concrete_instance_names: std::collections::HashSet<String>,
     fields: Vec<FieldDef>,
     methods: HashMap<String, FnSig>,
     constants: HashMap<String, TypeExpr>,
@@ -221,6 +231,43 @@ impl TypeChecker {
         self.type_vars.push(params.iter().cloned().collect());
     }
 
+    /// `Foo` or `Outer.Inner` from `Expr::Variable` / `Expr::Get` chain; else `None`.
+    fn static_superclass_chain_name(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Variable(s) => Some(s.clone()),
+            Expr::Get { object, name, .. } => {
+                Self::static_superclass_chain_name(object).map(|prefix| format!("{prefix}.{name}"))
+            }
+            _ => None,
+        }
+    }
+
+    /// Abstract instance methods still required after this class (for static checking).
+    fn abstract_methods_after_class(&self, class_name: &str) -> std::collections::HashSet<String> {
+        let mut chain: Vec<String> = Vec::new();
+        let mut cur = Some(class_name.to_string());
+        while let Some(ref cname) = cur {
+            chain.push(cname.clone());
+            let Some(c) = self.classes.get(cname) else {
+                break;
+            };
+            cur = c.superclass_name.clone();
+        }
+        let mut pending = std::collections::HashSet::new();
+        for cname in chain.into_iter().rev() {
+            let Some(c) = self.classes.get(&cname) else {
+                continue;
+            };
+            for m in &c.abstract_declared {
+                pending.insert(m.clone());
+            }
+            for m in &c.concrete_instance_names {
+                pending.remove(m);
+            }
+        }
+        pending
+    }
+
     fn pop_type_vars(&mut self) {
         self.type_vars.pop();
     }
@@ -271,11 +318,28 @@ impl TypeChecker {
             Expr::Class {
                 name,
                 type_params,
+                superclass,
+                is_abstract,
+                is_module,
                 fields,
                 methods,
                 constants,
+                nested,
                 ..
             } => {
+                let superclass_name = superclass
+                    .as_deref()
+                    .and_then(Self::static_superclass_chain_name);
+                let abstract_declared: std::collections::HashSet<String> = methods
+                    .iter()
+                    .filter(|m| m.is_abstract && !m.class_method)
+                    .map(|m| m.name.clone())
+                    .collect();
+                let concrete_instance_names: std::collections::HashSet<String> = methods
+                    .iter()
+                    .filter(|m| !m.class_method && !m.is_abstract)
+                    .map(|m| m.name.clone())
+                    .collect();
                 let method_sigs = methods
                     .iter()
                     .map(|m| {
@@ -299,11 +363,19 @@ impl TypeChecker {
                     name.clone(),
                     ClassInfo {
                         type_params: type_params.clone(),
+                        superclass_name,
+                        is_abstract: *is_abstract,
+                        is_module: *is_module,
+                        abstract_declared,
+                        concrete_instance_names,
                         fields: fields.clone(),
                         methods: method_sigs,
                         constants: constants_map,
                     },
                 );
+                for n in nested {
+                    self.collect_def(n);
+                }
             }
             _ => {}
         }
@@ -532,10 +604,43 @@ impl TypeChecker {
                 }
             }
             Expr::Print(inner) => self.check_expr(inner),
-            Expr::Class { name, type_params, methods, constants, .. } => {
+            Expr::Class {
+                name,
+                type_params,
+                is_abstract,
+                is_module,
+                methods,
+                constants,
+                nested,
+                ..
+            } => {
                 let saved_class = self.current_class.replace(name.clone());
                 self.push_type_vars(type_params);
+                if !*is_abstract && !*is_module {
+                    for method in methods.iter().filter(|m| m.is_abstract && !m.class_method) {
+                        self.errors.push(TypeCheckError {
+                            message: format!(
+                                "abstract method '{}' is only allowed in an abstract class",
+                                method.name
+                            ),
+                            line: self.current_line,
+                        });
+                    }
+                }
                 for method in methods {
+                    if method.is_abstract {
+                        if let Some(rt) = &method.return_type {
+                            self.validate_type_ann(rt);
+                        }
+                        self.push_type_vars(&method.type_params);
+                        for p in &method.params {
+                            if let Some(te) = &p.type_ann {
+                                self.validate_type_ann(te);
+                            }
+                        }
+                        self.pop_type_vars();
+                        continue;
+                    }
                     let saved = self.current_return_type.take();
                     if let Some(rt) = &method.return_type {
                         self.validate_type_ann(rt);
@@ -585,6 +690,21 @@ impl TypeChecker {
                 }
                 for (_cname, expr) in constants {
                     self.check_expr(expr);
+                }
+                if !*is_abstract && !*is_module {
+                    let pending = self.abstract_methods_after_class(name);
+                    for m in pending {
+                        self.errors.push(TypeCheckError {
+                            message: format!(
+                                "class '{}' must implement abstract method: {}",
+                                name, m
+                            ),
+                            line: self.current_line,
+                        });
+                    }
+                }
+                for n in nested {
+                    self.check_expr(n);
                 }
                 self.pop_type_vars();
                 self.current_class = saved_class;
@@ -692,6 +812,9 @@ impl TypeChecker {
                 let saved_class = self.current_class.replace(name.clone());
                 self.push_type_vars(type_params);
                 for method in methods {
+                    if method.is_abstract {
+                        continue;
+                    }
                     if method.return_type.is_some() {
                         continue;
                     }
@@ -768,6 +891,9 @@ impl TypeChecker {
                 let saved_class = self.current_class.replace(name.clone());
                 self.push_type_vars(type_params);
                 for method in methods {
+                    if method.is_abstract {
+                        continue;
+                    }
                     let Some(rt) = &method.return_type else { continue };
                     let rt = rt.clone();
                     self.push_type_vars(&method.type_params);

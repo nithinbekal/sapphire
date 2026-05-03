@@ -50,6 +50,7 @@ pub struct MethodDef {
     pub body: Vec<Expr>,
     pub private: bool,
     pub class_method: bool,
+    pub is_abstract: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +138,8 @@ pub enum Expr {
         type_params: Vec<String>,
         /// Superclass expression: `Name` or `Outer.Inner`.  `None` means inherit from Object.
         superclass: Option<Box<Expr>>,
+        /// When true, `abstract class` — cannot be instantiated; may declare `abstract def`.
+        is_abstract: bool,
         /// When true, this is a `module` (cannot be instantiated; only mixed in).
         is_module: bool,
         /// Included mixin names in source order (`include(A)`, `include(B.Mod)`).

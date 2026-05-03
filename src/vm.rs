@@ -354,6 +354,10 @@ pub enum VmValue {
         name: String,
         #[allow(dead_code)]
         superclass: Option<String>,
+        /// True if declared `abstract class` (uninstantiable regardless of method coverage).
+        declared_abstract: bool,
+        /// Abstract instance method names not yet implemented (for concrete classes that omit methods).
+        remaining_abstract: Vec<String>,
         fields: Vec<(String, VmValue)>,
         methods: Rc<HashMap<String, VmMethod>>,
         class_methods: Rc<HashMap<String, VmMethod>>,
@@ -559,6 +563,10 @@ struct ClassEntry {
     /// Included mixin names in source order (registry keys).
     includes: Vec<String>,
     is_module: bool,
+    /// True if declared `abstract class` (still uninstantiable even if no abstract methods).
+    declared_abstract: bool,
+    /// Abstract instance method names not yet implemented in the merged method table.
+    remaining_abstract: Vec<String>,
     /// The merged (inherited + own) field list with default values.
     fields: Vec<(String, VmValue)>,
     /// Merged (inherited + own) instance methods.
@@ -1447,6 +1455,8 @@ impl Vm {
             let val = VmValue::Class {
                 name: cname.clone(),
                 superclass: entry.superclass.clone(),
+                declared_abstract: entry.declared_abstract,
+                remaining_abstract: entry.remaining_abstract.clone(),
                 fields: entry.fields.clone(),
                 methods: entry.methods.clone(),
                 class_methods: entry.class_methods.clone(),
@@ -1771,6 +1781,8 @@ impl Vm {
                         superclass_name,
                         superclass_dynamic,
                         is_module,
+                        is_abstract_decl,
+                        abstract_method_names,
                         includes,
                         own_fields,
                         class_method_names,
@@ -1785,6 +1797,8 @@ impl Vm {
                                 superclass,
                                 superclass_dynamic,
                                 is_module,
+                                is_abstract,
+                                abstract_method_names,
                                 includes,
                                 field_names,
                                 field_defaults,
@@ -1808,6 +1822,8 @@ impl Vm {
                                     superclass.clone(),
                                     *superclass_dynamic,
                                     *is_module,
+                                    *is_abstract,
+                                    abstract_method_names.clone(),
                                     includes.clone(),
                                     own_fields,
                                     class_method_names.clone(),
@@ -1957,6 +1973,22 @@ impl Vm {
                     }
                     merged_methods.extend(own_methods);
                     merged_class_methods.extend(own_class_methods);
+                    let mut remaining_abstract: Vec<String> = Vec::new();
+                    if let Some(ref sname) = effective_super
+                        && let Some(p) = self.classes.get(sname)
+                    {
+                        for n in &p.remaining_abstract {
+                            if !merged_methods.contains_key(n) && !remaining_abstract.contains(n) {
+                                remaining_abstract.push(n.clone());
+                            }
+                        }
+                    }
+                    for n in &abstract_method_names {
+                        if !merged_methods.contains_key(n) && !remaining_abstract.contains(n) {
+                            remaining_abstract.push(n.clone());
+                        }
+                    }
+                    remaining_abstract.sort();
                     let merged_rc = Rc::new(merged_methods);
                     let merged_class_rc = Rc::new(merged_class_methods);
                     let namespace_rc = Rc::new(namespace);
@@ -1967,6 +1999,8 @@ impl Vm {
                             ancestors,
                             includes: includes.clone(),
                             is_module,
+                            declared_abstract: is_abstract_decl,
+                            remaining_abstract: remaining_abstract.clone(),
                             fields: merged_fields.clone(),
                             methods: merged_rc.clone(),
                             class_methods: merged_class_rc.clone(),
@@ -1997,6 +2031,8 @@ impl Vm {
                     self.stack.push(VmValue::Class {
                         name: class_name,
                         superclass: effective_super,
+                        declared_abstract: is_abstract_decl,
+                        remaining_abstract,
                         fields: merged_fields,
                         methods: merged_rc,
                         class_methods: merged_class_rc,
@@ -2061,6 +2097,27 @@ impl Vm {
                             message: format!("cannot instantiate module '{}'", class_name),
                             line,
                         });
+                    }
+                    if let Some(entry) = self.classes.get(&class_name) {
+                        if entry.declared_abstract {
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "cannot instantiate abstract class {}",
+                                    class_name
+                                ),
+                                line,
+                            });
+                        }
+                        if !entry.remaining_abstract.is_empty() {
+                            let names = entry.remaining_abstract.join(", ");
+                            return Err(VmError::TypeError {
+                                message: format!(
+                                    "cannot instantiate class {}: abstract methods not implemented: {}",
+                                    class_name, names
+                                ),
+                                line,
+                            });
+                        }
                     }
                     // Regex.new("pattern") / Regex.new("pattern", ignore_case: true)
                     if class_name == "Regex" {
@@ -2338,6 +2395,8 @@ impl Vm {
                                     Some(entry) => VmValue::Class {
                                         name: cname,
                                         superclass: entry.superclass.clone(),
+                                        declared_abstract: entry.declared_abstract,
+                                        remaining_abstract: entry.remaining_abstract.clone(),
                                         fields: entry.fields.clone(),
                                         methods: entry.methods.clone(),
                                         class_methods: entry.class_methods.clone(),
@@ -2672,6 +2731,8 @@ impl Vm {
                                     Some(entry) => VmValue::Class {
                                         name: sname.to_string(),
                                         superclass: entry.superclass.clone(),
+                                        declared_abstract: entry.declared_abstract,
+                                        remaining_abstract: entry.remaining_abstract.clone(),
                                         fields: entry.fields.clone(),
                                         methods: entry.methods.clone(),
                                         class_methods: entry.class_methods.clone(),

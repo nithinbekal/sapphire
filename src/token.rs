@@ -68,6 +68,7 @@ pub enum TokenKind {
     End,
     Import,
     Type,
+    Abstract,
     Question,
 
     Newline,

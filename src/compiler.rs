@@ -863,6 +863,7 @@ impl Compiler {
                 superclass,
                 includes,
                 is_module,
+                is_abstract,
                 fields,
                 methods,
                 nested,
@@ -874,6 +875,7 @@ impl Compiler {
                     superclass.as_deref(),
                     includes,
                     *is_module,
+                    *is_abstract,
                     fields,
                     methods,
                     nested,
@@ -1369,6 +1371,7 @@ impl Compiler {
         superclass: Option<&Expr>,
         includes: &[String],
         is_module: bool,
+        is_abstract: bool,
         fields: &[crate::ast::FieldDef],
         methods: &[MethodDef],
         nested: &[Expr],
@@ -1382,6 +1385,7 @@ impl Compiler {
             superclass,
             includes,
             is_module,
+            is_abstract,
             fields,
             methods,
             nested,
@@ -1400,6 +1404,7 @@ impl Compiler {
         superclass: Option<&Expr>,
         includes: &[String],
         is_module: bool,
+        is_abstract: bool,
         fields: &[crate::ast::FieldDef],
         methods: &[MethodDef],
         nested: &[Expr],
@@ -1410,6 +1415,26 @@ impl Compiler {
 
         let (instance_methods, class_methods): (Vec<&MethodDef>, Vec<&MethodDef>) =
             methods.iter().partition(|m| !m.class_method);
+
+        for m in &instance_methods {
+            if m.is_abstract && !is_abstract {
+                return Err(self.error(format!(
+                    "abstract method '{}' is only allowed in an abstract class",
+                    m.name
+                )));
+            }
+        }
+
+        let concrete_instance: Vec<&MethodDef> = instance_methods
+            .iter()
+            .copied()
+            .filter(|m| !m.is_abstract)
+            .collect();
+        let abstract_method_names: Vec<String> = instance_methods
+            .iter()
+            .filter(|m| m.is_abstract)
+            .map(|m| m.name.clone())
+            .collect();
 
         // Build the set of all type variables in scope for this class.
         let class_tvars: std::collections::HashSet<String> =
@@ -1449,8 +1474,8 @@ impl Compiler {
             self.emit(OpCode::Closure(fi));
         }
 
-        // Emit instance method closures.
-        for method in &instance_methods {
+        // Emit instance method closures (concrete only).
+        for method in &concrete_instance {
             let arity = method.params.len();
             self.push_fn(&method.name, arity, line);
             self.state_mut().super_method_name = Some(method.name.clone());
@@ -1492,6 +1517,7 @@ impl Compiler {
                     superclass: nsuper,
                     includes: nincludes,
                     is_module: nmodule,
+                    is_abstract: nabstract,
                     fields: nfields,
                     methods: nmethods,
                     nested: nnested,
@@ -1504,6 +1530,7 @@ impl Compiler {
                         nsuper.as_deref(),
                         nincludes,
                         *nmodule,
+                        *nabstract,
                         nfields,
                         nmethods,
                         nnested,
@@ -1549,8 +1576,8 @@ impl Compiler {
                 _ => None,
             })
             .collect();
-        let method_names: Vec<String> = instance_methods.iter().map(|m| m.name.clone()).collect();
-        let private_methods: Vec<String> = instance_methods
+        let method_names: Vec<String> = concrete_instance.iter().map(|m| m.name.clone()).collect();
+        let private_methods: Vec<String> = concrete_instance
             .iter()
             .filter(|m| m.private)
             .map(|m| m.name.clone())
@@ -1562,6 +1589,8 @@ impl Compiler {
             superclass: static_super.map(|s| s.to_string()),
             superclass_dynamic,
             is_module,
+            is_abstract,
+            abstract_method_names,
             includes: resolved_includes,
             field_names,
             field_defaults,
