@@ -551,7 +551,7 @@ fn mixin_include_instance_method() {
   def hi { \"hi\" }
 }
 class Person {
-  include Greet
+  include(Greet)
 }
 Person.new.hi";
     assert_eq!(eval(src), VmValue::Str("hi".into()));
@@ -566,7 +566,7 @@ class Base {
   def greet { \"base\" }
 }
 class Child < Base {
-  include M
+  include(M)
   def greet { \"c:\" + super.greet }
 }
 Child.new.greet";
@@ -577,7 +577,7 @@ Child.new.greet";
 fn mixin_is_a_question() {
     let src = "module Trackable { }
 class C {
-  include Trackable
+  include(Trackable)
 }
 C.new.is_a?(Trackable)";
     assert_eq!(eval(src), VmValue::Bool(true));
@@ -590,7 +590,7 @@ fn nested_module_include_resolves_lexically() {
     def x { 1 }
   }
   class Sub {
-    include Inner
+    include(Inner)
   }
 }
 Outer.Sub.new.x";

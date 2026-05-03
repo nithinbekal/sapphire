@@ -456,8 +456,17 @@ impl Parser {
         self.logical()
     }
 
-    /// Parse `include A`, `include A.B`, … — adds dotted constant paths as strings.
-    fn parse_include_spec(&mut self, includes: &mut Vec<String>) -> Result<(), SapphireError> {
+    /// Parse `include(Foo)`, `include(Mod.Nested)`, … — dotted constant paths as strings.
+    fn parse_include_statement(&mut self, includes: &mut Vec<String>) -> Result<(), SapphireError> {
+        if !self.check(&TokenKind::LeftParen) {
+            return Err(SapphireError::ParseError {
+                message: "expected '(' after 'include'".into(),
+                line: self.peek().line,
+                column: self.peek().column,
+            });
+        }
+        self.advance(); // '('
+        self.skip_terminators();
         let first = match self.peek().kind.clone() {
             TokenKind::Identifier(n) => {
                 self.advance();
@@ -465,15 +474,17 @@ impl Parser {
             }
             _ => {
                 return Err(SapphireError::ParseError {
-                    message: "expected mixin name after 'include'".into(),
+                    message: "expected mixin name in include(...)".into(),
                     line: self.peek().line,
                     column: self.peek().column,
                 });
             }
         };
         let mut path = first;
+        self.skip_terminators();
         while self.check(&TokenKind::Dot) {
             self.advance();
+            self.skip_terminators();
             let segment = match self.peek().kind.clone() {
                 TokenKind::Identifier(n) => {
                     self.advance();
@@ -481,7 +492,7 @@ impl Parser {
                 }
                 _ => {
                     return Err(SapphireError::ParseError {
-                        message: "expected identifier after '.' in include".into(),
+                        message: "expected identifier after '.' in include(...)".into(),
                         line: self.peek().line,
                         column: self.peek().column,
                     });
@@ -489,7 +500,17 @@ impl Parser {
             };
             path.push('.');
             path.push_str(&segment);
+            self.skip_terminators();
         }
+        self.skip_terminators();
+        if !self.check(&TokenKind::RightParen) {
+            return Err(SapphireError::ParseError {
+                message: "expected ')' after include(...) mixin name".into(),
+                line: self.peek().line,
+                column: self.peek().column,
+            });
+        }
+        self.advance();
         includes.push(path);
         Ok(())
     }
@@ -530,7 +551,7 @@ impl Parser {
             }
             if self.check(&TokenKind::Include) {
                 self.advance();
-                self.parse_include_spec(&mut includes)?;
+                self.parse_include_statement(&mut includes)?;
             } else if self.check(&TokenKind::Class) {
                 nested.push(self.class_def()?);
             } else if self.check(&TokenKind::Module) {
@@ -708,7 +729,7 @@ impl Parser {
             }
             if self.check(&TokenKind::Include) {
                 self.advance();
-                self.parse_include_spec(&mut includes)?;
+                self.parse_include_statement(&mut includes)?;
             } else if self.check(&TokenKind::Class) {
                 nested.push(self.class_def()?);
             } else if self.check(&TokenKind::Module) {
@@ -1935,6 +1956,15 @@ mod tests {
         let tokens = Lexer::new("x = 1; x + 2").scan_tokens();
         let stmts = Parser::new(tokens).parse().unwrap();
         assert_eq!(stmts.len(), 2);
+    }
+
+    #[test]
+    fn test_include_requires_parens() {
+        let ok = Parser::new(Lexer::new("class C { include(M) }\n").scan_tokens()).parse();
+        assert!(ok.is_ok());
+        let ok2 = Parser::new(Lexer::new("class C { include(Outer.Inner) }\n").scan_tokens()).parse();
+        assert!(ok2.is_ok());
+        assert!(Parser::new(Lexer::new("class C { include M }\n").scan_tokens()).parse().is_err());
     }
 
     #[test]
