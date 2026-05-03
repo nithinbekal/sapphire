@@ -2,6 +2,7 @@ use sapphire::compiler::compile;
 use sapphire::lexer::Lexer;
 use sapphire::parser::Parser;
 use sapphire::vm::{Vm, VmError, VmValue};
+use std::path::PathBuf;
 
 fn eval(src: &str) -> VmValue {
     let tokens = Lexer::new(src).scan_tokens();
@@ -544,7 +545,85 @@ Child.new().add(2, 3)";
     assert_eq!(eval(src), VmValue::Int(6));
 }
 
+#[test]
+fn mixin_include_instance_method() {
+    let src = "module Greet {
+  def hi { \"hi\" }
+}
+class Person {
+  include Greet
+}
+Person.new.hi";
+    assert_eq!(eval(src), VmValue::Str("hi".into()));
+}
 
+#[test]
+fn mixin_super_traverses_module_then_superclass() {
+    let src = "module M {
+  def greet { \"m:\" + super.greet }
+}
+class Base {
+  def greet { \"base\" }
+}
+class Child < Base {
+  include M
+  def greet { \"c:\" + super.greet }
+}
+Child.new.greet";
+    assert_eq!(eval(src), VmValue::Str("c:m:base".into()));
+}
+
+#[test]
+fn mixin_is_a_question() {
+    let src = "module Trackable { }
+class C {
+  include Trackable
+}
+C.new.is_a?(Trackable)";
+    assert_eq!(eval(src), VmValue::Bool(true));
+}
+
+#[test]
+fn nested_module_include_resolves_lexically() {
+    let src = "class Outer {
+  module Inner {
+    def x { 1 }
+  }
+  class Sub {
+    include Inner
+  }
+}
+Outer.Sub.new.x";
+    assert_eq!(eval(src), VmValue::Int(1));
+}
+
+#[test]
+fn module_new_is_error() {
+    let err = eval_err("module M {}\nM.new()");
+    match err {
+        VmError::TypeError { message, .. } => {
+            assert!(message.contains("instantiate module"));
+        }
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+#[test]
+fn import_module_fixture() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .canonicalize()
+        .unwrap();
+    let src = r#"import "./module"
+SampleMod.Widget.new.ping"#;
+    let tokens = Lexer::new(src).scan_tokens();
+    let stmts = Parser::new(tokens).parse().expect("parse error");
+    let func = compile(&stmts).expect("compile error");
+    let mut vm = Vm::new(func, dir);
+    vm.load_stdlib().expect("stdlib");
+    let v = vm.run().expect("vm error").expect("empty stack");
+    assert_eq!(v, VmValue::Str("pong".into()));
+}
 
 #[test]
 fn safe_get_on_nil_returns_nil() {

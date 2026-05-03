@@ -20,7 +20,7 @@ cargo build > /dev/null 2>&1
 
 run_check "cargo test" "cargo test"
 run_check "cargo clippy" "cargo clippy -- -D warnings"
-run_check "sapphire test" "target/debug/sapphire-lang test stdlib/tests tests"
+run_check "sapphire test" "target/debug/sapphire-lang test stdlib/tests"
 run_check "examples" "examples/run_all.sh --interpreter && examples/run_all.sh --typecheck"
 
 echo
