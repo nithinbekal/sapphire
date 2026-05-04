@@ -2,6 +2,23 @@ use crate::token::Token;
 use crate::value::Value;
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Literal(Value),
+    Type(String),
+    Binding(String),
+    Wildcard,
+    Range(Value, Value),
+    List(Vec<Pattern>),
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub patterns: Vec<Pattern>,
+    pub guard: Option<Box<Expr>>,
+    pub body: Vec<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
     /// A bare type name: `Int`, `String`, `Bool`, `Float`, `Nil`, or a class name.
     Named(String),
@@ -185,5 +202,10 @@ pub enum Expr {
     TypeAlias {
         name: String,
         type_expr: TypeExpr,
+    },
+    /// `match expr { pattern => { body } ... }` — pattern matching expression.
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
     },
 }

@@ -1,4 +1,4 @@
-use crate::ast::{CallArg, Expr, FieldDef, ParamDef, TypeExpr};
+use crate::ast::{CallArg, Expr, FieldDef, MatchArm, ParamDef, Pattern, TypeExpr};
 use crate::token::TokenKind;
 use crate::value::Value;
 use std::collections::{HashMap, HashSet};
@@ -314,6 +314,22 @@ impl TypeChecker {
     }
     fn pop_scope(&mut self) {
         self.var_scopes.pop();
+    }
+
+    fn check_match_arm(&mut self, arm: &MatchArm) {
+        self.push_scope();
+        // If the arm has a single Binding pattern, declare the binding in scope.
+        if let [Pattern::Binding(name)] = arm.patterns.as_slice() {
+            // Type is unknown without further inference; register as Any for now.
+            self.set_var(name, TypeExpr::Any);
+        }
+        if let Some(guard) = &arm.guard {
+            self.check_expr(guard);
+        }
+        for stmt in &arm.body {
+            self.check_expr(stmt);
+        }
+        self.pop_scope();
     }
 
     fn validate_type_ann(&mut self, te: &TypeExpr) {
@@ -648,6 +664,12 @@ impl TypeChecker {
                 self.current_return_type = saved;
             }
             Expr::TypeAlias { .. } => {}
+            Expr::Match { scrutinee, arms } => {
+                self.check_expr(scrutinee);
+                for arm in arms {
+                    self.check_match_arm(arm);
+                }
+            }
             _ => {}
         }
     }
@@ -1109,6 +1131,14 @@ impl TypeChecker {
                     return Some(ty.clone());
                 }
                 None
+            }
+            Expr::Match { arms, .. } => {
+                let types: Vec<Option<TypeExpr>> = arms
+                    .iter()
+                    .map(|a| a.body.last().and_then(|e| self.infer_type(e)))
+                    .collect();
+                let first = types.first().and_then(|t| t.clone());
+                if types.iter().all(|t| t == &first) { first } else { None }
             }
             _ => None,
         }

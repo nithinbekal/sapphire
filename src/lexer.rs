@@ -98,6 +98,8 @@ impl Lexer {
                 '=' => {
                     if self.match_next('=') {
                         TokenKind::EqEq
+                    } else if self.match_next('>') {
+                        TokenKind::FatArrow
                     } else {
                         TokenKind::Eq
                     }
@@ -514,6 +516,8 @@ impl Lexer {
             "end" => TokenKind::End,
             "import" => TokenKind::Import,
             "type" => TokenKind::Type,
+            "match" => TokenKind::Match,
+            "_" => TokenKind::Underscore,
             _ => TokenKind::Identifier(s),
         }
     }

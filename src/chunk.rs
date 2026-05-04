@@ -217,6 +217,12 @@ pub enum OpCode {
     True,
     False,
     Nil,
+
+    // Pattern matching helpers
+    /// Pop value; push Bool — true if the value is an instance of the named class/type.
+    IsA(String),
+    /// Pop a List; push its length as Int.  Errors if the value is not a List.
+    ListLen,
 }
 
 /// A runtime constant — the only values the compiler can embed directly.

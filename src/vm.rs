@@ -718,6 +718,45 @@ impl Vm {
         self.heap.get_fields_mut(r)
     }
 
+    fn is_instance_of(&self, val: &VmValue, class_name: &str) -> bool {
+        match val {
+            VmValue::Int(_) => class_name == "Int" || class_name == "Num",
+            VmValue::Float(_) => class_name == "Float" || class_name == "Num",
+            VmValue::Str(_) => class_name == "String",
+            VmValue::Bool(_) => class_name == "Bool",
+            VmValue::Nil => class_name == "Nil",
+            VmValue::List(_) => class_name == "List",
+            VmValue::Map(_) => class_name == "Map",
+            VmValue::Set(_) => class_name == "Set",
+            VmValue::Range { .. } => class_name == "Range",
+            VmValue::Instance { class_name: cn, .. } => {
+                if cn == class_name {
+                    return true;
+                }
+                // Walk the superclass chain via the class registry.
+                let mut current: &str = cn.as_str();
+                loop {
+                    if let Some(entry) = self.classes.get(current) {
+                        if let Some(parent) = &entry.superclass {
+                            if parent == class_name {
+                                return true;
+                            }
+                            current = parent.as_str();
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                false
+            }
+            VmValue::Class { name, .. } => class_name == "Class" || name == class_name,
+            VmValue::ClassObj(_) => class_name == "Class",
+            VmValue::Function(_) | VmValue::Closure { .. } => class_name == "Function",
+        }
+    }
+
     fn alloc_list(&mut self, v: Vec<VmValue>) -> VmValue {
         self.maybe_gc();
         VmValue::List(self.heap.alloc(HeapObject::List(v)))
@@ -3725,6 +3764,28 @@ impl Vm {
                         other => {
                             return Err(VmError::TypeError {
                                 message: format!("range_to() not supported for {}", other),
+                                line,
+                            });
+                        }
+                    }
+                }
+
+                OpCode::IsA(ref class_name) => {
+                    let val = self.pop()?;
+                    let result = self.is_instance_of(&val, class_name);
+                    self.stack.push(VmValue::Bool(result));
+                }
+
+                OpCode::ListLen => {
+                    let val = self.pop()?;
+                    match val {
+                        VmValue::List(r) => {
+                            let n = self.get_list(r).len() as i64;
+                            self.stack.push(VmValue::Int(n));
+                        }
+                        other => {
+                            return Err(VmError::TypeError {
+                                message: format!("expected List, got {}", other),
                                 line,
                             });
                         }

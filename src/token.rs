@@ -68,6 +68,10 @@ pub enum TokenKind {
     Type,
     Question,
 
+    Match,
+    FatArrow,   // =>
+    Underscore, // _
+
     Newline,
     Eof,
 }

@@ -1,0 +1,142 @@
+class MatchTest < Test {
+  def test_literal_match {
+    result = match 200 {
+      200 => { "OK" }
+      404 => { "Not Found" }
+      _   => { "Other" }
+    }
+    assert_equal("OK", result)
+  }
+
+  def test_literal_fall_through {
+    result = match 500 {
+      200 => { "OK" }
+      404 => { "Not Found" }
+      _   => { "Other" }
+    }
+    assert_equal("Other", result)
+  }
+
+  def test_multiple_values_per_arm {
+    sat = match "Sat" {
+      "Sat", "Sun" => { "Weekend" }
+      _            => { "Weekday" }
+    }
+    assert_equal("Weekend", sat)
+    sun = match "Sun" {
+      "Sat", "Sun" => { "Weekend" }
+      _            => { "Weekday" }
+    }
+    assert_equal("Weekend", sun)
+    mon = match "Mon" {
+      "Sat", "Sun" => { "Weekend" }
+      _            => { "Weekday" }
+    }
+    assert_equal("Weekday", mon)
+  }
+
+  def test_range {
+    a = match 95 {
+      90..100 => { "A" }
+      80..89  => { "B" }
+      _       => { "F" }
+    }
+    assert_equal("A", a)
+    b = match 85 {
+      90..100 => { "A" }
+      80..89  => { "B" }
+      _       => { "F" }
+    }
+    assert_equal("B", b)
+    f = match 70 {
+      90..100 => { "A" }
+      80..89  => { "B" }
+      _       => { "F" }
+    }
+    assert_equal("F", f)
+  }
+
+  def test_guard {
+    huge = match 150 {
+      n if n > 100 => { "huge" }
+      n if n > 10  => { "big" }
+      _            => { "small" }
+    }
+    assert_equal("huge", huge)
+    big = match 42 {
+      n if n > 100 => { "huge" }
+      n if n > 10  => { "big" }
+      _            => { "small" }
+    }
+    assert_equal("big", big)
+    small = match 5 {
+      n if n > 100 => { "huge" }
+      n if n > 10  => { "big" }
+      _            => { "small" }
+    }
+    assert_equal("small", small)
+  }
+
+  def test_binding {
+    got = match 7 {
+      nil => { "nothing" }
+      v   => { "got #{v}" }
+    }
+    assert_equal("got 7", got)
+    nothing = match nil {
+      nil => { "nothing" }
+      v   => { "got #{v}" }
+    }
+    assert_equal("nothing", nothing)
+  }
+
+  def test_type {
+    int_result = match 5 {
+      Int    => { "int" }
+      String => { "str" }
+      _      => { "other" }
+    }
+    assert_equal("int", int_result)
+    str_result = match "hi" {
+      Int    => { "int" }
+      String => { "str" }
+      _      => { "other" }
+    }
+    assert_equal("str", str_result)
+    other_result = match 3.14 {
+      Int    => { "int" }
+      String => { "str" }
+      _      => { "other" }
+    }
+    assert_equal("other", other_result)
+  }
+
+  def test_list {
+    two_d = match [1, 2] {
+      [x, y]    => { "2D" }
+      [x, y, z] => { "3D" }
+      _         => { "nope" }
+    }
+    assert_equal("2D", two_d)
+    three_d = match [1, 2, 3] {
+      [x, y]    => { "2D" }
+      [x, y, z] => { "3D" }
+      _         => { "nope" }
+    }
+    assert_equal("3D", three_d)
+    nope = match [1] {
+      [x, y]    => { "2D" }
+      [x, y, z] => { "3D" }
+      _         => { "nope" }
+    }
+    assert_equal("nope", nope)
+  }
+
+  def test_match_as_expression {
+    result = match 42 {
+      42 => { "yes" }
+      _  => { "no" }
+    }
+    assert_equal("yes", result)
+  }
+}

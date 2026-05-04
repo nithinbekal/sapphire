@@ -1,4 +1,4 @@
-use crate::ast::{Block, CallArg, Expr, FieldDef, MethodDef, ParamDef, StringPart, TypeExpr};
+use crate::ast::{Block, CallArg, Expr, FieldDef, MatchArm, MethodDef, ParamDef, Pattern, StringPart, TypeExpr};
 use crate::error::SapphireError;
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
@@ -1462,6 +1462,10 @@ impl Parser {
 
     // primary: NUMBER | STRING | BOOL | IDENTIFIER ('=' equality)? | '(' equality ')'
     fn primary(&mut self) -> Result<Expr, SapphireError> {
+        if self.check(&TokenKind::Match) {
+            return self.parse_match();
+        }
+
         if let TokenKind::Number(n) = self.peek().kind {
             self.advance();
             return Ok(Expr::Literal(Value::Int(n)));
@@ -1674,6 +1678,181 @@ impl Parser {
 
         Err(SapphireError::ParseError {
             message: format!("unexpected token '{:?}'", self.peek().kind),
+            line: self.peek().line, column: self.peek().column,
+        })
+    }
+
+    // ── Match expression ──────────────────────────────────────────────────────
+
+    fn parse_match(&mut self) -> Result<Expr, SapphireError> {
+        self.advance(); // consume 'match'
+        self.allow_trailing_block = false;
+        let scrutinee = self.logical()?;
+        self.allow_trailing_block = true;
+        if !self.check(&TokenKind::LeftBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '{' after match scrutinee".into(),
+                line: self.peek().line, column: self.peek().column,
+            });
+        }
+        self.advance(); // consume '{'
+        let mut arms: Vec<MatchArm> = Vec::new();
+        loop {
+            self.skip_terminators();
+            if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+                break;
+            }
+            arms.push(self.parse_arm()?);
+        }
+        if !self.check(&TokenKind::RightBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '}' to close match".into(),
+                line: self.peek().line, column: self.peek().column,
+            });
+        }
+        self.advance(); // consume '}'
+        if arms.is_empty() {
+            return Err(SapphireError::ParseError {
+                message: "match expression has no arms".into(),
+                line: self.peek().line, column: self.peek().column,
+            });
+        }
+        // Validate: last arm must be exhaustive (Wildcard or bare Binding without guard).
+        let last = arms.last().unwrap();
+        let last_exhaustive = last.guard.is_none()
+            && last.patterns.len() == 1
+            && matches!(last.patterns[0], Pattern::Wildcard | Pattern::Binding(_));
+        if !last_exhaustive {
+            return Err(SapphireError::ParseError {
+                message: "last match arm must be a wildcard '_' or bare binding (exhaustive fallback)".into(),
+                line: self.peek().line, column: self.peek().column,
+            });
+        }
+        Ok(Expr::Match {
+            scrutinee: Box::new(scrutinee),
+            arms,
+        })
+    }
+
+    fn parse_arm(&mut self) -> Result<MatchArm, SapphireError> {
+        let mut patterns = vec![self.parse_pattern()?];
+        while self.check(&TokenKind::Comma) {
+            self.advance(); // consume ','
+            self.skip_terminators();
+            patterns.push(self.parse_pattern()?);
+        }
+        // Optional guard: `if condition` — only valid on a single Binding pattern.
+        let guard = if self.check(&TokenKind::If) {
+            if patterns.len() != 1 || !matches!(patterns[0], Pattern::Binding(_)) {
+                return Err(SapphireError::ParseError {
+                    message: "guard 'if' is only allowed on a single binding pattern".into(),
+                    line: self.peek().line, column: self.peek().column,
+                });
+            }
+            self.advance(); // consume 'if'
+            self.allow_trailing_block = false;
+            let g = self.logical()?;
+            self.allow_trailing_block = true;
+            Some(Box::new(g))
+        } else {
+            None
+        };
+        if !self.check(&TokenKind::FatArrow) {
+            return Err(SapphireError::ParseError {
+                message: "expected '=>' after match pattern".into(),
+                line: self.peek().line, column: self.peek().column,
+            });
+        }
+        self.advance(); // consume '=>'
+        let body = self.block()?;
+        Ok(MatchArm { patterns, guard, body })
+    }
+
+    fn parse_pattern(&mut self) -> Result<Pattern, SapphireError> {
+        // Wildcard: _
+        if self.check(&TokenKind::Underscore) {
+            self.advance();
+            return Ok(Pattern::Wildcard);
+        }
+        // List destructuring: [p1, p2, ...]
+        if self.check(&TokenKind::LeftBracket) {
+            self.advance(); // consume '['
+            let mut elements = Vec::new();
+            self.skip_terminators();
+            while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
+                elements.push(self.parse_pattern()?);
+                self.skip_terminators();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    self.skip_terminators();
+                }
+            }
+            if !self.check(&TokenKind::RightBracket) {
+                return Err(SapphireError::ParseError {
+                    message: "expected ']' to close list pattern".into(),
+                    line: self.peek().line, column: self.peek().column,
+                });
+            }
+            self.advance(); // consume ']'
+            return Ok(Pattern::List(elements));
+        }
+        // Nil literal
+        if self.check(&TokenKind::Nil) {
+            self.advance();
+            return Ok(Pattern::Literal(Value::Nil));
+        }
+        // Bool literals
+        if self.check(&TokenKind::True) {
+            self.advance();
+            return Ok(Pattern::Literal(Value::Bool(true)));
+        }
+        if self.check(&TokenKind::False) {
+            self.advance();
+            return Ok(Pattern::Literal(Value::Bool(false)));
+        }
+        // String literal
+        if let TokenKind::StringLit(s) = self.peek().kind.clone() {
+            self.advance();
+            return Ok(Pattern::Literal(Value::Str(s)));
+        }
+        // Numeric literal — may be followed by '..' to form a range pattern.
+        if let TokenKind::Number(n) = self.peek().kind {
+            self.advance();
+            if self.check(&TokenKind::DotDot) {
+                self.advance(); // consume '..'
+                // high bound must also be a number
+                if let TokenKind::Number(hi) = self.peek().kind {
+                    self.advance();
+                    return Ok(Pattern::Range(Value::Int(n), Value::Int(hi)));
+                }
+                return Err(SapphireError::ParseError {
+                    message: "expected integer after '..' in range pattern".into(),
+                    line: self.peek().line, column: self.peek().column,
+                });
+            }
+            return Ok(Pattern::Literal(Value::Int(n)));
+        }
+        // Negative number literal (e.g. -5)
+        if self.check(&TokenKind::Minus) {
+            let next = self.tokens.get(self.current + 1).map(|t| t.kind.clone());
+            if let Some(TokenKind::Number(n)) = next {
+                self.advance(); // consume '-'
+                self.advance(); // consume number
+                return Ok(Pattern::Literal(Value::Int(-n)));
+            }
+        }
+        // Identifier: uppercase → Type, lowercase → Binding
+        if let TokenKind::Identifier(name) = self.peek().kind.clone() {
+            self.advance();
+            let first_char = name.chars().next().unwrap_or('_');
+            if first_char.is_uppercase() {
+                return Ok(Pattern::Type(name));
+            } else {
+                return Ok(Pattern::Binding(name));
+            }
+        }
+        Err(SapphireError::ParseError {
+            message: format!("expected pattern, got '{:?}'", self.peek().kind),
             line: self.peek().line, column: self.peek().column,
         })
     }

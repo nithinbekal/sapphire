@@ -701,3 +701,23 @@ fn class_constant_lexical_access_in_method_infers_type() {
     );
     assert_method_returns!(types, "Math", "approx_pi", Float);
 }
+
+// ── match expression typechecking ─────────────────────────────────────────────
+
+#[test]
+fn match_uniform_arms_infer_type() {
+    let types = check_types_ok(
+        "def f(x: Int) { match x { 1 => { \"one\" } _ => { \"other\" } } }",
+    );
+    assert_function_returns!(types, "f", String);
+}
+
+#[test]
+fn match_no_type_error_on_valid_patterns() {
+    typecheck_ok(r#"match 42 { 1 => { "one" } 2 => { "two" } _ => { "many" } }"#);
+}
+
+#[test]
+fn match_binding_arm_accepted() {
+    typecheck_ok(r#"match 42 { n if n > 0 => { "pos" } _ => { "non-pos" } }"#);
+}

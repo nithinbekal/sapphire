@@ -1,4 +1,4 @@
-use crate::ast::{Block, Expr, MethodDef, StringPart, TypeExpr};
+use crate::ast::{Block, Expr, MatchArm, MethodDef, Pattern, StringPart, TypeExpr};
 use crate::chunk::{Chunk, Constant, Function, OpCode, RuntimeType, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
@@ -931,6 +931,8 @@ impl Compiler {
                 Ok(())
             }
 
+            Expr::Match { scrutinee, arms } => self.compile_match(scrutinee, arms),
+
             Expr::Begin {
                 body,
                 rescue_var,
@@ -1144,7 +1146,8 @@ impl Compiler {
                 }
             }
             // New scopes: do not hoist through closures or class bodies.
-            Expr::Lambda { .. } | Expr::Function { .. } | Expr::Class { .. } => {}
+            // Match arm bindings are scoped per-arm; don't hoist them.
+            Expr::Lambda { .. } | Expr::Function { .. } | Expr::Class { .. } | Expr::Match { .. } => {}
             _ => {}
         }
     }
@@ -1202,6 +1205,221 @@ impl Compiler {
 
     fn patch_jump(&mut self, jump_idx: usize) {
         self.state_mut().chunk.patch_jump(jump_idx);
+    }
+
+    /// Compile `match scrutinee { pattern => { body } ... }` as an expression.
+    fn compile_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> Result<(), CompileError> {
+        // Evaluate the scrutinee; the pushed value IS the stack slot for this local.
+        // We do NOT emit SetLocal/Pop — the value stays at stack[base + scrutinee_slot].
+        self.expr(scrutinee)?;
+        let scrutinee_slot = self.state().locals.len();
+        self.state_mut().locals.push(LocalInfo {
+            name: "__match__".to_string(),
+            captured: false,
+        });
+
+        let mut end_jumps: Vec<usize> = Vec::new();
+
+        for arm in arms {
+            let fail_jumps = match &arm.patterns[..] {
+                [Pattern::Binding(name)] => {
+                    // Binding arm: rename the scrutinee slot so guard/body can reference it.
+                    self.state_mut().locals[scrutinee_slot].name = name.clone();
+                    let mut fjs = Vec::new();
+                    if let Some(guard) = &arm.guard {
+                        self.expr(guard)?;
+                        fjs.push(self.emit_jump(OpCode::JumpIfFalse(0)));
+                        // JumpIfFalse pops bool. On fail: stack = [..., scrutinee]. ✓
+                    }
+                    fjs
+                }
+                _ => self.compile_arm_check(arm, scrutinee_slot)?,
+            };
+
+            self.compile_branch(&arm.body)?;
+            end_jumps.push(self.emit_jump(OpCode::Jump(0)));
+
+            for j in fail_jumps {
+                self.patch_jump(j);
+            }
+
+            // Restore the scrutinee slot name for subsequent arms.
+            self.state_mut().locals[scrutinee_slot].name = "__match__".to_string();
+        }
+
+        for j in end_jumps {
+            self.patch_jump(j);
+        }
+
+        // Keep "__match__" in locals so subsequent slot allocations remain consistent.
+        // The scrutinee value stays on the stack as an orphaned slot for the frame lifetime.
+        Ok(())
+    }
+
+    /// Emit bytecode to check whether the scrutinee matches `arm` (non-binding arms only).
+    /// Returns jump indices to patch to the NEXT arm start.
+    /// After this returns (arm matched), stack = [..., scrutinee]. No extra value on top.
+    fn compile_arm_check(
+        &mut self,
+        arm: &MatchArm,
+        scrutinee_slot: usize,
+    ) -> Result<Vec<usize>, CompileError> {
+        let mut fail_jumps: Vec<usize> = Vec::new();
+
+        if arm.patterns.len() > 1 {
+            // OR pattern — use `Not + JumpIfFalse` so ALL paths leave a clean stack.
+            // For non-last patterns: if original bool is True → Not→False → JumpIfFalse
+            //   jumps to body_entry (popping False). Stack: [scrutinee]. ✓
+            // For the last pattern: JumpIfFalse normally — pops bool; False → fail jump.
+            let last_idx = arm.patterns.len() - 1;
+            let mut body_jumps: Vec<usize> = Vec::new();
+            for (i, pat) in arm.patterns.iter().enumerate() {
+                self.emit_pattern_test(pat, scrutinee_slot)?;
+                if i < last_idx {
+                    self.emit(OpCode::Not);
+                    body_jumps.push(self.emit_jump(OpCode::JumpIfFalse(0)));
+                } else {
+                    fail_jumps.push(self.emit_jump(OpCode::JumpIfFalse(0)));
+                }
+            }
+            for j in body_jumps {
+                self.patch_jump(j);
+            }
+            // Stack: [scrutinee] in all taken-arm paths. ✓
+        } else {
+            // Single pattern — emit test, JumpIfFalse pops bool; no extra Pop needed.
+            self.emit_pattern_test(&arm.patterns[0], scrutinee_slot)?;
+            fail_jumps.push(self.emit_jump(OpCode::JumpIfFalse(0)));
+            // Stack after JumpIfFalse (arm matched): [scrutinee]. ✓
+        }
+
+        Ok(fail_jumps)
+    }
+
+    /// Emit instructions that leave a Bool on the stack: true iff the scrutinee
+    /// at `scrutinee_slot` matches `pattern`.
+    /// Stack effect: net +1 (the bool). The scrutinee slot is untouched.
+    fn emit_pattern_test(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee_slot: usize,
+    ) -> Result<(), CompileError> {
+        match pattern {
+            Pattern::Wildcard | Pattern::Binding(_) => {
+                // Wildcard always matches; Binding is handled by compile_match directly.
+                self.emit(OpCode::True);
+            }
+
+            Pattern::Literal(val) => {
+                self.emit(OpCode::GetLocal(scrutinee_slot));
+                self.literal(val)?;
+                self.emit(OpCode::Equal);
+            }
+
+            Pattern::Type(name) => {
+                self.emit(OpCode::GetLocal(scrutinee_slot));
+                self.emit(OpCode::IsA(name.clone()));
+            }
+
+            Pattern::Range(low, high) => {
+                // scrutinee >= low && scrutinee <= high
+                // JumpIfFalseKeep: on True pops the bool; on False keeps False and jumps.
+                // So after JumpIfFalseKeep on the True path, stack = [scrutinee] with NO extra Pop needed.
+                self.emit(OpCode::GetLocal(scrutinee_slot));
+                self.literal(low)?;
+                self.emit(OpCode::GreaterEqual);
+                let jfalse = self.emit_jump(OpCode::JumpIfFalseKeep(0));
+                self.emit(OpCode::GetLocal(scrutinee_slot));
+                self.literal(high)?;
+                self.emit(OpCode::LessEqual);
+                self.patch_jump(jfalse);
+            }
+
+            Pattern::List(sub_patterns) => {
+                let n = sub_patterns.len();
+                let mut fail_jumps: Vec<usize> = Vec::new();
+
+                // JumpIfFalseKeep semantics: truthy → pop TOS and fall through;
+                // falsy → keep TOS (False) and jump. No extra Pop needed on the success path.
+
+                // 1. Is a List?
+                self.emit(OpCode::GetLocal(scrutinee_slot));
+                self.emit(OpCode::IsA("List".to_string()));
+                fail_jumps.push(self.emit_jump(OpCode::JumpIfFalseKeep(0)));
+
+                // 2. Correct length?
+                self.emit(OpCode::GetLocal(scrutinee_slot));
+                self.emit(OpCode::ListLen);
+                let n_const = self.state_mut().chunk.add_constant(Constant::Int(n as i64));
+                self.emit(OpCode::Constant(n_const));
+                self.emit(OpCode::Equal);
+                fail_jumps.push(self.emit_jump(OpCode::JumpIfFalseKeep(0)));
+
+                // 3. Each element: load inline (no temp local), consume element with check.
+                for (i, sub_pat) in sub_patterns.iter().enumerate() {
+                    self.emit(OpCode::GetLocal(scrutinee_slot));
+                    let i_const =
+                        self.state_mut().chunk.add_constant(Constant::Int(i as i64));
+                    self.emit(OpCode::Constant(i_const));
+                    self.emit(OpCode::Index); // TOS = element (temporary)
+                    self.emit_list_element_check(sub_pat)?; // consumes TOS, pushes bool
+                    fail_jumps.push(self.emit_jump(OpCode::JumpIfFalseKeep(0)));
+                }
+
+                self.emit(OpCode::True);
+
+                for j in fail_jumps {
+                    self.patch_jump(j);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Given an element value on TOS, emit a pattern check that CONSUMES the element
+    /// and pushes a Bool result.  Used for list sub-patterns only.
+    /// (Binding sub-patterns in lists are treated as Wildcard for now.)
+    fn emit_list_element_check(&mut self, pattern: &Pattern) -> Result<(), CompileError> {
+        match pattern {
+            Pattern::Wildcard | Pattern::Binding(_) => {
+                self.emit(OpCode::Pop); // discard element
+                self.emit(OpCode::True);
+            }
+            Pattern::Literal(val) => {
+                self.literal(val)?; // push literal
+                self.emit(OpCode::Equal); // pops element + literal, pushes bool
+            }
+            Pattern::Type(name) => {
+                self.emit(OpCode::IsA(name.clone())); // pops element, pushes bool
+            }
+            Pattern::Range(low, high) => {
+                // elem is TOS; we need it twice (once per bound). Do not register as a
+                // named local — that would corrupt locals.len() across loop iterations.
+                let elem_pos = self.state().locals.len();
+                // Push a copy so GreaterEqual can consume it without losing the original.
+                self.emit(OpCode::GetLocal(elem_pos)); // [elem, elem_copy]
+                self.literal(low)?;                    // [elem, elem_copy, low]
+                self.emit(OpCode::GreaterEqual);       // [elem, bool1] — copy consumed
+                // JumpIfFalse pops bool1 on both branches, leaving [elem] either way.
+                let first_fail = self.emit_jump(OpCode::JumpIfFalse(0));
+                // True path: [elem]  →  check elem <= high
+                self.literal(high)?;                   // [elem, high]
+                self.emit(OpCode::LessEqual);          // [bool2] — elem consumed
+                let end_jump = self.emit_jump(OpCode::Jump(0));
+                // False path: [elem]  →  discard elem, push False
+                self.patch_jump(first_fail);
+                self.emit(OpCode::Pop);
+                self.emit(OpCode::False);
+                self.patch_jump(end_jump);
+                // Both paths: TOS = bool, original elem consumed.
+            }
+            Pattern::List(_) => {
+                // Nested list patterns not supported in this implementation.
+                self.emit(OpCode::Pop);
+                self.emit(OpCode::True);
+            }
+        }
+        Ok(())
     }
 
     /// Compile `begin … rescue … else … end` as an expression: one value on the stack.
