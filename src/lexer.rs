@@ -517,6 +517,7 @@ impl Lexer {
             "import" => TokenKind::Import,
             "type" => TokenKind::Type,
             "abstract" => TokenKind::Abstract,
+            "interface" => TokenKind::Interface,
             _ => TokenKind::Identifier(s),
         }
     }
@@ -676,5 +677,4 @@ mod tests {
             vec![TokenKind::StringLit("\\z".into()), TokenKind::Eof]
         );
     }
-
 }

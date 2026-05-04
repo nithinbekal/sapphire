@@ -3,6 +3,7 @@ use crate::chunk::{Chunk, Constant, Function, OpCode, RuntimeType, UpvalueDef};
 use crate::token::TokenKind;
 use crate::value::Value;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
 
@@ -17,7 +18,11 @@ pub struct CompileError {
 
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[line {}:{}] compile error: {}", self.line, self.column, self.message)
+        write!(
+            f,
+            "[line {}:{}] compile error: {}",
+            self.line, self.column, self.message
+        )
     }
 }
 
@@ -119,6 +124,8 @@ struct Compiler {
     enclosing_class_stack: Vec<String>,
     /// Type alias map collected in a pre-pass; used when encoding type annotations.
     type_aliases: HashMap<String, TypeExpr>,
+    /// Interfaces are checked statically only, so their annotations erase at runtime.
+    interfaces: HashSet<String>,
 }
 
 impl Compiler {
@@ -129,6 +136,7 @@ impl Compiler {
             has_imports: false,
             enclosing_class_stack: Vec::new(),
             type_aliases: HashMap::new(),
+            interfaces: HashSet::new(),
         }
     }
 
@@ -139,6 +147,7 @@ impl Compiler {
             has_imports: true,
             enclosing_class_stack: Vec::new(),
             type_aliases: HashMap::new(),
+            interfaces: HashSet::new(),
         }
     }
 
@@ -149,6 +158,7 @@ impl Compiler {
             has_imports: false,
             enclosing_class_stack: Vec::new(),
             type_aliases: HashMap::new(),
+            interfaces: HashSet::new(),
         }
     }
 
@@ -180,8 +190,14 @@ impl Compiler {
 
     fn collect_type_aliases(&mut self, exprs: &[Expr]) {
         for e in exprs {
-            if let Expr::TypeAlias { name, type_expr } = e {
-                self.type_aliases.insert(name.clone(), type_expr.clone());
+            match e {
+                Expr::TypeAlias { name, type_expr } => {
+                    self.type_aliases.insert(name.clone(), type_expr.clone());
+                }
+                Expr::Interface { name, .. } => {
+                    self.interfaces.insert(name.clone());
+                }
+                _ => {}
             }
         }
     }
@@ -196,11 +212,13 @@ impl Compiler {
                     te.clone()
                 }
             }
-            TypeExpr::Apply(name, args) => {
-                TypeExpr::Apply(name.clone(), args.iter().map(|a| self.resolve_type_expr(a)).collect())
-            }
+            TypeExpr::Apply(name, args) => TypeExpr::Apply(
+                name.clone(),
+                args.iter().map(|a| self.resolve_type_expr(a)).collect(),
+            ),
             TypeExpr::Union(arms) => {
-                let resolved: Vec<TypeExpr> = arms.iter().map(|a| self.resolve_type_expr(a)).collect();
+                let resolved: Vec<TypeExpr> =
+                    arms.iter().map(|a| self.resolve_type_expr(a)).collect();
                 let mut flat = Vec::new();
                 for arm in resolved {
                     match arm {
@@ -208,7 +226,11 @@ impl Compiler {
                         other => flat.push(other),
                     }
                 }
-                if flat.len() == 1 { flat.remove(0) } else { TypeExpr::Union(flat) }
+                if flat.len() == 1 {
+                    flat.remove(0)
+                } else {
+                    TypeExpr::Union(flat)
+                }
             }
             TypeExpr::Literal(_) => te.clone(),
             TypeExpr::Any => TypeExpr::Any,
@@ -218,10 +240,7 @@ impl Compiler {
     // ── Function stack ────────────────────────────────────────────────────────
 
     fn push_fn(&mut self, name: &str, arity: usize, line: u32) {
-        let inherit_super = self
-            .states
-            .last()
-            .and_then(|s| s.super_method_name.clone());
+        let inherit_super = self.states.last().and_then(|s| s.super_method_name.clone());
         self.states.push(FunctionState::new(name, arity, line));
         if let Some(sm) = inherit_super {
             self.state_mut().super_method_name = Some(sm);
@@ -324,6 +343,7 @@ impl Compiler {
                 | Expr::MultiAssign { .. }
                 | Expr::Import { .. }
                 | Expr::TypeAlias { .. }
+                | Expr::Interface { .. }
         )
     }
 
@@ -455,6 +475,10 @@ impl Compiler {
                 // Type aliases are compile-time only; no bytecode emitted.
             }
 
+            Expr::Interface { .. } => {
+                // Interfaces are compile-time only; no bytecode emitted.
+            }
+
             e => {
                 let is_new_local = self.is_new_local_assign(e);
                 // In global mode, function/class defs emit SetGlobal (peek) instead of
@@ -482,7 +506,7 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::TypeAlias { .. } => {
+            Expr::TypeAlias { .. } | Expr::Interface { .. } => {
                 self.stmt(expr)?;
                 self.emit(OpCode::Nil);
                 Ok(())
@@ -500,7 +524,9 @@ impl Compiler {
                     TokenKind::Minus => self.emit(OpCode::Negate),
                     TokenKind::Bang => self.emit(OpCode::Not),
                     TokenKind::Tilde => self.emit(OpCode::BitNot),
-                    other => return Err(self.error(format!("unsupported unary operator '{:?}'", other))),
+                    other => {
+                        return Err(self.error(format!("unsupported unary operator '{:?}'", other)));
+                    }
                 }
                 Ok(())
             }
@@ -547,7 +573,11 @@ impl Compiler {
                     TokenKind::LessEq => self.emit(OpCode::LessEqual),
                     TokenKind::Greater => self.emit(OpCode::Greater),
                     TokenKind::GreaterEq => self.emit(OpCode::GreaterEqual),
-                    other => return Err(self.error(format!("unsupported binary operator '{:?}'", other))),
+                    other => {
+                        return Err(
+                            self.error(format!("unsupported binary operator '{:?}'", other))
+                        );
+                    }
                 }
                 Ok(())
             }
@@ -616,7 +646,12 @@ impl Compiler {
                 block,
             } => {
                 // Method call: `obj.method(args)` or `obj.method(args) { |x| ... }`
-                if let Expr::Get { object, name, line: get_line } = callee.as_ref() {
+                if let Expr::Get {
+                    object,
+                    name,
+                    line: get_line,
+                } = callee.as_ref()
+                {
                     if *get_line > 0 {
                         self.state_mut().current_line = *get_line as u32;
                     }
@@ -706,7 +741,11 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::Get { object, name, line: get_line } => {
+            Expr::Get {
+                object,
+                name,
+                line: get_line,
+            } => {
                 if *get_line > 0 {
                     self.state_mut().current_line = *get_line as u32;
                 }
@@ -719,7 +758,11 @@ impl Compiler {
                 Ok(())
             }
 
-            Expr::SafeGet { object, name, line: get_line } => {
+            Expr::SafeGet {
+                object,
+                name,
+                line: get_line,
+            } => {
                 if *get_line > 0 {
                     self.state_mut().current_line = *get_line as u32;
                 }
@@ -822,9 +865,7 @@ impl Compiler {
                 block: _,
             } => {
                 if *forward_args && !args.is_empty() {
-                    return Err(self.error(
-                        "internal: bare super with non-empty args".to_string(),
-                    ));
+                    return Err(self.error("internal: bare super with non-empty args".to_string()));
                 }
                 self.emit(OpCode::GetSelf);
                 let arg_count = if *forward_args {
@@ -900,7 +941,7 @@ impl Compiler {
                 self.push_fn(name, arity, line);
                 self.state_mut().return_type = return_type.as_ref().and_then(|te| {
                     let erased = erase_type_vars(&self.resolve_type_expr(te), &fn_tvars);
-                    type_expr_runtime(Some(&erased))
+                    self.type_expr_runtime(Some(&erased))
                 });
                 // Slot 0 = the function itself — enables direct recursion by name.
                 self.state_mut().locals.push(LocalInfo {
@@ -1177,7 +1218,10 @@ impl Compiler {
                 }
             }
             // New scopes: do not hoist through closures or class bodies.
-            Expr::Lambda { .. } | Expr::Function { .. } | Expr::Class { .. } => {}
+            Expr::Lambda { .. }
+            | Expr::Function { .. }
+            | Expr::Class { .. }
+            | Expr::Interface { .. } => {}
             _ => {}
         }
     }
@@ -1203,10 +1247,13 @@ impl Compiler {
                 .state_mut()
                 .chunk
                 .add_constant(Constant::Str(name.to_string()));
-            let scope_idx = self.state_mut().chunk.add_constant(Constant::LexicalClassScope {
-                enclosing_classes: enclosing,
-                name_idx,
-            });
+            let scope_idx = self
+                .state_mut()
+                .chunk
+                .add_constant(Constant::LexicalClassScope {
+                    enclosing_classes: enclosing,
+                    name_idx,
+                });
             self.emit(OpCode::GetLexicalConstant(scope_idx));
         } else {
             let idx = self
@@ -1453,7 +1500,7 @@ impl Compiler {
                 .collect();
             self.state_mut().return_type = method.return_type.as_ref().and_then(|te| {
                 let erased = erase_type_vars(&self.resolve_type_expr(te), &all_tvars);
-                type_expr_runtime(Some(&erased))
+                self.type_expr_runtime(Some(&erased))
             });
             self.state_mut().locals.push(LocalInfo {
                 name: "self".into(),
@@ -1486,7 +1533,7 @@ impl Compiler {
                 .collect();
             self.state_mut().return_type = method.return_type.as_ref().and_then(|te| {
                 let erased = erase_type_vars(&self.resolve_type_expr(te), &all_tvars);
-                type_expr_runtime(Some(&erased))
+                self.type_expr_runtime(Some(&erased))
             });
             self.state_mut().locals.push(LocalInfo {
                 name: "self".into(),
@@ -1672,9 +1719,10 @@ fn resolve_include_names(enclosing_stack: &[String], includes: &[String]) -> Vec
 fn erase_type_vars(te: &TypeExpr, type_vars: &std::collections::HashSet<String>) -> TypeExpr {
     match te {
         TypeExpr::Named(n) if type_vars.contains(n.as_str()) => TypeExpr::Any,
-        TypeExpr::Apply(n, args) => {
-            TypeExpr::Apply(n.clone(), args.iter().map(|a| erase_type_vars(a, type_vars)).collect())
-        }
+        TypeExpr::Apply(n, args) => TypeExpr::Apply(
+            n.clone(),
+            args.iter().map(|a| erase_type_vars(a, type_vars)).collect(),
+        ),
         TypeExpr::Union(arms) => {
             TypeExpr::Union(arms.iter().map(|a| erase_type_vars(a, type_vars)).collect())
         }
@@ -1700,6 +1748,30 @@ fn type_expr_runtime(te: Option<&TypeExpr>) -> Option<RuntimeType> {
             } else {
                 Some(RuntimeType::Union(parts))
             }
+        }
+    }
+}
+
+impl Compiler {
+    fn type_expr_runtime(&self, te: Option<&TypeExpr>) -> Option<RuntimeType> {
+        match te {
+            Some(TypeExpr::Named(n)) | Some(TypeExpr::Apply(n, _))
+                if self.interfaces.contains(n) =>
+            {
+                None
+            }
+            Some(TypeExpr::Union(arms)) => {
+                let parts: Vec<RuntimeType> = arms
+                    .iter()
+                    .filter_map(|a| self.type_expr_runtime(Some(a)))
+                    .collect();
+                if parts.is_empty() {
+                    None
+                } else {
+                    Some(RuntimeType::Union(parts))
+                }
+            }
+            other => type_expr_runtime(other),
         }
     }
 }

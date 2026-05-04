@@ -1,0 +1,37 @@
+interface Drawable {
+  def draw() -> String
+}
+
+interface Sink[T] {
+  def push(value: T) -> Nil
+}
+
+module Named {
+  def name() -> String { "badge" }
+}
+
+class Badge {
+  include(Named)
+
+  def draw() -> String {
+    "drawing " + self.name()
+  }
+}
+
+class StringSink {
+  def push(value: String) -> Nil {
+    print value
+    nil
+  }
+}
+
+def render(item: Drawable) -> String {
+  item.draw()
+}
+
+def write(sink: Sink[String]) -> Nil {
+  sink.push("rendered")
+}
+
+write(StringSink.new())
+render(Badge.new())

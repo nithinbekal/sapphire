@@ -397,6 +397,9 @@ impl Parser {
         if self.check(&TokenKind::Module) {
             return self.module_def();
         }
+        if self.check(&TokenKind::Interface) {
+            return self.interface_def();
+        }
         if self.check(&TokenKind::Def) {
             return self.function_def();
         }
@@ -695,6 +698,61 @@ impl Parser {
     fn class_def(&mut self) -> Result<Expr, SapphireError> {
         self.advance(); // consume 'class'
         self.parse_class_from_name(false)
+    }
+
+    fn interface_def(&mut self) -> Result<Expr, SapphireError> {
+        self.advance(); // consume 'interface'
+        let name = match self.peek().kind.clone() {
+            TokenKind::Identifier(n) => {
+                self.advance();
+                n
+            }
+            _ => {
+                return Err(SapphireError::ParseError {
+                    message: "expected interface name".into(),
+                    line: self.peek().line,
+                    column: self.peek().column,
+                });
+            }
+        };
+        let type_params = self.parse_type_param_names()?;
+        if !self.check(&TokenKind::LeftBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '{' after interface name".into(),
+                line: self.peek().line,
+                column: self.peek().column,
+            });
+        }
+        self.advance();
+        let mut methods = Vec::new();
+        loop {
+            self.skip_terminators();
+            if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+                break;
+            }
+            if self.check(&TokenKind::Def) {
+                methods.push(self.interface_method_def()?);
+            } else {
+                return Err(SapphireError::ParseError {
+                    message: "expected 'def' in interface body".into(),
+                    line: self.peek().line,
+                    column: self.peek().column,
+                });
+            }
+        }
+        if !self.check(&TokenKind::RightBrace) {
+            return Err(SapphireError::ParseError {
+                message: "expected '}'".into(),
+                line: self.peek().line,
+                column: self.peek().column,
+            });
+        }
+        self.advance();
+        Ok(Expr::Interface {
+            name,
+            type_params,
+            methods,
+        })
     }
 
     fn parse_class_from_name(&mut self, class_is_abstract: bool) -> Result<Expr, SapphireError> {
@@ -1176,6 +1234,69 @@ impl Parser {
             return_type,
             body: vec![],
             private,
+            class_method: false,
+            is_abstract: true,
+        })
+    }
+
+    fn interface_method_def(&mut self) -> Result<MethodDef, SapphireError> {
+        self.advance(); // consume 'def'
+        let name = match self.peek().kind.clone() {
+            TokenKind::Identifier(n) => {
+                self.advance();
+                n
+            }
+            _ => {
+                return Err(SapphireError::ParseError {
+                    message: "expected method name".into(),
+                    line: self.peek().line,
+                    column: self.peek().column,
+                });
+            }
+        };
+        let type_params = self.parse_type_param_names()?;
+        let mut params = Vec::new();
+        if self.check(&TokenKind::LeftParen) {
+            self.advance();
+            if !self.check(&TokenKind::RightParen) {
+                loop {
+                    match self.peek().kind.clone() {
+                        TokenKind::Identifier(p) => {
+                            self.advance();
+                            let type_ann = self.parse_type_ann()?;
+                            params.push(ParamDef { name: p, type_ann });
+                        }
+                        _ => {
+                            return Err(SapphireError::ParseError {
+                                message: "expected parameter name".into(),
+                                line: self.peek().line,
+                                column: self.peek().column,
+                            });
+                        }
+                    }
+                    if !self.check(&TokenKind::Comma) {
+                        break;
+                    }
+                    self.advance();
+                }
+            }
+            if !self.check(&TokenKind::RightParen) {
+                return Err(SapphireError::ParseError {
+                    message: "expected ')' after parameters".into(),
+                    line: self.peek().line,
+                    column: self.peek().column,
+                });
+            }
+            self.advance();
+        }
+        let return_type = self.parse_return_type()?;
+        Ok(MethodDef {
+            name,
+            type_params,
+            params,
+            return_type,
+            body: vec![],
+            private: false,
             class_method: false,
             is_abstract: true,
         })
