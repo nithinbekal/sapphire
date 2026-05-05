@@ -1,26 +1,6 @@
 use crate::gc::{GcHeap, GcRef};
 use crate::vm::{define_native_method, HeapObject, VmError, VmValue};
 
-const METHOD_ARITIES: &[(&str, usize)] = &[
-    ("first", 0),
-    ("include?", 1),
-    ("last", 0),
-    ("max", 0),
-    ("min", 0),
-    ("size", 0),
-    ("to_a", 0),
-    ("to_s", 0),
-];
-
-fn arg_error(name: &str, argc: usize, line: u32) -> VmError {
-    let msg = METHOD_ARITIES
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, arity)| format!("Range.{name} expects {arity} argument(s), got {argc}"))
-        .unwrap_or_else(|| format!("Range has no method '{name}'"));
-    VmError::TypeError { message: msg, line }
-}
-
 fn range_recv(recv: &VmValue) -> (i64, i64) {
     match recv {
         VmValue::Range { from, to } => (*from, *to),
@@ -53,7 +33,7 @@ pub fn dispatch_range_method(
             message: "include? expects an Int".to_string(),
             line,
         }),
-        _ => Err(arg_error(name, args.len(), line)),
+        _ => unreachable!("dispatch_range_method({name:?}, {} args)", args.len()),
     }
 }
 

@@ -1,38 +1,6 @@
 use crate::gc::{GcHeap, GcRef};
 use crate::vm::{define_native_method, HeapObject, NativeArity, VmError, VmValue};
 
-const METHOD_ARITIES: &[(&str, usize)] = &[
-    ("bytes", 0),
-    ("chars", 0),
-    ("chomp", 0),
-    ("downcase", 0),
-    ("empty?", 0),
-    ("ends_with?", 1),
-    ("include?", 1),
-    ("lines", 0),
-    ("replace", 2),
-    ("replace_all", 2),
-    ("reverse", 0),
-    ("size", 0),
-    ("slice", 2),
-    ("starts_with?", 1),
-    ("split", 1),
-    ("to_f", 0),
-    ("to_i", 0),
-    ("to_s", 0),
-    ("trim", 0),
-    ("upcase", 0),
-];
-
-fn arg_error(name: &str, argc: usize, line: u32) -> VmError {
-    let msg = METHOD_ARITIES
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, arity)| format!("String.{name} expects {arity} argument(s), got {argc}"))
-        .unwrap_or_else(|| format!("String has no method '{name}'"));
-    VmError::TypeError { message: msg, line }
-}
-
 fn str_recv(recv: &VmValue) -> &str {
     match recv {
         VmValue::Str(s) => s.as_str(),
@@ -125,7 +93,7 @@ pub fn dispatch_str_method(
             message: "split expects a String delimiter".to_string(),
             line,
         }),
-        _ => Err(arg_error(name, args.len(), line)),
+        _ => unreachable!("dispatch_str_method({name:?}, {} args)", args.len()),
     }
 }
 

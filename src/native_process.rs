@@ -8,18 +8,13 @@ pub enum ProcessResult {
     RunOutput { stdout: String, stderr: String, exit_code: i64 },
 }
 
-const METHOD_ARITIES: &[(&str, usize)] = &[
-    ("args", 0),
-    ("pid", 0),
-    ("run", 1),
-];
-
-fn arg_error(name: &str, argc: usize, line: u32) -> VmError {
-    let msg = METHOD_ARITIES.iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, arity)| format!("Process.{name} expects {arity} argument(s), got {argc}"))
-        .unwrap_or_else(|| format!("Process has no class method '{name}'"));
-    VmError::TypeError { message: msg, line }
+fn process_dispatch_error(name: &str, argc: usize, line: u32) -> VmError {
+    let message = match name {
+        "args" | "pid" => format!("Process.{name} expects 0 argument(s), got {argc}"),
+        "run" => format!("Process.run expects 1 argument(s), got {argc}"),
+        _ => format!("Process has no class method '{name}'"),
+    };
+    VmError::TypeError { message, line }
 }
 
 pub fn dispatch_process_class_method(
@@ -37,10 +32,12 @@ pub fn dispatch_process_class_method(
         ("exit", []) => std::process::exit(0),
         ("exit", [VmValue::Int(n)]) => std::process::exit(*n as i32),
         ("exit", [_]) => Err(VmError::TypeError {
-            message: "Process.exit: exit code must be an integer".to_string(), line,
+            message: "Process.exit: exit code must be an integer".to_string(),
+            line,
         }),
         ("exit", _) => Err(VmError::TypeError {
-            message: format!("Process.exit expects 0 or 1 argument, got {}", args.len()), line,
+            message: format!("Process.exit expects 0 or 1 argument, got {}", args.len()),
+            line,
         }),
 
         ("pid", []) => Ok(ProcessResult::Primitive(VmValue::Int(std::process::id() as i64))),
@@ -58,9 +55,10 @@ pub fn dispatch_process_class_method(
             })
         }
         ("run", [_]) => Err(VmError::TypeError {
-            message: "Process.run: command must be a string".to_string(), line,
+            message: "Process.run: command must be a string".to_string(),
+            line,
         }),
 
-        _ => Err(arg_error(name, args.len(), line)),
+        _ => Err(process_dispatch_error(name, args.len(), line)),
     }
 }
