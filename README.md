@@ -20,9 +20,9 @@ A Ruby-inspired, gradually typed, object-oriented scripting language — everyth
 class Shape {
   attr color = "red"
 
-  def area { 0 }
+  def area() { 0 }
 
-  def describe {
+  def describe() {
     "A #{self.color} shape with area #{self.area()}"
   }
 }
@@ -30,7 +30,7 @@ class Shape {
 class Circle < Shape {
   attr radius: Float
 
-  def area {
+  def area() {
     Math::PI * self.radius * self.radius
   }
 }
@@ -140,9 +140,9 @@ class Color {
   attr b: Int
 
   self {
-    def red   { Color.new(r: 255, g: 0, b: 0) }
-    def green { Color.new(r: 0, g: 255, b: 0) }
-    def blue  { Color.new(r: 0, g: 0, b: 255) }
+    def red()   { Color.new(r: 255, g: 0, b: 0) }
+    def green() { Color.new(r: 0, g: 255, b: 0) }
+    def blue()  { Color.new(r: 0, g: 0, b: 255) }
   }
 }
 

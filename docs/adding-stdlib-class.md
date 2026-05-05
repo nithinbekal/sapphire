@@ -376,7 +376,7 @@ Higher-order helpers in Sapphire call primitives you provide from Rust or from *
 
 ```sapphire
 class Set {
-  def map {
+  def map() {
     result = []
     each { |x| result.append(yield(x)) }
     result

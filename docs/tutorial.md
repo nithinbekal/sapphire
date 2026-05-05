@@ -271,11 +271,11 @@ class Point {
   attr x: Int
   attr y: Int
 
-  def distance_sq -> Int {
+  def distance_sq() -> Int {
     x * x + y * y
   }
 
-  def to_s -> Str {
+  def to_s() -> Str {
     "(#{x}, #{y})"
   }
 }
@@ -305,11 +305,11 @@ Reading uses the bare field name; writing requires `self.field =`:
 class Counter {
   attr count = 0
 
-  def increment {
+  def increment() {
     self.count = count + 1
   }
 
-  def reset {
+  def reset() {
     self.count = 0
   }
 }
@@ -358,7 +358,7 @@ class Point {
   attr y: Int
 
   self {
-    def origin {
+    def origin() {
       self.new(x: 0, y: 0)
     }
   }
@@ -376,23 +376,23 @@ Use `class Child < Parent` to inherit from a parent class. Subclasses inherit al
 class Animal {
   attr name: Str
 
-  def speak {
+  def speak() {
     print "..."
   }
 
-  def greet {
+  def greet() {
     print "I am #{name}"
   }
 }
 
 class Dog < Animal {
-  def speak {
+  def speak() {
     print "Woof!"
   }
 }
 
 class Cat < Animal {
-  def speak {
+  def speak() {
     print "Meow!"
   }
 }
@@ -411,7 +411,7 @@ Use bare `super` or `super(...)` to call the superclass method with the same nam
 class Animal {
   attr name: Str
 
-  def describe -> Str {
+  def describe() -> Str {
     name
   }
 }
@@ -419,7 +419,7 @@ class Animal {
 class Dog < Animal {
   attr breed: Str
 
-  def describe -> Str {
+  def describe() -> Str {
     super() + " (#{breed})"
   }
 }
@@ -526,7 +526,7 @@ class Point {
     ((dx * dx) + (dy * dy)).sqrt()
   }
 
-  def to_s -> Str {
+  def to_s() -> Str {
     "(#{self.x}, #{self.y})"
   }
 }
@@ -555,7 +555,7 @@ class Circle {
   attr center: Point
   attr radius: Float
 
-  def area -> Float {
+  def area() -> Float {
     3.14159 * self.radius * self.radius
   }
 }
@@ -569,11 +569,11 @@ Here is a small program that uses classes, inheritance, type annotations, blocks
 
 ```ruby
 class Shape {
-  def area -> Float {
+  def area() -> Float {
     raise "area() not implemented"
   }
 
-  def describe -> Str {
+  def describe() -> Str {
     "Shape with area #{self.area()}"
   }
 }
@@ -582,11 +582,11 @@ class Rectangle < Shape {
   attr width: Float
   attr height: Float
 
-  def area -> Float {
+  def area() -> Float {
     width * height
   }
 
-  def describe -> Str {
+  def describe() -> Str {
     "Rectangle #{width}x#{height}, area=#{self.area()}"
   }
 }
@@ -594,11 +594,11 @@ class Rectangle < Shape {
 class Circle < Shape {
   attr radius: Float
 
-  def area -> Float {
+  def area() -> Float {
     3.14159 * radius * radius
   }
 
-  def describe -> Str {
+  def describe() -> Str {
     "Circle r=#{radius}, area=#{self.area()}"
   }
 }

@@ -2,10 +2,10 @@
 # Inherits numeric helper methods from Num.
 #
 #   x = 3.14
-#   x.positive?  # true
+#   x.positive?()  # true
 #   x.abs        # 3.14
 #   x.is_a?(Num)   # true
 #
 class Float < Num {
-  def zero? { self == 0.0 }
+  def zero?() { self == 0.0 }
 }

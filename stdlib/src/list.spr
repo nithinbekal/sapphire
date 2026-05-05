@@ -27,7 +27,7 @@ class List {
   #   [1, 2, 3].any? { |x| x > 2 }   # true
   #   [1, 2, 3].any? { |x| x > 9 }   # false
   #
-  def any? {
+  def any?() {
     each { |x| return true if yield(x) }
     false
   }
@@ -37,7 +37,7 @@ class List {
   #   [1, 2, 3].all? { |x| x > 0 }   # true
   #   [1, 2, 3].all? { |x| x > 2 }   # false
   #
-  def all? {
+  def all?() {
     each { |x| return false if yield(x) == false }
     true
   }
@@ -47,7 +47,7 @@ class List {
   #   [1, 2, 3].none? { |x| x > 9 }   # true
   #   [1, 2, 3].none? { |x| x > 2 }   # false
   #
-  def none? {
+  def none?() {
     each { |x| return false if yield(x) }
     true
   }
