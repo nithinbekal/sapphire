@@ -4,30 +4,30 @@
 class Num {
   # Returns true if the value is zero.
   #
-  #   0.zero?()    # true
-  #   1.zero?()    # false
-  #   0.0.zero?()  # true
+  #   0.zero?    # true
+  #   1.zero?    # false
+  #   0.0.zero?  # true
   #
 
-  def zero?() { self == 0 }
+  def zero? { self == 0 }
 
   # Returns true if the value is greater than zero.
   #
-  #   1.positive?()    # true
-  #   0.positive?()    # false
-  #   (-1).positive?() # false
+  #   1.positive?    # true
+  #   0.positive?    # false
+  #   (-1).positive? # false
   #
 
-  def positive?() { self > 0 }
+  def positive? { self > 0 }
 
   # Returns true if the value is less than zero.
   #
-  #   (-1).negative?() # true
-  #   0.negative?()    # false
-  #   1.negative?()    # false
+  #   (-1).negative? # true
+  #   0.negative?    # false
+  #   1.negative?    # false
   #
 
-  def negative?() { self < 0 }
+  def negative? { self < 0 }
 
   # Returns the absolute value.
   #

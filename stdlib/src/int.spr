@@ -2,24 +2,24 @@
 # Inherits numeric helper methods from Num.
 #
 #   x = 42
-#   x.zero?()     # false
+#   x.zero?     # false
 #   x.abs       # 42
 #   x.is_a?(Num)  # true
 #
 class Int < Num {
   # Returns true if the integer is even.
   #
-  #   4.even?()  # true
-  #   3.even?()  # false
+  #   4.even?  # true
+  #   3.even?  # false
   #
-  def even?() { self % 2 == 0 }
+  def even? { self % 2 == 0 }
 
   # Returns true if the integer is odd.
   #
-  #   3.odd?()  # true
-  #   4.odd?()  # false
+  #   3.odd?  # true
+  #   4.odd?  # false
   #
-  def odd?() { self % 2 != 0 }
+  def odd? { self % 2 != 0 }
 
   # Returns the larger of self and other.
   #

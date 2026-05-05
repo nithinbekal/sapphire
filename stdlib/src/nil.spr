@@ -4,9 +4,9 @@
 class Nil {
   # Returns true. nil is the only value that answers true to nil?.
   #
-  #   nil.nil?()   # true
+  #   nil.nil?   # true
   #
-  def nil?() {
+  def nil? {
     true
   }
 

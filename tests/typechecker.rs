@@ -82,7 +82,7 @@ fn literal_union_param_rejects_wrong_literal() {
 
 #[test]
 fn union_duplicate_arm_type_error() {
-    assert_typecheck_error!("def f() -> Int | Int { 1 }\nf()", "duplicate type 'Int' in union");
+    assert_typecheck_error!("def f -> Int | Int { 1 }\nf()", "duplicate type 'Int' in union");
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn bare_list_compatible_with_parameterized_list_gradual() {
 fn infer_return_type_propagates_to_annotated_caller() {
     let types = check_types_ok(
         "def double(n: Int) { n * 2 }\n\
-         def wrapper() -> Int { double(3) }",
+         def wrapper -> Int { double(3) }",
     );
     assert_function_returns!(types, "double", Int);
 }
@@ -154,8 +154,8 @@ fn inferred_class_method_return_type_exposed() {
 #[test]
 fn infer_return_type_catches_caller_mismatch() {
     assert_typecheck_error!(
-        "def greet() { \"hello\" }\n\
-         def main() -> Int { greet() }",
+        "def greet { \"hello\" }\n\
+         def main -> Int { greet() }",
         "expected Int",
         "got String"
     );
@@ -165,8 +165,8 @@ fn infer_return_type_catches_caller_mismatch() {
 fn infer_return_type_class_method_propagates() {
     let types = check_types_ok(
         "class Counter {\n\
-           def value() { 0 }\n\
-           def doubled() -> Int { self.value() }\n\
+           def value { 0 }\n\
+           def doubled -> Int { self.value() }\n\
          }",
     );
     assert_method_returns!(types, "Counter", "value", Int);
@@ -177,7 +177,7 @@ fn infer_return_type_class_method_propagates() {
 fn infer_if_type_matching_branches() {
     let types = check_types_ok(
         "def clamp(x: Int) { if x > 0 { x } else { 0 } }\n\
-         def caller() -> Int { clamp(5) }",
+         def caller -> Int { clamp(5) }",
     );
     assert_function_returns!(types, "clamp", Int);
 }
@@ -186,7 +186,7 @@ fn infer_if_type_matching_branches() {
 fn infer_if_type_catches_caller_mismatch() {
     assert_typecheck_error!(
         "def sign(x: Int) { if x > 0 { 1 } else { 0 } }\n\
-         def caller() -> String { sign(1) }",
+         def caller -> String { sign(1) }",
         "expected String",
         "got Int"
     );
@@ -207,8 +207,8 @@ fn infer_if_mismatched_branches_no_inference() {
 #[test]
 fn infer_while_returns_nil() {
     let types = check_types_ok(
-        "def f() { while true { 42 } }\n\
-         def caller() -> Nil { f() }",
+        "def f { while true { 42 } }\n\
+         def caller -> Nil { f() }",
     );
     assert_function_returns!(types, "f", Nil);
 }
@@ -216,8 +216,8 @@ fn infer_while_returns_nil() {
 #[test]
 fn infer_while_nil_catches_caller_mismatch() {
     assert_typecheck_error!(
-        "def f() { while true { 42 } }\n\
-         def caller() -> Int { f() }",
+        "def f { while true { 42 } }\n\
+         def caller -> Int { f() }",
         "expected Int",
         "got Nil"
     );
@@ -226,8 +226,8 @@ fn infer_while_nil_catches_caller_mismatch() {
 #[test]
 fn infer_begin_type_no_rescue() {
     let types = check_types_ok(
-        "def f() { begin\n42\nend }\n\
-         def caller() -> Int { f() }",
+        "def f { begin\n42\nend }\n\
+         def caller -> Int { f() }",
     );
     assert_function_returns!(types, "f", Int);
 }
@@ -235,8 +235,8 @@ fn infer_begin_type_no_rescue() {
 #[test]
 fn infer_begin_type_catches_caller_mismatch() {
     assert_typecheck_error!(
-        "def f() { begin\n42\nend }\n\
-         def caller() -> String { f() }",
+        "def f { begin\n42\nend }\n\
+         def caller -> String { f() }",
         "expected String",
         "got Int"
     );
@@ -244,14 +244,14 @@ fn infer_begin_type_catches_caller_mismatch() {
 
 #[test]
 fn infer_begin_type_with_rescue_no_inference() {
-    typecheck_ok("def f() { begin\n42\nrescue e\n0\nend }\nf()");
+    typecheck_ok("def f { begin\n42\nrescue e\n0\nend }\nf()");
 }
 
 #[test]
 fn infer_assign_propagates_int() {
     let types = check_types_ok(
-        "def f() { x = 42 }\n\
-         def caller() -> Int { f() }",
+        "def f { x = 42 }\n\
+         def caller -> Int { f() }",
     );
     assert_function_returns!(types, "f", Int);
 }
@@ -259,8 +259,8 @@ fn infer_assign_propagates_int() {
 #[test]
 fn infer_assign_propagates_string() {
     let types = check_types_ok(
-        "def f() { s = \"hello\" }\n\
-         def caller() -> String { f() }",
+        "def f { s = \"hello\" }\n\
+         def caller -> String { f() }",
     );
     assert_function_returns!(types, "f", String);
 }
@@ -268,8 +268,8 @@ fn infer_assign_propagates_string() {
 #[test]
 fn infer_assign_catches_caller_mismatch() {
     assert_typecheck_error!(
-        "def f() { x = 1 }\n\
-         def caller() -> String { f() }",
+        "def f { x = 1 }\n\
+         def caller -> String { f() }",
         "expected String",
         "got Int"
     );
@@ -279,7 +279,7 @@ fn infer_assign_catches_caller_mismatch() {
 fn infer_assign_chained_through_variable() {
     let types = check_types_ok(
         "def f(n: Int) { x = n }\n\
-         def caller() -> Int { f(7) }",
+         def caller -> Int { f(7) }",
     );
     assert_function_returns!(types, "f", Int);
 }
@@ -288,7 +288,7 @@ fn infer_assign_chained_through_variable() {
 fn assign_tracks_type_for_subsequent_typed_call() {
     typecheck_ok(
         "def foo(n: Int) { n }\n\
-         def f() { x = 42\nfoo(x) }",
+         def f { x = 42\nfoo(x) }",
     );
 }
 
@@ -296,7 +296,7 @@ fn assign_tracks_type_for_subsequent_typed_call() {
 fn assign_tracked_type_causes_error_on_mismatch() {
     assert_typecheck_error!(
         "def foo(n: Int) { n }\n\
-         def f() { x = \"hello\"\nfoo(x) }",
+         def f { x = \"hello\"\nfoo(x) }",
         "expected Int",
         "got String"
     );
@@ -306,7 +306,7 @@ fn assign_tracked_type_causes_error_on_mismatch() {
 fn reassign_overwrites_tracked_type() {
     typecheck_ok(
         "def foo(n: String) { n }\n\
-         def f() { x = 42\nx = \"hello\"\nfoo(x) }",
+         def f { x = 42\nx = \"hello\"\nfoo(x) }",
     );
 }
 
@@ -315,7 +315,7 @@ fn safe_get_call_infers_nil_union() {
     use sapphire::ast::TypeExpr;
     let types = check_types_ok(
         "class Foo {\n\
-           def bar() -> Int { 42 }\n\
+           def bar -> Int { 42 }\n\
          }\n\
          def f(x: Foo) { x&.bar() }",
     );
@@ -332,7 +332,7 @@ fn safe_get_call_infers_nil_union() {
 fn safe_get_call_rejects_when_int_expected() {
     assert_typecheck_error!(
         "class Foo {\n\
-           def bar() -> Int { 42 }\n\
+           def bar -> Int { 42 }\n\
          }\n\
          def f(x: Foo) -> Int { x&.bar() }",
         "expected Int",
@@ -344,7 +344,7 @@ fn safe_get_call_rejects_when_int_expected() {
 fn safe_get_call_accepts_nullable_return() {
     typecheck_ok(
         "class Foo {\n\
-           def bar() -> Int { 42 }\n\
+           def bar -> Int { 42 }\n\
          }\n\
          def f(x: Foo) -> Int? { x&.bar() }",
     );
@@ -353,8 +353,8 @@ fn safe_get_call_accepts_nullable_return() {
 #[test]
 fn infer_return_expr_int() {
     let types = check_types_ok(
-        "def f() { return 42 }\n\
-         def caller() -> Int { f() }",
+        "def f { return 42 }\n\
+         def caller -> Int { f() }",
     );
     assert_function_returns!(types, "f", Int);
 }
@@ -362,8 +362,8 @@ fn infer_return_expr_int() {
 #[test]
 fn infer_return_expr_string() {
     let types = check_types_ok(
-        "def f() { return \"hi\" }\n\
-         def caller() -> String { f() }",
+        "def f { return \"hi\" }\n\
+         def caller -> String { f() }",
     );
     assert_function_returns!(types, "f", String);
 }
@@ -371,8 +371,8 @@ fn infer_return_expr_string() {
 #[test]
 fn infer_return_expr_catches_caller_mismatch() {
     assert_typecheck_error!(
-        "def f() { return 42 }\n\
-         def caller() -> String { f() }",
+        "def f { return 42 }\n\
+         def caller -> String { f() }",
         "expected String",
         "got Int"
     );
@@ -384,7 +384,7 @@ fn infer_early_return_method() {
         "class C {\n\
            def f(x: Int) { return x }\n\
          }\n\
-         def caller() -> Int { C.new().f(1) }",
+         def caller -> Int { C.new().f(1) }",
     );
     assert_method_returns!(types, "C", "f", Int);
 }
@@ -392,8 +392,8 @@ fn infer_early_return_method() {
 #[test]
 fn infer_set_propagates_int() {
     let types = check_types_ok(
-        "class P { attr x: Int\n def f() { self.x = 42 } }\n\
-         def caller() -> Int { P.new().f() }",
+        "class P { attr x: Int\n def f { self.x = 42 } }\n\
+         def caller -> Int { P.new().f() }",
     );
     assert_method_returns!(types, "P", "f", Int);
 }
@@ -401,8 +401,8 @@ fn infer_set_propagates_int() {
 #[test]
 fn infer_set_propagates_string() {
     let types = check_types_ok(
-        "class P { attr label: String\n def f() { self.label = \"hi\" } }\n\
-         def caller() -> String { P.new().f() }",
+        "class P { attr label: String\n def f { self.label = \"hi\" } }\n\
+         def caller -> String { P.new().f() }",
     );
     assert_method_returns!(types, "P", "f", String);
 }
@@ -410,8 +410,8 @@ fn infer_set_propagates_string() {
 #[test]
 fn infer_set_catches_caller_mismatch() {
     assert_typecheck_error!(
-        "class P { attr x: Int\n def f() { self.x = 1 } }\n\
-         def caller() -> String { P.new().f() }",
+        "class P { attr x: Int\n def f { self.x = 1 } }\n\
+         def caller -> String { P.new().f() }",
         "expected String",
         "got Int"
     );
@@ -421,7 +421,7 @@ fn infer_set_catches_caller_mismatch() {
 fn infer_set_chained_through_typed_param() {
     let types = check_types_ok(
         "class P { attr x: Int\n def f(n: Int) { self.x = n } }\n\
-         def caller() -> Int { P.new().f(7) }",
+         def caller -> Int { P.new().f(7) }",
     );
     assert_method_returns!(types, "P", "f", Int);
 }
@@ -430,7 +430,7 @@ fn infer_set_chained_through_typed_param() {
 fn infer_string_concat_plus() {
     let types = check_types_ok(
         "def greet(a: String, b: String) { a + b }\n\
-         def caller() -> String { greet(\"hello\", \" world\") }",
+         def caller -> String { greet(\"hello\", \" world\") }",
     );
     assert_function_returns!(types, "greet", String);
 }
@@ -439,7 +439,7 @@ fn infer_string_concat_plus() {
 fn infer_string_concat_return_type_mismatch() {
     assert_typecheck_error!(
         "def f(a: String, b: String) { a + b }\n\
-         def caller() -> Int { f(\"x\", \"y\") }",
+         def caller -> Int { f(\"x\", \"y\") }",
         "expected Int",
         "got String"
     );
@@ -449,7 +449,7 @@ fn infer_string_concat_return_type_mismatch() {
 fn string_plus_int_does_not_infer() {
     let types = check_types_ok(
         "def f(a: String, b: Int) { a + b }\n\
-         def caller() -> String { \"ok\" }",
+         def caller -> String { \"ok\" }",
     );
     assert_eq!(types.function_return_type("f"), Some(None));
 }
@@ -457,8 +457,8 @@ fn string_plus_int_does_not_infer() {
 #[test]
 fn infer_callee_defined_after_caller() {
     let types = check_types_ok(
-        "def caller() { callee() }\n\
-         def callee() { 42 }",
+        "def caller { callee() }\n\
+         def callee { 42 }",
     );
     assert_function_returns!(types, "caller", Int);
     assert_function_returns!(types, "callee", Int);
@@ -467,9 +467,9 @@ fn infer_callee_defined_after_caller() {
 #[test]
 fn infer_chained_forward_references() {
     let types = check_types_ok(
-        "def a() { b() }\n\
-         def b() { c() }\n\
-         def c() { 42 }",
+        "def a { b() }\n\
+         def b { c() }\n\
+         def c { 42 }",
     );
     assert_function_returns!(types, "a", Int);
     assert_function_returns!(types, "b", Int);
@@ -480,8 +480,8 @@ fn infer_chained_forward_references() {
 fn infer_method_calling_forward_declared_method_in_same_class() {
     let types = check_types_ok(
         "class C {\n\
-           def caller() { self.callee() }\n\
-           def callee() { 42 }\n\
+           def caller { self.callee() }\n\
+           def callee { 42 }\n\
          }",
     );
     assert_method_returns!(types, "C", "caller", Int);
@@ -491,9 +491,9 @@ fn infer_method_calling_forward_declared_method_in_same_class() {
 #[test]
 fn infer_function_calling_method_on_later_declared_class() {
     let types = check_types_ok(
-        "def caller() { B.new().helper() }\n\
+        "def caller { B.new().helper() }\n\
          class B {\n\
-           def helper() { 42 }\n\
+           def helper { 42 }\n\
          }",
     );
     assert_function_returns!(types, "caller", Int);
@@ -503,8 +503,8 @@ fn infer_function_calling_method_on_later_declared_class() {
 #[test]
 fn infer_list_literal_index() {
     let types = check_types_ok(
-        "def f() { [1, 2, 3][0] }\n\
-         def caller() -> Int { f() }",
+        "def f { [1, 2, 3][0] }\n\
+         def caller -> Int { f() }",
     );
     assert_function_returns!(types, "f", Int);
 }
@@ -512,8 +512,8 @@ fn infer_list_literal_index() {
 #[test]
 fn infer_list_literal_index_catches_mismatch() {
     assert_typecheck_error!(
-        "def f() { [1, 2, 3][0] }\n\
-         def caller() -> String { f() }",
+        "def f { [1, 2, 3][0] }\n\
+         def caller -> String { f() }",
         "expected String",
         "got Int"
     );
@@ -523,7 +523,7 @@ fn infer_list_literal_index_catches_mismatch() {
 fn infer_list_param_index() {
     let types = check_types_ok(
         "def first(items: List[Int]) { items[0] }\n\
-         def caller() -> Int { first([]) }",
+         def caller -> Int { first([]) }",
     );
     assert_function_returns!(types, "first", Int);
 }
@@ -531,8 +531,8 @@ fn infer_list_param_index() {
 #[test]
 fn infer_map_literal_index() {
     let types = check_types_ok(
-        "def f() { {a: 1, b: 2}[\"a\"] }\n\
-         def caller() -> Int { f() }",
+        "def f { {a: 1, b: 2}[\"a\"] }\n\
+         def caller -> Int { f() }",
     );
     assert_function_returns!(types, "f", Int);
 }
@@ -540,14 +540,14 @@ fn infer_map_literal_index() {
 #[test]
 fn infer_mixed_list_literal_index_no_inference() {
     // Mixed element types → no element type inference, so return type stays unknown
-    typecheck_ok("def f() { [1, \"two\", 3][0] }");
+    typecheck_ok("def f { [1, \"two\", 3][0] }");
 }
 
 #[test]
 fn infer_multiassign_return_type() {
     let types = check_types_ok(
-        "def f() { a, b = 1, 2 }\n\
-         def caller() -> Int { f() }",
+        "def f { a, b = 1, 2 }\n\
+         def caller -> Int { f() }",
     );
     assert_function_returns!(types, "f", Int);
 }
@@ -564,7 +564,7 @@ fn infer_multiassign_spread_list_literal() {
 #[test]
 fn infer_multiassign_spread_list_call() {
     typecheck_ok(
-        "def g() -> List[Int] { [] }\n\
+        "def g -> List[Int] { [] }\n\
          a, b = g()\n\
          def f(x: Int, y: Int) { }\n\
          f(a, b)",
@@ -613,8 +613,8 @@ fn infer_mutual_recursion_three_functions() {
 fn infer_mutual_recursion_pure_cycle_stays_none() {
     // Pure cycle with no base case — both should remain None.
     let types = check_types_ok(
-        "def f() { g() }\n\
-         def g() { f() }",
+        "def f { g() }\n\
+         def g { f() }",
     );
     assert_eq!(types.function_return_type("f"), Some(None));
     assert_eq!(types.function_return_type("g"), Some(None));
@@ -627,7 +627,7 @@ fn infer_mutual_recursion_catches_mismatch() {
     assert_typecheck_error!(
         "def f(n: Int) { if n > 0 { g(n - 1) } else { 0 } }\n\
          def g(n: Int) { f(n) }\n\
-         def caller() -> String { g(1) }",
+         def caller -> String { g(1) }",
         "expected String",
         "got Int"
     );
@@ -696,7 +696,7 @@ fn class_constant_lexical_access_in_method_infers_type() {
     let types = check_types_ok(
         "class Math {\n\
            PI = 3.14159\n\
-           def approx_pi() { PI }\n\
+           def approx_pi { PI }\n\
          }",
     );
     assert_method_returns!(types, "Math", "approx_pi", Float);

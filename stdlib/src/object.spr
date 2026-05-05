@@ -5,9 +5,9 @@ class Object {
   # Returns false. Ordinary object instances are never nil.
   #
   #   o = Object.new
-  #   o.nil?()   # false
+  #   o.nil?   # false
   #
-  def nil?() {
+  def nil? {
     false
   }
 

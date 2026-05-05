@@ -286,7 +286,7 @@ fn last_expr_is_implicit_return() {
 
 #[test]
 fn function_call_no_args() {
-    let src = "def answer() { 42 }\nanswer()";
+    let src = "def answer { 42 }\nanswer()";
     assert_eq!(eval(src), VmValue::Int(42));
 }
 
@@ -298,7 +298,7 @@ fn function_call_with_args() {
 
 #[test]
 fn function_local_vars_dont_leak() {
-    let src = "def f() { x = 99\nx }\nx = 1\nf()\nx";
+    let src = "def f { x = 99\nx }\nx = 1\nf()\nx";
     assert_eq!(eval(src), VmValue::Int(1));
 }
 
@@ -323,9 +323,9 @@ add5(3)";
 #[test]
 fn closure_captures_local() {
     let src = "
-def make_counter() {
+def make_counter {
   count = 0
-  def inc() { count = count + 1\ncount }
+  def inc { count = count + 1\ncount }
   inc
 }
 counter = make_counter()
@@ -406,7 +406,7 @@ fn while_expr_in_assignment_is_nil() {
 
 #[test]
 fn next_skips_rest_of_block() {
-    let src = "def collect() {
+    let src = "def collect {
   a = yield(1)
   b = yield(2)
   a + b
@@ -418,7 +418,7 @@ n * 10 }";
 
 #[test]
 fn break_exits_block_caller() {
-    let src = "def wrap() {
+    let src = "def wrap {
   yield(1)
   break 99
   yield(2)
@@ -430,7 +430,7 @@ wrap() { |n| n }";
 #[test]
 fn block_yield_basic() {
     let src = "
-def call_block() { yield }
+def call_block { yield }
 call_block() { 42 }";
     assert_eq!(eval(src), VmValue::Int(42));
 }
@@ -446,7 +446,7 @@ apply(10) { |n| n * 2 }";
 #[test]
 fn block_captures_outer_var() {
     let src = "
-def run() { yield(5) }
+def run { yield(5) }
 factor = 3
 run() { |x| x * factor }";
     assert_eq!(eval(src), VmValue::Int(15));
@@ -455,7 +455,7 @@ run() { |x| x * factor }";
 #[test]
 fn block_yield_multiple_times() {
     let src = "
-def twice() { yield(1)\nyield(2) }
+def twice { yield(1)\nyield(2) }
 sum = 0
 twice() { |n| sum = sum + n }
 sum";
@@ -478,8 +478,8 @@ fn class_field_write() {
 fn class_method_call() {
     let src = "class Counter {
   attr n
-  def inc() { self.n = self.n + 1 }
-  def get() { self.n }
+  def inc { self.n = self.n + 1 }
+  def get { self.n }
 }
 c = Counter.new(n: 0)
 c.inc()
@@ -502,7 +502,7 @@ m.add(3, 4)";
 fn class_method_returns_self_field() {
     let src = "class Dog {
   attr name
-  def bark() { self.name }
+  def bark { self.name }
 }
 d = Dog.new(name: \"Rex\")
 d.bark()";
@@ -512,10 +512,10 @@ d.bark()";
 #[test]
 fn class_inheritance_method() {
     let src = "class Animal {
-  def speak() { \"animal\" }
+  def speak { \"animal\" }
 }
 class Dog < Animal {
-  def fetch() { \"fetching\" }
+  def fetch { \"fetching\" }
 }
 d = Dog.new()
 d.speak()";
@@ -525,10 +525,10 @@ d.speak()";
 #[test]
 fn super_method_call() {
     let src = "class Animal {
-  def speak() { \"animal\" }
+  def speak { \"animal\" }
 }
 class Dog < Animal {
-  def speak() { \"dog:\" + super() }
+  def speak { \"dog:\" + super() }
 }
 Dog.new().speak()";
     assert_eq!(eval(src), VmValue::Str("dog:animal".into()));
@@ -749,13 +749,13 @@ fn print_does_not_change_result_when_not_last_statement() {
 
 #[test]
 fn implicit_return_last_print_passes_printed_value() {
-    assert_eq!(eval("def f() { print 42 }\nf()"), VmValue::Int(42));
+    assert_eq!(eval("def f { print 42 }\nf()"), VmValue::Int(42));
 }
 
 #[test]
 fn implicit_return_last_def_returns_method_name() {
     assert_eq!(
-        eval("def outer() { def inner() { 1 } }\nouter()"),
+        eval("def outer { def inner { 1 } }\nouter()"),
         VmValue::Str("inner".into())
     );
 }
@@ -770,8 +770,8 @@ fn implicit_return_last_class_returns_class() {
 fn transitive_capture() {
     let src = "
 def outer(x) {
-  def mid() {
-    def inner() { x }
+  def mid {
+    def inner { x }
     inner
   }
   mid
@@ -926,7 +926,7 @@ fn lambda_closure_capture() {
 #[test]
 fn lambda_return_exits_only_lambda() {
     let src = r#"
-def outer() {
+def outer {
   f = def(x) { return x * 2 }
   result = f.call(5)
   result + 1
@@ -940,7 +940,7 @@ outer()
 fn private_method_callable_from_within_class() {
     let src = r#"class Foo {
   defp secret() { 42 }
-  def get() { self.secret() }
+  def get { self.secret() }
 }
 Foo.new().get()"#;
     assert_eq!(eval(src), VmValue::Int(42));
@@ -960,7 +960,7 @@ Foo.new().secret()"#;
 fn class_method_basic() {
     let src = r#"class Greeter {
   self {
-    def hello() { "hello" }
+    def hello { "hello" }
   }
 }
 Greeter.hello()"#;
@@ -996,7 +996,7 @@ fn class_method_factory() {
   attr x
   attr y
   self {
-    def origin() { self.new(x: 0, y: 0) }
+    def origin { self.new(x: 0, y: 0) }
   }
 }
 p = Point.origin()
@@ -1008,7 +1008,7 @@ p.x"#;
 fn class_method_inherited_by_subclass() {
     let src = r#"class Animal {
   self {
-    def kind() { "animal" }
+    def kind { "animal" }
   }
 }
 class Dog < Animal {}
@@ -1020,12 +1020,12 @@ Dog.kind()"#;
 fn class_method_overridden_in_subclass() {
     let src = r#"class Animal {
   self {
-    def kind() { "animal" }
+    def kind { "animal" }
   }
 }
 class Dog < Animal {
   self {
-    def kind() { "dog" }
+    def kind { "dog" }
   }
 }
 Dog.kind()"#;
@@ -1323,7 +1323,7 @@ sum";
 fn yield_in_method() {
     let src = "class Wrapper {
   attr items
-  def each() {
+  def each {
     len = self.items.size()
     i = 0
     while i < len { yield(self.items[i])\ni = i + 1 }
@@ -1364,8 +1364,8 @@ d.breed"#;
 
 #[test]
 fn inheritance_override() {
-    let src = r#"class Animal { def speak() { "..." } }
-class Dog < Animal { def speak() { "woof" } }
+    let src = r#"class Animal { def speak { "..." } }
+class Dog < Animal { def speak { "woof" } }
 Dog.new().speak()"#;
     assert_eq!(eval(src), VmValue::Str("woof".into()));
 }
@@ -1373,7 +1373,7 @@ Dog.new().speak()"#;
 #[test]
 fn field_mutation() {
     let src = r#"class Counter { attr n
-  def inc() { self.n = self.n + 1 }
+  def inc { self.n = self.n + 1 }
 }
 c = Counter.new(n: 0)
 c.inc()
@@ -1384,10 +1384,10 @@ c.n"#;
 #[test]
 fn super_with_field_override() {
     let src = r#"class Animal { attr name
-  def describe() { self.name }
+  def describe { self.name }
 }
 class Dog < Animal { attr breed
-  def describe() { super() + " (" + self.breed + ")" }
+  def describe { super() + " (" + self.breed + ")" }
 }
 d = Dog.new(name: "Rex", breed: "Lab")
 d.describe()"#;
@@ -1397,18 +1397,18 @@ d.describe()"#;
 #[test]
 fn super_still_works_with_implicit_object() {
     let src = r#"class Animal { attr name
-  def speak() { "..." }
+  def speak { "..." }
 }
-class Dog < Animal { def speak() { super } }
+class Dog < Animal { def speak { super } }
 Dog.new(name: "Rex").speak()"#;
     assert_eq!(eval(src), VmValue::Str("...".into()));
 }
 
 #[test]
 fn super_bare_in_nested_closure() {
-    let src = r#"class Animal { def speak() { "a" } }
+    let src = r#"class Animal { def speak { "a" } }
 class Dog < Animal {
-  def speak() {
+  def speak {
     f = def() { super }
     f()
   }
@@ -1419,7 +1419,7 @@ Dog.new().speak()"#;
 
 #[test]
 fn super_dot_method_is_rejected() {
-    let src = "class A { def m() { 1 } }\nclass B < A { def m() { super.m() } }";
+    let src = "class A { def m { 1 } }\nclass B < A { def m { super.m() } }";
     let tokens = Lexer::new(src).scan_tokens();
     let err = Parser::new(tokens)
         .parse()
@@ -1435,14 +1435,14 @@ fn super_dot_method_is_rejected() {
 #[test]
 fn implicit_self_local_shadows_field() {
     let src = r#"class Box { attr x
-  def doubled() { x = 99
+  def doubled { x = 99
 x }
 }
 b = Box.new(x: 10)
 b.doubled()"#;
     assert_eq!(eval(src), VmValue::Int(99));
     let src2 = r#"class Box { attr x
-  def doubled() { x = 99
+  def doubled { x = 99
 x }
 }
 b = Box.new(x: 10)
@@ -1516,7 +1516,7 @@ fn else_on_next_line() {
 fn defp_inherited_callable_from_subclass() {
     let src = r#"class A {
   defp helper() { 99 }
-  def run() { helper() }
+  def run { helper() }
 }
 class B < A {}
 B.new().run()"#;
@@ -1601,7 +1601,7 @@ risky(-1)"#;
 
 #[test]
 fn inline_rescue_binds_error() {
-    let src = r#"def boom() {
+    let src = r#"def boom {
   raise "oops"
   1
 rescue e
@@ -1684,7 +1684,7 @@ add("x", 2)"#,
 
 #[test]
 fn typed_return_accepts_correct_type() {
-    let src = "def f() -> Int { 42 }\nf()";
+    let src = "def f -> Int { 42 }\nf()";
     assert_eq!(eval(src), VmValue::Int(42));
 }
 
@@ -1875,7 +1875,7 @@ fn return_type_annotation_correct() {
 
 #[test]
 fn return_type_annotation_wrong_type() {
-    let err = eval_err("def greet() -> Int { \"hello\" }\ngreet()");
+    let err = eval_err("def greet -> Int { \"hello\" }\ngreet()");
     match err {
         VmError::TypeError { message, .. } => {
             assert!(
@@ -1895,7 +1895,7 @@ fn return_type_annotation_wrong_type() {
 
 #[test]
 fn return_type_annotation_early_return_wrong() {
-    let err = eval_err("def f() -> Int { return \"oops\" }\nf()");
+    let err = eval_err("def f -> Int { return \"oops\" }\nf()");
     match err {
         VmError::TypeError { message, .. } => {
             assert!(
@@ -1910,13 +1910,13 @@ fn return_type_annotation_early_return_wrong() {
 
 #[test]
 fn return_type_annotation_num_accepts_int() {
-    let result = eval("def f() -> Num { 42 }\nf()");
+    let result = eval("def f -> Num { 42 }\nf()");
     assert_eq!(result, VmValue::Int(42));
 }
 
 #[test]
 fn return_type_annotation_num_accepts_float() {
-    let result = eval("def f() -> Num { 3.14 }\nf()");
+    let result = eval("def f -> Num { 3.14 }\nf()");
     assert_eq!(result, VmValue::Float(3.14));
 }
 
@@ -1924,25 +1924,25 @@ fn return_type_annotation_num_accepts_float() {
 
 #[test]
 fn unary_bang_infers_bool_return() {
-    let result = eval("def f() -> Bool { !true }\nf()");
+    let result = eval("def f -> Bool { !true }\nf()");
     assert_eq!(result, VmValue::Bool(false));
 }
 
 #[test]
 fn unary_minus_int_infers_int_return() {
-    let result = eval("def f() -> Int { -42 }\nf()");
+    let result = eval("def f -> Int { -42 }\nf()");
     assert_eq!(result, VmValue::Int(-42));
 }
 
 #[test]
 fn unary_minus_float_infers_float_return() {
-    let result = eval("def f() -> Float { -3.14 }\nf()");
+    let result = eval("def f -> Float { -3.14 }\nf()");
     assert_eq!(result, VmValue::Float(-3.14));
 }
 
 #[test]
 fn unary_tilde_infers_int_return() {
-    let result = eval("def f() -> Int { ~0 }\nf()");
+    let result = eval("def f -> Int { ~0 }\nf()");
     assert_eq!(result, VmValue::Int(-1));
 }
 
@@ -2026,7 +2026,7 @@ count"#,
 fn nested_class_accessible_via_dot() {
     let src = r#"class Outer {
   class Inner {
-    def greet() { "hello" }
+    def greet { "hello" }
   }
 }
 Outer.Inner.new().greet()"#;
@@ -2049,7 +2049,7 @@ p.x + p.y"#;
 #[test]
 fn nested_class_inherits_from_flat_class() {
     let src = r#"class Base {
-  def kind() { "base" }
+  def kind { "base" }
 }
 class Container {
   class Child < Base {}
@@ -2063,7 +2063,7 @@ fn lexical_class_constant_in_instance_method() {
     let src = r#"class Outer {
   C = 1
   class Inner {
-    def m() { C }
+    def m { C }
   }
 }
 Outer.Inner.new().m()"#;
@@ -2076,7 +2076,7 @@ fn lexical_inner_class_constant_shadows_outer() {
   C = 1
   class Inner {
     C = 2
-    def m() { C }
+    def m { C }
   }
 }
 Outer.Inner.new().m()"#;
@@ -2087,7 +2087,7 @@ Outer.Inner.new().m()"#;
 fn lexical_class_constant_in_lambda_inside_method() {
     let src = r#"class Math {
   PI = 3
-  def m() {
+  def m {
     f = def() { PI }
     f.call()
   }
@@ -2100,11 +2100,11 @@ Math.new().m()"#;
 fn superclass_via_dot_notation() {
     let src = r#"class Outer {
   class Animal {
-    def sound() { "..." }
+    def sound { "..." }
   }
 }
 class Dog < Outer.Animal {
-  def sound() { "woof" }
+  def sound { "woof" }
 }
 Dog.new().sound()"#;
     assert_eq!(eval(src), VmValue::Str("woof".into()));
@@ -2115,7 +2115,7 @@ Dog.new().sound()"#;
 #[test]
 fn method_call_no_parens() {
     let src = r#"class Greeter {
-  def hello() { "hi" }
+  def hello { "hi" }
 }
 g = Greeter.new()
 g.hello"#;
@@ -2125,7 +2125,7 @@ g.hello"#;
 #[test]
 fn method_call_no_parens_chained() {
     let src = r#"class Wrapper {
-  def value() { 42 }
+  def value { 42 }
 }
 w = Wrapper.new()
 w.value + 1"#;
@@ -2145,7 +2145,7 @@ d.name"#;
 #[test]
 fn method_call_explicit_parens_still_works() {
     let src = r#"class Counter {
-  def count() { 7 }
+  def count { 7 }
 }
 c = Counter.new()
 c.count()"#;
@@ -2190,7 +2190,7 @@ fn def_no_parens_top_level() {
 #[test]
 fn def_with_parens_still_works() {
     let src = r#"class Box {
-  def size() { 5 }
+  def size { 5 }
 }
 Box.new().size()"#;
     assert_eq!(eval(src), VmValue::Int(5));
@@ -2221,7 +2221,7 @@ fn union_return_type_string_arm() {
 
 #[test]
 fn union_return_type_wrong_type_error() {
-    let err = eval_err("def f() -> Int | String { 3.14 }\nf()");
+    let err = eval_err("def f -> Int | String { 3.14 }\nf()");
     match err {
         VmError::TypeError { message, .. } => {
             assert!(
@@ -2237,13 +2237,13 @@ fn union_return_type_wrong_type_error() {
 
 #[test]
 fn literal_return_type_string_exact_match() {
-    let result = eval("def f() -> \"ok\" { \"ok\" }\nf()");
+    let result = eval("def f -> \"ok\" { \"ok\" }\nf()");
     assert_eq!(result, VmValue::Str("ok".into()));
 }
 
 #[test]
 fn literal_return_type_string_mismatch_errors() {
-    let err = eval_err("def f() -> \"ok\" { \"nope\" }\nf()");
+    let err = eval_err("def f -> \"ok\" { \"nope\" }\nf()");
     match err {
         VmError::TypeError { message, .. } => {
             assert!(message.contains("expected \"ok\""), "msg: {}", message);
@@ -2268,19 +2268,19 @@ fn question_sugar_param_accepts_nil() {
 
 #[test]
 fn question_sugar_return_type_nil_ok() {
-    let result = eval("def f() -> Int? { nil }\nf()");
+    let result = eval("def f -> Int? { nil }\nf()");
     assert_eq!(result, VmValue::Nil);
 }
 
 #[test]
 fn question_sugar_return_type_int_ok() {
-    let result = eval("def f() -> Int? { 42 }\nf()");
+    let result = eval("def f -> Int? { 42 }\nf()");
     assert_eq!(result, VmValue::Int(42));
 }
 
 #[test]
 fn question_sugar_return_type_wrong_type() {
-    let err = eval_err("def f() -> Int? { \"oops\" }\nf()");
+    let err = eval_err("def f -> Int? { \"oops\" }\nf()");
     match err {
         VmError::TypeError { message, .. } => {
             assert!(message.contains("expected Int | Nil"), "msg: {}", message);
@@ -2292,27 +2292,27 @@ fn question_sugar_return_type_wrong_type() {
 #[test]
 fn grouped_nullable_union_return_type() {
     // (Int | String)? == Int | String | Nil
-    let result = eval("def f() -> (Int | String)? { nil }\nf()");
+    let result = eval("def f -> (Int | String)? { nil }\nf()");
     assert_eq!(result, VmValue::Nil);
 }
 
 #[test]
 fn nil_explicit_union_arm_parse_error() {
     // `Int | Nil` is a parse error — must use `Int?`
-    let msg = parse_err_msg("def f() -> Int | Nil { nil }\nf()");
+    let msg = parse_err_msg("def f -> Int | Nil { nil }\nf()");
     assert!(msg.contains("use Int? instead"), "msg: {}", msg);
 }
 
 #[test]
 fn nil_multi_arm_parse_error_suggests_grouped() {
-    let msg = parse_err_msg("def f() -> Int | String | Nil { nil }\nf()");
+    let msg = parse_err_msg("def f -> Int | String | Nil { nil }\nf()");
     assert!(msg.contains("use (Int | String)? instead"), "msg: {}", msg);
 }
 
 #[test]
 fn leading_pipe_multiline_union() {
     // Optional leading | for alignment (multiline style)
-    let result = eval("def f() -> | Int | String { 1 }\nf()");
+    let result = eval("def f -> | Int | String { 1 }\nf()");
     assert_eq!(result, VmValue::Int(1));
 }
 
@@ -2398,13 +2398,13 @@ fn generics_example_file_runs() {
 #[test]
 fn infer_return_type_from_literal_int() {
     // Unannotated function returning a literal: should run fine
-    assert_eq!(eval("def f() { 42 }\nf()"), VmValue::Int(42));
+    assert_eq!(eval("def f { 42 }\nf()"), VmValue::Int(42));
 }
 
 #[test]
 fn infer_return_type_from_literal_string() {
     assert_eq!(
-        eval("def greet() { \"hello\" }\ngreet()"),
+        eval("def greet { \"hello\" }\ngreet()"),
         VmValue::Str("hello".into())
     );
 }
@@ -2419,7 +2419,7 @@ fn annotated_return_type_unaffected_by_inference() {
 #[test]
 fn infer_return_type_empty_body_no_crash() {
     // A function with an empty body should not panic — inference simply finds nothing.
-    assert_eq!(eval("def noop() { }\nnoop()"), VmValue::Nil);
+    assert_eq!(eval("def noop { }\nnoop()"), VmValue::Nil);
 }
 
 // ── Infer `if` expression types ───────────────────────────────────────────────
@@ -2436,7 +2436,7 @@ fn infer_if_type_string_branches() {
 
 #[test]
 fn infer_begin_runtime() {
-    assert_eq!(eval("def f() { begin\n99\nend }\nf()"), VmValue::Int(99));
+    assert_eq!(eval("def f { begin\n99\nend }\nf()"), VmValue::Int(99));
 }
 
 // ── Infer `assign` expression types ──────────────────────────────────────────
@@ -2444,5 +2444,5 @@ fn infer_begin_runtime() {
 #[test]
 fn infer_assign_runtime() {
     // Sanity-check that assignment still evaluates to the RHS at runtime.
-    assert_eq!(eval("def f() { x = 99 }\nf()"), VmValue::Int(99));
+    assert_eq!(eval("def f { x = 99 }\nf()"), VmValue::Int(99));
 }

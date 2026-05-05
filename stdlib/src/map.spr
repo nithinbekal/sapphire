@@ -17,7 +17,7 @@ class Map {
   #   { a: 1, b: 2 }.any? { |k, v| v > 1 }   # true
   #   { a: 1, b: 2 }.any? { |k, v| v > 9 }   # false
   #
-  def any?() {
+  def any? {
     each { |k, v| return true if yield(k, v) }
     false
   }
@@ -27,7 +27,7 @@ class Map {
   #   { a: 1, b: 2 }.all? { |k, v| v > 0 }   # true
   #   { a: 1, b: 2 }.all? { |k, v| v > 1 }   # false
   #
-  def all?() {
+  def all? {
     each { |k, v| return false if !yield(k, v) }
     true
   }
@@ -37,7 +37,7 @@ class Map {
   #   { a: 1, b: 2 }.none? { |k, v| v > 9 }   # true
   #   { a: 1, b: 2 }.none? { |k, v| v > 1 }   # false
   #
-  def none?() {
+  def none? {
     each { |k, v| return false if yield(k, v) }
     true
   }
