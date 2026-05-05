@@ -7,7 +7,7 @@ interface Sink[T] {
 }
 
 module Named {
-  def name() -> String { "badge" }
+  def name -> String { "badge" }
 }
 
 class Badge {
