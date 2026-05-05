@@ -51,11 +51,11 @@ fn class_structurally_satisfies_interface_without_declaration() {
     typecheck_ok(
         r#"
 interface Drawable {
-  def draw() -> String
+  def draw -> String
 }
 
 class Circle {
-  def draw() -> String { "circle" }
+  def draw -> String { "circle" }
 }
 
 def render(item: Drawable) -> String {
@@ -72,11 +72,11 @@ fn interface_annotation_is_static_only_at_runtime() {
     let value = eval(
         r#"
 interface Drawable {
-  def draw() -> String
+  def draw -> String
 }
 
 class Circle {
-  def draw() -> String { "circle" }
+  def draw -> String { "circle" }
 }
 
 def render(item: Drawable) -> String {
@@ -95,7 +95,7 @@ fn missing_interface_method_is_type_error() {
     assert_typecheck_error!(
         r#"
 interface Drawable {
-  def draw() -> String
+  def draw -> String
 }
 
 class Circle {
@@ -118,11 +118,11 @@ fn interface_method_return_must_match() {
     assert_typecheck_error!(
         r#"
 interface Drawable {
-  def draw() -> String
+  def draw -> String
 }
 
 class Circle {
-  def draw() -> Int { 1 }
+  def draw -> Int { 1 }
 }
 
 def render(item: Drawable) -> String {
@@ -144,12 +144,12 @@ fn interface_typed_value_only_exposes_interface_methods() {
     assert_typecheck_error!(
         r#"
 interface Drawable {
-  def draw() -> String
+  def draw -> String
 }
 
 class Circle {
-  def draw() -> String { "circle" }
-  def radius() -> Int { 5 }
+  def draw -> String { "circle" }
+  def radius -> Int { 5 }
 }
 
 def render(item: Drawable) -> Int {
@@ -214,11 +214,11 @@ fn included_module_methods_count_for_structural_interface() {
     typecheck_ok(
         r#"
 interface Greeter {
-  def greet() -> String
+  def greet -> String
 }
 
 module Greeting {
-  def greet() -> String { "hi" }
+  def greet -> String { "hi" }
 }
 
 class Person {
