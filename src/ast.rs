@@ -151,6 +151,12 @@ pub enum Expr {
         /// Class-level constants (`PI = 3.14`) — accessible as `ClassName.PI`.
         constants: Vec<(String, Box<Expr>)>,
     },
+    /// `interface Name ...` — a compile-time structural method contract.
+    Interface {
+        name: String,
+        type_params: Vec<String>,
+        methods: Vec<MethodDef>,
+    },
     /// Top-level `def name(...)` on `Object`; value is the method name string.
     Function {
         name: String,

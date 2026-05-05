@@ -78,6 +78,7 @@ struct ClassInfo {
     is_abstract: bool,
     #[allow(dead_code)]
     is_module: bool,
+    includes: Vec<String>,
     /// Instance methods declared `abstract def` in this class only.
     abstract_declared: std::collections::HashSet<String>,
     /// Instance methods with a body in this class (`def` / `defp`, not abstract).
@@ -87,9 +88,16 @@ struct ClassInfo {
     constants: HashMap<String, TypeExpr>,
 }
 
+#[derive(Clone)]
+struct InterfaceInfo {
+    type_params: Vec<String>,
+    methods: HashMap<String, FnSig>,
+}
+
 pub struct TypeChecker {
     functions: HashMap<String, FnSig>,
     classes: HashMap<String, ClassInfo>,
+    interfaces: HashMap<String, InterfaceInfo>,
     type_aliases: HashMap<String, TypeExpr>,
     errors: Vec<TypeCheckError>,
     current_return_type: Option<TypeExpr>,
@@ -111,6 +119,7 @@ impl TypeChecker {
         Self {
             functions: HashMap::new(),
             classes: HashMap::new(),
+            interfaces: HashMap::new(),
             type_aliases: HashMap::new(),
             errors: Vec::new(),
             current_return_type: None,
@@ -145,11 +154,14 @@ impl TypeChecker {
         // whose bodies have a base-case branch with a known type.  The lenient flag lets
         // `infer_type` for `if` return the known branch even when the other is still None.
         let has_unresolved = tc.functions.values().any(|s| s.return_type.is_none())
-            || tc.classes.values().any(|c| c.methods.values().any(|s| s.return_type.is_none()));
+            || tc
+                .classes
+                .values()
+                .any(|c| c.methods.values().any(|s| s.return_type.is_none()));
         if has_unresolved {
             tc.lenient = true;
-            let max_iters = tc.functions.len()
-                + tc.classes.values().map(|c| c.methods.len()).sum::<usize>();
+            let max_iters =
+                tc.functions.len() + tc.classes.values().map(|c| c.methods.len()).sum::<usize>();
             for _ in 0..max_iters {
                 let progress = exprs.iter().any(|e| tc.propagate_return_type(e));
                 if !progress {
@@ -203,11 +215,13 @@ impl TypeChecker {
                     te
                 }
             }
-            TypeExpr::Apply(name, args) => {
-                TypeExpr::Apply(name, args.into_iter().map(|a| self.resolve_type(a)).collect())
-            }
+            TypeExpr::Apply(name, args) => TypeExpr::Apply(
+                name,
+                args.into_iter().map(|a| self.resolve_type(a)).collect(),
+            ),
             TypeExpr::Union(arms) => {
-                let resolved: Vec<TypeExpr> = arms.into_iter().map(|a| self.resolve_type(a)).collect();
+                let resolved: Vec<TypeExpr> =
+                    arms.into_iter().map(|a| self.resolve_type(a)).collect();
                 // Flatten nested unions that arose from alias expansion
                 let mut flat = Vec::new();
                 for arm in resolved {
@@ -273,7 +287,10 @@ impl TypeChecker {
     }
 
     fn is_type_var(&self, name: &str) -> bool {
-        self.type_vars.iter().rev().any(|scope| scope.contains(name))
+        self.type_vars
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
     }
 
     fn types_compat(&self, actual: &TypeExpr, expected: &TypeExpr) -> bool {
@@ -290,7 +307,183 @@ impl TypeChecker {
         }
         let a = self.resolve_type(actual.clone());
         let e = self.resolve_type(expected.clone());
+        match (&a, &e) {
+            (TypeExpr::Union(arms), _) => return arms.iter().all(|arm| self.types_compat(arm, &e)),
+            (_, TypeExpr::Union(arms)) => return arms.iter().any(|arm| self.types_compat(&a, arm)),
+            _ => {}
+        }
+        if self.satisfies_interface(&a, &e).is_ok() {
+            return true;
+        }
         types_compatible(&a, &e)
+    }
+
+    fn interface_name_and_args(&self, te: &TypeExpr) -> Option<(String, Vec<TypeExpr>)> {
+        match te {
+            TypeExpr::Named(name) if self.interfaces.contains_key(name) => {
+                Some((name.clone(), Vec::new()))
+            }
+            TypeExpr::Apply(name, args) if self.interfaces.contains_key(name) => {
+                Some((name.clone(), args.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn class_name_from_type(&self, te: &TypeExpr) -> Option<String> {
+        match te {
+            TypeExpr::Named(name) if self.classes.contains_key(name) => Some(name.clone()),
+            TypeExpr::Apply(name, _) if self.classes.contains_key(name) => Some(name.clone()),
+            _ => None,
+        }
+    }
+
+    fn substitute_type(te: &TypeExpr, substitutions: &HashMap<String, TypeExpr>) -> TypeExpr {
+        match te {
+            TypeExpr::Named(name) => substitutions
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| te.clone()),
+            TypeExpr::Apply(name, args) => TypeExpr::Apply(
+                name.clone(),
+                args.iter()
+                    .map(|arg| Self::substitute_type(arg, substitutions))
+                    .collect(),
+            ),
+            TypeExpr::Union(arms) => TypeExpr::Union(
+                arms.iter()
+                    .map(|arm| Self::substitute_type(arm, substitutions))
+                    .collect(),
+            ),
+            TypeExpr::Literal(_) | TypeExpr::Any => te.clone(),
+        }
+    }
+
+    fn substitute_sig(sig: &FnSig, substitutions: &HashMap<String, TypeExpr>) -> FnSig {
+        FnSig {
+            type_params: sig.type_params.clone(),
+            params: sig
+                .params
+                .iter()
+                .map(|param| ParamDef {
+                    name: param.name.clone(),
+                    type_ann: param
+                        .type_ann
+                        .as_ref()
+                        .map(|te| Self::substitute_type(te, substitutions)),
+                })
+                .collect(),
+            return_type: sig
+                .return_type
+                .as_ref()
+                .map(|te| Self::substitute_type(te, substitutions)),
+        }
+    }
+
+    fn method_sig_for_type(&self, ty: &TypeExpr, method_name: &str) -> Option<FnSig> {
+        let resolved = self.resolve_type(ty.clone());
+        if let Some((interface_name, args)) = self.interface_name_and_args(&resolved)
+            && let Some(interface) = self.interfaces.get(&interface_name)
+            && let Some(sig) = interface.methods.get(method_name)
+        {
+            let substitutions: HashMap<String, TypeExpr> =
+                interface.type_params.iter().cloned().zip(args).collect();
+            return Some(Self::substitute_sig(sig, &substitutions));
+        }
+
+        if let Some(class_name) = self.class_name_from_type(&resolved)
+            && let Some(cls) = self.classes.get(&class_name)
+            && let Some(sig) = cls.methods.get(method_name)
+        {
+            return Some(sig.clone());
+        }
+
+        None
+    }
+
+    fn class_method_sig(&self, class_name: &str, method_name: &str) -> Option<FnSig> {
+        let cls = self.classes.get(class_name)?;
+        if let Some(sig) = cls.methods.get(method_name) {
+            return Some(sig.clone());
+        }
+        for include in &cls.includes {
+            if let Some(sig) = self.class_method_sig(include, method_name) {
+                return Some(sig);
+            }
+        }
+        if let Some(superclass) = &cls.superclass_name {
+            return self.class_method_sig(superclass, method_name);
+        }
+        None
+    }
+
+    fn satisfies_interface(&self, actual: &TypeExpr, expected: &TypeExpr) -> Result<(), String> {
+        let Some(class_name) = self.class_name_from_type(actual) else {
+            return Err(format!("{} is not a class type", te_name(actual)));
+        };
+        let Some((interface_name, args)) = self.interface_name_and_args(expected) else {
+            return Err(format!("{} is not an interface type", te_name(expected)));
+        };
+        let interface = self.interfaces.get(&interface_name).unwrap();
+        let substitutions: HashMap<String, TypeExpr> =
+            interface.type_params.iter().cloned().zip(args).collect();
+
+        for (method_name, expected_sig) in &interface.methods {
+            let expected_sig = Self::substitute_sig(expected_sig, &substitutions);
+            let actual_sig = self
+                .class_method_sig(&class_name, method_name)
+                .ok_or_else(|| {
+                    format!(
+                        "{} does not satisfy {}: missing method {}",
+                        te_name(actual),
+                        te_name(expected),
+                        method_name
+                    )
+                })?;
+            if actual_sig.params.len() != expected_sig.params.len() {
+                return Err(format!(
+                    "{} does not satisfy {}: method {} expected {} argument(s), got {}",
+                    te_name(actual),
+                    te_name(expected),
+                    method_name,
+                    expected_sig.params.len(),
+                    actual_sig.params.len()
+                ));
+            }
+            for (actual_param, expected_param) in
+                actual_sig.params.iter().zip(expected_sig.params.iter())
+            {
+                if let (Some(actual_ty), Some(expected_ty)) =
+                    (&actual_param.type_ann, &expected_param.type_ann)
+                    && !self.types_compat(actual_ty, expected_ty)
+                {
+                    return Err(format!(
+                        "{} does not satisfy {}: method {} parameter '{}' expected {}, got {}",
+                        te_name(actual),
+                        te_name(expected),
+                        method_name,
+                        expected_param.name,
+                        te_name(expected_ty),
+                        te_name(actual_ty)
+                    ));
+                }
+            }
+            if let (Some(actual_return), Some(expected_return)) =
+                (&actual_sig.return_type, &expected_sig.return_type)
+                && !self.types_compat(actual_return, expected_return)
+            {
+                return Err(format!(
+                    "{} does not satisfy {}: method {} expected {}, got {}",
+                    te_name(actual),
+                    te_name(expected),
+                    method_name,
+                    te_name(expected_return),
+                    te_name(actual_return)
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     // First pass: record function and class signatures without checking bodies.
@@ -319,6 +512,7 @@ impl TypeChecker {
                 name,
                 type_params,
                 superclass,
+                includes,
                 is_abstract,
                 is_module,
                 fields,
@@ -355,9 +549,7 @@ impl TypeChecker {
                     .collect();
                 let constants_map: HashMap<String, TypeExpr> = constants
                     .iter()
-                    .filter_map(|(cname, expr)| {
-                        self.infer_type(expr).map(|ty| (cname.clone(), ty))
-                    })
+                    .filter_map(|(cname, expr)| self.infer_type(expr).map(|ty| (cname.clone(), ty)))
                     .collect();
                 self.classes.insert(
                     name.clone(),
@@ -366,6 +558,7 @@ impl TypeChecker {
                         superclass_name,
                         is_abstract: *is_abstract,
                         is_module: *is_module,
+                        includes: includes.clone(),
                         abstract_declared,
                         concrete_instance_names,
                         fields: fields.clone(),
@@ -376,6 +569,32 @@ impl TypeChecker {
                 for n in nested {
                     self.collect_def(n);
                 }
+            }
+            Expr::Interface {
+                name,
+                type_params,
+                methods,
+            } => {
+                let method_sigs = methods
+                    .iter()
+                    .map(|m| {
+                        (
+                            m.name.clone(),
+                            FnSig {
+                                type_params: m.type_params.clone(),
+                                params: m.params.clone(),
+                                return_type: m.return_type.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+                self.interfaces.insert(
+                    name.clone(),
+                    InterfaceInfo {
+                        type_params: type_params.clone(),
+                        methods: method_sigs,
+                    },
+                );
             }
             _ => {}
         }
@@ -398,7 +617,10 @@ impl TypeChecker {
             _ => {
                 let resolved = self.resolve_type(te.clone());
                 if let Some(msg) = check_union_duplicates(&resolved) {
-                    self.errors.push(TypeCheckError { message: msg, line: self.current_line });
+                    self.errors.push(TypeCheckError {
+                        message: msg,
+                        line: self.current_line,
+                    });
                 }
             }
         }
@@ -709,6 +931,26 @@ impl TypeChecker {
                 self.pop_type_vars();
                 self.current_class = saved_class;
             }
+            Expr::Interface {
+                type_params,
+                methods,
+                ..
+            } => {
+                self.push_type_vars(type_params);
+                for method in methods {
+                    self.push_type_vars(&method.type_params);
+                    for param in &method.params {
+                        if let Some(te) = &param.type_ann {
+                            self.validate_type_ann(te);
+                        }
+                    }
+                    if let Some(rt) = &method.return_type {
+                        self.validate_type_ann(rt);
+                    }
+                    self.pop_type_vars();
+                }
+                self.pop_type_vars();
+            }
             Expr::Function {
                 name,
                 type_params,
@@ -782,11 +1024,22 @@ impl TypeChecker {
     /// Returns `true` if at least one type was newly stored.
     fn propagate_return_type(&mut self, expr: &Expr) -> bool {
         match expr {
-            Expr::Function { name, type_params, params, return_type, body } => {
+            Expr::Function {
+                name,
+                type_params,
+                params,
+                return_type,
+                body,
+            } => {
                 if return_type.is_some() {
                     return false;
                 }
-                if self.functions.get(name).and_then(|s| s.return_type.as_ref()).is_some() {
+                if self
+                    .functions
+                    .get(name)
+                    .and_then(|s| s.return_type.as_ref())
+                    .is_some()
+                {
                     return false;
                 }
                 self.push_type_vars(type_params);
@@ -807,7 +1060,12 @@ impl TypeChecker {
                 }
                 false
             }
-            Expr::Class { name, type_params, methods, .. } => {
+            Expr::Class {
+                name,
+                type_params,
+                methods,
+                ..
+            } => {
                 let mut progress = false;
                 let saved_class = self.current_class.replace(name.clone());
                 self.push_type_vars(type_params);
@@ -859,7 +1117,13 @@ impl TypeChecker {
     /// previously `None` and is now known).
     fn verify_annotated_return_types(&mut self, expr: &Expr) {
         match expr {
-            Expr::Function { name: _, type_params, params, return_type: Some(rt), body } => {
+            Expr::Function {
+                name: _,
+                type_params,
+                params,
+                return_type: Some(rt),
+                body,
+            } => {
                 let rt = rt.clone();
                 self.push_type_vars(type_params);
                 self.push_scope();
@@ -881,20 +1145,30 @@ impl TypeChecker {
                         te_name(&actual)
                     );
                     if !self.errors.iter().any(|e| e.message == msg) {
-                        self.errors.push(TypeCheckError { message: msg, line: self.current_line });
+                        self.errors.push(TypeCheckError {
+                            message: msg,
+                            line: self.current_line,
+                        });
                     }
                 }
                 self.pop_scope();
                 self.pop_type_vars();
             }
-            Expr::Class { name, type_params, methods, .. } => {
+            Expr::Class {
+                name,
+                type_params,
+                methods,
+                ..
+            } => {
                 let saved_class = self.current_class.replace(name.clone());
                 self.push_type_vars(type_params);
                 for method in methods {
                     if method.is_abstract {
                         continue;
                     }
-                    let Some(rt) = &method.return_type else { continue };
+                    let Some(rt) = &method.return_type else {
+                        continue;
+                    };
                     let rt = rt.clone();
                     self.push_type_vars(&method.type_params);
                     self.push_scope();
@@ -913,7 +1187,10 @@ impl TypeChecker {
                             te_name(&actual)
                         );
                         if !self.errors.iter().any(|e| e.message == msg) {
-                            self.errors.push(TypeCheckError { message: msg, line: self.current_line });
+                            self.errors.push(TypeCheckError {
+                                message: msg,
+                                line: self.current_line,
+                            });
                         }
                     }
                     self.pop_scope();
@@ -972,18 +1249,24 @@ impl TypeChecker {
                         }
                         self.pop_type_vars();
                     }
-                } else if let Some(TypeExpr::Named(class_name)) = self.infer_type(object)
-                    && let Some(cls) = self.classes.get(&class_name).cloned()
-                    && let Some(sig) = cls.methods.get(method_name).cloned()
-                {
-                    // Push class + method type params so T params accept any argument.
-                    let combined: Vec<String> = cls.type_params.iter()
-                        .chain(sig.type_params.iter())
-                        .cloned()
-                        .collect();
-                    self.push_type_vars(&combined);
-                    self.check_args(&sig.params, args, method_name);
-                    self.pop_type_vars();
+                } else if let Some(object_ty) = self.infer_type(object) {
+                    if let Some(sig) = self.method_sig_for_type(&object_ty, method_name) {
+                        self.push_type_vars(&sig.type_params.clone());
+                        self.check_args(&sig.params, args, method_name);
+                        self.pop_type_vars();
+                    } else if self
+                        .interface_name_and_args(&self.resolve_type(object_ty.clone()))
+                        .is_some()
+                    {
+                        self.errors.push(TypeCheckError {
+                            message: format!(
+                                "method '{}' is not defined by interface {}",
+                                method_name,
+                                te_name(&object_ty)
+                            ),
+                            line: self.current_line,
+                        });
+                    }
                 }
             }
             _ => self.check_expr(callee),
@@ -996,14 +1279,28 @@ impl TypeChecker {
                 && let Some(actual) = self.infer_type(&arg.value)
                 && !self.types_compat(&actual, te)
             {
-                self.errors.push(TypeCheckError {
-                    message: format!(
+                let detail = self.satisfies_interface(
+                    &self.resolve_type(actual.clone()),
+                    &self.resolve_type(te.clone()),
+                );
+                let message = match detail {
+                    Err(msg)
+                        if self
+                            .interface_name_and_args(&self.resolve_type(te.clone()))
+                            .is_some() =>
+                    {
+                        msg
+                    }
+                    _ => format!(
                         "argument '{}' to '{}' expected {}, got {}",
                         param.name,
                         fn_name,
                         te_name(te),
                         te_name(&actual)
                     ),
+                };
+                self.errors.push(TypeCheckError {
+                    message,
                     line: self.current_line,
                 });
             }
@@ -1012,7 +1309,10 @@ impl TypeChecker {
 
     fn infer_type(&self, expr: &Expr) -> Option<TypeExpr> {
         match expr {
-            Expr::SelfExpr => self.current_class.as_ref().map(|cn| TypeExpr::Named(cn.clone())),
+            Expr::SelfExpr => self
+                .current_class
+                .as_ref()
+                .map(|cn| TypeExpr::Named(cn.clone())),
             Expr::Super { .. } => Some(TypeExpr::Any),
             Expr::Literal(v) => match v {
                 Value::Int(_) => Some(TypeExpr::Named("Int".into())),
@@ -1057,10 +1357,7 @@ impl TypeChecker {
                         _ => None,
                     }
                 }
-                TokenKind::Minus
-                | TokenKind::Star
-                | TokenKind::Slash
-                | TokenKind::Percent => {
+                TokenKind::Minus | TokenKind::Star | TokenKind::Slash | TokenKind::Percent => {
                     let l = self.infer_type(left);
                     let r = self.infer_type(right);
                     match (&l, &r) {
@@ -1100,7 +1397,11 @@ impl TypeChecker {
                 _ => None,
             },
             Expr::Print(inner) => self.infer_type(inner),
-            Expr::If { then_branch, else_branch, .. } => {
+            Expr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 let then_type = then_branch.last().and_then(|e| self.infer_type(e));
                 let else_type = else_branch
                     .as_ref()
@@ -1116,7 +1417,9 @@ impl TypeChecker {
                     _ => None,
                 }
             }
-            Expr::Begin { body, rescue_body, .. } => {
+            Expr::Begin {
+                body, rescue_body, ..
+            } => {
                 if rescue_body.is_empty() {
                     body.last().and_then(|e| self.infer_type(e))
                 } else {
@@ -1125,12 +1428,8 @@ impl TypeChecker {
             }
             Expr::Return(inner) => self.infer_type(inner),
             Expr::While { .. } => Some(TypeExpr::Named("Nil".into())),
-            Expr::MultiAssign { values, .. } => {
-                values.last().and_then(|v| self.infer_type(v))
-            }
-            Expr::Break(_)
-            | Expr::Next(_)
-            | Expr::Raise(_) => None,
+            Expr::MultiAssign { values, .. } => values.last().and_then(|v| self.infer_type(v)),
+            Expr::Break(_) | Expr::Next(_) | Expr::Raise(_) => None,
             Expr::Lambda { .. } => None,
             Expr::Class { name, .. } => Some(TypeExpr::Named(name.clone())),
             Expr::Function { .. } => Some(TypeExpr::Named("String".into())),
@@ -1158,13 +1457,10 @@ impl TypeChecker {
                         return Some(ty.clone());
                     }
 
-                    if let Some(TypeExpr::Named(cn)) = self.infer_type(object)
-                        && let Some(cls) = self.classes.get(&cn)
+                    if let Some(object_type) = self.infer_type(object)
+                        && let Some(sig) = self.method_sig_for_type(&object_type, method_name)
                     {
-                        return cls
-                            .methods
-                            .get(method_name)
-                            .and_then(|s| s.return_type.clone());
+                        return sig.return_type;
                     }
 
                     None
@@ -1174,17 +1470,12 @@ impl TypeChecker {
                     name: method_name,
                     ..
                 } => {
-                    if let Some(TypeExpr::Named(cn)) = self.infer_type(object)
-                        && let Some(cls) = self.classes.get(&cn)
-                        && let Some(ret) = cls
-                            .methods
-                            .get(method_name)
-                            .and_then(|s| s.return_type.clone())
+                    if let Some(object_type) = self.infer_type(object)
+                        && let Some(ret) = self
+                            .method_sig_for_type(&object_type, method_name)
+                            .and_then(|s| s.return_type)
                     {
-                        return Some(TypeExpr::Union(vec![
-                            TypeExpr::Named("Nil".into()),
-                            ret,
-                        ]));
+                        return Some(TypeExpr::Union(vec![TypeExpr::Named("Nil".into()), ret]));
                     }
                     None
                 }
@@ -1262,10 +1553,14 @@ fn types_compatible(actual: &TypeExpr, expected: &TypeExpr) -> bool {
         (TypeExpr::Apply(an, a_args), TypeExpr::Apply(en, e_args)) => {
             an == en
                 && a_args.len() == e_args.len()
-                && a_args.iter().zip(e_args.iter()).all(|(a, e)| types_compatible(a, e))
+                && a_args
+                    .iter()
+                    .zip(e_args.iter())
+                    .all(|(a, e)| types_compatible(a, e))
         }
         // Gradual: bare Named is compatible with Apply of the same name (unannotated = unknown params).
-        (TypeExpr::Named(a), TypeExpr::Apply(e, _)) | (TypeExpr::Apply(a, _), TypeExpr::Named(e)) => a == e,
+        (TypeExpr::Named(a), TypeExpr::Apply(e, _))
+        | (TypeExpr::Apply(a, _), TypeExpr::Named(e)) => a == e,
         // actual is a union: ALL arms must be compatible with expected
         (TypeExpr::Union(arms), _) => arms.iter().all(|a| types_compatible(a, expected)),
         // expected is a union: actual must be compatible with AT LEAST ONE arm
@@ -1288,7 +1583,11 @@ fn te_name(te: &TypeExpr) -> String {
     match te {
         TypeExpr::Named(n) => n.clone(),
         TypeExpr::Apply(n, args) => {
-            format!("{}[{}]", n, args.iter().map(te_name).collect::<Vec<_>>().join(", "))
+            format!(
+                "{}[{}]",
+                n,
+                args.iter().map(te_name).collect::<Vec<_>>().join(", ")
+            )
         }
         TypeExpr::Literal(Value::Int(n)) => n.to_string(),
         TypeExpr::Literal(Value::Float(n)) => n.to_string(),
