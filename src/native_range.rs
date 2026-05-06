@@ -8,57 +8,92 @@ fn range_recv(recv: &VmValue) -> (i64, i64) {
     }
 }
 
-pub fn dispatch_range_method(
-    heap: &mut GcHeap<HeapObject>,
-    from: i64,
-    to: i64,
+pub fn range_first(
+    _heap: &mut GcHeap<HeapObject>,
     recv: &VmValue,
-    name: &str,
+    _args: &[VmValue],
+    _line: u32,
+) -> Result<VmValue, VmError> {
+    let (from, _to) = range_recv(recv);
+    Ok(VmValue::Int(from))
+}
+
+pub fn range_include_q(
+    _heap: &mut GcHeap<HeapObject>,
+    recv: &VmValue,
     args: &[VmValue],
     line: u32,
 ) -> Result<VmValue, VmError> {
-    match (name, args) {
-        ("first", []) => Ok(VmValue::Int(from)),
-        ("include?", [VmValue::Int(n)]) => Ok(VmValue::Bool(n >= &from && n < &to)),
-        ("last", []) => Ok(VmValue::Int(to - 1)),
-        ("max", []) => Ok(VmValue::Int(to - 1)),
-        ("min", []) => Ok(VmValue::Int(from)),
-        ("size", []) => Ok(VmValue::Int((to - from).max(0))),
-        ("to_a", []) => {
-            let v: Vec<VmValue> = (from..to).map(VmValue::Int).collect();
-            Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
-        }
-        ("to_s", []) => Ok(VmValue::Str(format!("{}", recv))),
-        ("include?", [_]) => Err(VmError::TypeError {
+    let (from, to) = range_recv(recv);
+    match args {
+        [VmValue::Int(n)] => Ok(VmValue::Bool(n >= &from && n < &to)),
+        [_] => Err(VmError::TypeError {
             message: "include? expects an Int".to_string(),
             line,
         }),
-        _ => unreachable!("dispatch_range_method({name:?}, {} args)", args.len()),
+        _ => unreachable!("Range#include?: expected 1 argument"),
     }
 }
 
-macro_rules! range_native {
-    ($fn:ident, $name:literal) => {
-        pub fn $fn(
-            heap: &mut GcHeap<HeapObject>,
-            recv: &VmValue,
-            args: &[VmValue],
-            line: u32,
-        ) -> Result<VmValue, VmError> {
-            let (from, to) = range_recv(recv);
-            dispatch_range_method(heap, from, to, recv, $name, args, line)
-        }
-    };
+pub fn range_last(
+    _heap: &mut GcHeap<HeapObject>,
+    recv: &VmValue,
+    _args: &[VmValue],
+    _line: u32,
+) -> Result<VmValue, VmError> {
+    let (_from, to) = range_recv(recv);
+    Ok(VmValue::Int(to - 1))
 }
 
-range_native!(range_first, "first");
-range_native!(range_include_q, "include?");
-range_native!(range_last, "last");
-range_native!(range_max, "max");
-range_native!(range_min, "min");
-range_native!(range_size, "size");
-range_native!(range_to_a, "to_a");
-range_native!(range_to_s, "to_s");
+pub fn range_max(
+    _heap: &mut GcHeap<HeapObject>,
+    recv: &VmValue,
+    _args: &[VmValue],
+    _line: u32,
+) -> Result<VmValue, VmError> {
+    let (_from, to) = range_recv(recv);
+    Ok(VmValue::Int(to - 1))
+}
+
+pub fn range_min(
+    _heap: &mut GcHeap<HeapObject>,
+    recv: &VmValue,
+    _args: &[VmValue],
+    _line: u32,
+) -> Result<VmValue, VmError> {
+    let (from, _to) = range_recv(recv);
+    Ok(VmValue::Int(from))
+}
+
+pub fn range_size(
+    _heap: &mut GcHeap<HeapObject>,
+    recv: &VmValue,
+    _args: &[VmValue],
+    _line: u32,
+) -> Result<VmValue, VmError> {
+    let (from, to) = range_recv(recv);
+    Ok(VmValue::Int((to - from).max(0)))
+}
+
+pub fn range_to_a(
+    heap: &mut GcHeap<HeapObject>,
+    recv: &VmValue,
+    _args: &[VmValue],
+    _line: u32,
+) -> Result<VmValue, VmError> {
+    let (from, to) = range_recv(recv);
+    let v: Vec<VmValue> = (from..to).map(VmValue::Int).collect();
+    Ok(VmValue::List(heap.alloc(HeapObject::List(v))))
+}
+
+pub fn range_to_s(
+    _heap: &mut GcHeap<HeapObject>,
+    recv: &VmValue,
+    _args: &[VmValue],
+    _line: u32,
+) -> Result<VmValue, VmError> {
+    Ok(VmValue::Str(format!("{}", recv)))
+}
 
 pub fn register_methods(heap: &mut GcHeap<HeapObject>, class_ref: GcRef) {
     define_native_method(heap, class_ref, "first", 0, range_first);
